@@ -1,0 +1,267 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Devices that can hover. Tailwind applies hover: and group-hover: only there, so anything
+ * hidden until it is hovered must be hidden only there too, or a touch screen never shows it.
+ */
+@custom-variant can-hover {
+  @media (hover: hover) {
+    @slot;
+  }
+}
+
+/*
+ * Brand palette.
+ * `static` keeps every variable in the output even when no class uses it: the charts read
+ * the colours from script (see Theme.palette).
+ */
+@theme static {
+  --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  /* One step below text-xs, for hints and captions. Size only: the line height is inherited. */
+  --text-2xs: 0.6875rem;
+  --color-primary: #0c7beb;
+  --color-primary-strong: #0a5fc2;
+  --color-success: #12b76a;
+  --color-warning: #f5a524;
+  --color-danger: #e5484d;
+  --radius-card: 14px;
+  --radius-control: 10px;
+  --shadow-card: 0 8px 24px -18px rgba(16, 24, 44, 0.25);
+}
+
+/* Surface colours switch with the theme, so templates need no `dark:` variants. */
+@theme inline {
+  --color-page: var(--app-page);
+  --color-surface: var(--app-surface);
+  --color-elevated: var(--app-elevated);
+  --color-line: var(--app-line);
+  --color-ink: var(--app-ink);
+  --color-muted: var(--app-muted);
+}
+
+:root {
+  color-scheme: light;
+  --app-page: #f3f3f3;
+  --app-surface: #ffffff;
+  --app-elevated: #eef1f6;
+  --app-line: #dbe4f3;
+  --app-ink: #10182c;
+  --app-muted: #5b6472;
+
+  --st-resolved-bg: #d9f3e6;
+  --st-resolved-fg: #0a6b3f;
+  --st-pending-bg: #fdecc8;
+  --st-pending-fg: #8a5a00;
+  --st-unresolved-bg: #fbdcdd;
+  --st-unresolved-fg: #b4282d;
+
+  /* Chart slice for what has no value (cases without priority). The same grey in both themes, so .dark does not repeat it. */
+  --chart-neutral: #9b9b9f;
+}
+
+.dark {
+  color-scheme: dark;
+  --app-page: #111113;
+  --app-surface: #1a1a1d;
+  --app-elevated: #232326;
+  --app-line: #313135;
+  --app-ink: #ededed;
+  --app-muted: #9b9b9f;
+
+  --st-resolved-bg: rgba(18, 183, 106, 0.16);
+  --st-resolved-fg: #4cd89a;
+  --st-pending-bg: rgba(245, 165, 36, 0.16);
+  --st-pending-fg: #f7bd5c;
+  --st-unresolved-bg: rgba(229, 72, 77, 0.18);
+  --st-unresolved-fg: #f28487;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-page font-sans text-sm text-ink antialiased;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-control px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-strong;
+  }
+
+  .btn-soft {
+    @apply bg-elevated text-ink hover:bg-line;
+  }
+
+  .btn-ghost {
+    @apply text-muted hover:bg-elevated hover:text-ink;
+  }
+
+  .btn-danger {
+    @apply bg-danger/10 text-danger hover:bg-danger hover:text-white;
+  }
+
+  .input {
+    @apply w-full rounded-control border border-line bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-muted/70 focus:border-primary focus:ring-2 focus:ring-primary/20;
+  }
+
+  .label {
+    @apply mb-1 block text-xs font-medium text-muted;
+  }
+
+  .card {
+    @apply rounded-card border border-line bg-surface shadow-card;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap;
+  }
+
+  .nav-link {
+    @apply flex items-center gap-2.5 rounded-control px-3 py-2 text-muted transition-colors hover:bg-elevated hover:text-ink;
+  }
+
+  .nav-link.active {
+    @apply bg-primary text-white hover:bg-primary hover:text-white;
+  }
+
+  /* Switch drawn next to a visually hidden checkbox: <input class="sr-only"> <span class="toggle">. */
+  .toggle {
+    @apply relative inline-block h-5 w-9 shrink-0 rounded-full bg-line transition-colors;
+  }
+
+  .toggle::after {
+    content: "";
+    @apply absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform;
+  }
+
+  input:checked + .toggle {
+    @apply bg-primary;
+  }
+
+  input:checked + .toggle::after {
+    transform: translateX(1rem);
+  }
+
+  input:focus-visible + .toggle {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  .tab-link {
+    @apply flex flex-1 flex-col items-center gap-0.5 py-2 text-2xs text-muted;
+  }
+
+  .tab-link.active {
+    @apply text-primary;
+  }
+
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 grid place-items-center bg-black/45 p-3;
+  }
+
+  /*
+   * One option of a segmented control: <button class="segment" [attr.aria-pressed]="…">.
+   * The selected look hangs on aria-pressed, so what is drawn and what is announced cannot differ.
+   */
+  .segment {
+    @apply rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted;
+  }
+
+  .segment[aria-pressed="true"] {
+    @apply bg-surface text-ink;
+  }
+
+  /* Small uppercase heading of a section inside a panel. */
+  .section-title {
+    @apply text-xs font-semibold tracking-wide text-muted uppercase;
+  }
+
+  /* Error message of a form or dialog, used with role="alert". */
+  .alert-error {
+    @apply rounded-control bg-danger/10 px-3 py-2 text-danger;
+  }
+
+  /*
+   * Under a text field whose save failed: says so, with the buttons to retry or to discard it.
+   * The text is in the ink colour, as in the other notices: the danger colour on this
+   * background does not reach the contrast small text needs. It stays in the tint, in the icon
+   * and in the border of the field.
+   */
+  .unsaved-hint {
+    @apply mt-1 flex flex-wrap items-center gap-x-3 rounded-control bg-danger/10 px-3 py-1 text-xs text-ink;
+  }
+
+  /* Its buttons have the colour of the text around them, so the underline is what says they can be pressed. */
+  .unsaved-hint button {
+    @apply py-1 font-medium underline underline-offset-2 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50;
+  }
+
+  /* Inline-editable cell controls: look like text until hovered or focused. */
+  .cell-control {
+    @apply w-full cursor-pointer rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm text-ink outline-none hover:border-line focus:border-primary focus:bg-surface;
+  }
+
+  /* Status colours follow the team's spreadsheet: green, yellow, red. */
+  .st-RESOLVED {
+    background: var(--st-resolved-bg);
+    color: var(--st-resolved-fg);
+  }
+
+  .st-PENDING {
+    background: var(--st-pending-bg);
+    color: var(--st-pending-fg);
+  }
+
+  .st-UNRESOLVED {
+    background: var(--st-unresolved-bg);
+    color: var(--st-unresolved-fg);
+  }
+}
+
+/* Angular CDK drag and drop (Kanban board) */
+.cdk-drag-preview {
+  border-radius: var(--radius-card);
+  box-shadow: 0 12px 28px -8px rgba(16, 24, 44, 0.45);
+}
+
+.cdk-drag-placeholder {
+  opacity: 0.35;
+}
+
+.cdk-drag-animating {
+  transition: transform 180ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.cdk-drop-list-receiving,
+.cdk-drop-list-dragging {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * Pseudo-elements too: the MDI spinner turns on ::before. A single iteration, because an
+   * endless animation made this short would flicker instead of stopping.
+   */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

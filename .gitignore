@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.angular/
+.env
+api/.env
+devdb/.pgdata/
+api/uploads/
+*.log
+backups/
+# A team's own files that replace the ones the project ships (see README, "Personalizar").
+api/assets/*.local.md
+# Local set-up of AI coding tools (the skill for assistants is published in skills/).
+.claude/

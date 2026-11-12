@@ -1,0 +1,159 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TicketStatus {
+  UNRESOLVED
+  PENDING
+  RESOLVED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  name         String
+  /// Null for people created by the spreadsheet import: they exist as assignees but cannot log in.
+  passwordHash String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  assigned Ticket[]        @relation("TicketAssignee")
+  created  Ticket[]        @relation("TicketCreator")
+  notes    TicketNote[]
+  history  TicketHistory[]
+}
+
+/// Catalog of the supported software's modules. Managed from the UI.
+model SystemModule {
+  id       Int            @id @default(autoincrement())
+  name     String
+  parentId Int?
+  parent   SystemModule?  @relation("ModuleTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children SystemModule[] @relation("ModuleTree")
+  active   Boolean        @default(true)
+  tickets  Ticket[]
+}
+
+/// Hours allowed to resolve a ticket, per priority.
+model SlaPolicy {
+  priority Priority @id
+  hours    Int
+}
+
+model Ticket {
+  id               Int           @id @default(autoincrement())
+  date             DateTime      @db.Date
+  company          String
+  description      String
+  /// Company and description in lowercase without accents. The search box matches against this.
+  /// No default on purpose: a write that forgets it must not compile. See `ticketSearchKey`.
+  searchText       String
+  status           TicketStatus  @default(PENDING)
+  assigneeId       Int?
+  assignee         User?         @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  /// True when the client is responsible for the case ("Responsable: Cliente").
+  assignedToClient Boolean       @default(false)
+  priority         Priority?
+  estimatedMinutes Int?
+  spentMinutes     Int           @default(0)
+  timerStartedAt   DateTime?
+  moduleId         Int?
+  module           SystemModule? @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  dueAt            DateTime?
+  /// "Promesa de entrega": day the team promised the client to have the case resolved. Null = no promise.
+  promisedDate     DateTime?     @db.Date
+  resolvedAt       DateTime?
+  aiGenerated      Boolean       @default(false)
+  /// Message for the person who asked for support. Drafted by the AI when the case is resolved; editable.
+  customerReply    String?
+  createdById      Int?
+  createdBy        User?         @relation("TicketCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt        DateTime      @default(now())
+  /// Last time a person worked on the case: created, edited, note or attachment added, client reply saved.
+  /// Forgotten cases are measured from here. Only the writes that count as activity move it (see `activityStamp`).
+  lastActivityAt   DateTime      @default(now())
+  /// Last write of the row, whatever it was. Bookkeeping only: nothing reads it.
+  updatedAt        DateTime      @updatedAt
+
+  notes       TicketNote[]
+  attachments Attachment[]
+  history     TicketHistory[]
+
+  @@index([status])
+  @@index([date])
+  @@index([company])
+  @@index([assigneeId])
+  @@index([promisedDate])
+}
+
+/// "Observación" entries. One ticket has many, each with date and author.
+model TicketNote {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  text      String
+  /// Text in lowercase without accents, for the search box. No default: see `noteSearchKey`.
+  searchText String
+  authorId  Int?
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+}
+
+model Attachment {
+  id         Int      @id @default(autoincrement())
+  ticketId   Int
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  filename   String
+  storedName String
+  mime       String
+  size       Int
+  createdAt  DateTime @default(now())
+
+  @@index([ticketId])
+}
+
+model TicketHistory {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  field     String
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+}
+
+/// Small app-wide settings edited from Configuración, one row per key.
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// One row per AI provider. The API key is stored encrypted with APP_SECRET.
+model AiProviderConfig {
+  provider  String   @id
+  apiKeyEnc String?
+  baseUrl   String?
+  model     String?
+  active    Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}

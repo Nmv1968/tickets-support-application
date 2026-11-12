@@ -1,0 +1,337 @@
+<div class="flex h-full flex-col gap-3 p-3 md:p-5">
+  <!-- Title and actions -->
+  <div class="flex flex-wrap items-center gap-2">
+    <h1 class="mr-auto basis-full text-lg font-semibold sm:basis-auto">Casos de soporte</h1>
+
+    <button type="button" class="btn btn-primary mr-auto sm:mr-0" (click)="openAi([])" title="Crear un caso desde una foto, captura o texto">
+      <i class="mdi mdi-creation-outline text-base" aria-hidden="true"></i>
+      Nuevo con IA
+    </button>
+    <!-- On phones these two show only their icon, so each carries its name apart from the text. -->
+    <button type="button" class="btn btn-soft" (click)="importOpen.set(true)" aria-label="Importar">
+      <i class="mdi mdi-file-import-outline text-base" aria-hidden="true"></i>
+      <span class="hidden sm:inline">Importar</span>
+    </button>
+    <div #exportMenu class="relative">
+      @let exportLabel = exporting() ? 'Generando…' : 'Exportar';
+      <button type="button" class="btn btn-soft" [disabled]="exporting()" (click)="exportOpen.set(!exportOpen())" aria-haspopup="menu" [attr.aria-expanded]="exportOpen()" [attr.aria-label]="exportLabel">
+        <i class="mdi mdi-download-outline text-base" aria-hidden="true"></i>
+        <span class="hidden sm:inline">{{ exportLabel }}</span>
+      </button>
+      @if (exportOpen()) {
+        <div class="card absolute right-0 z-30 mt-1 w-48 p-1" role="menu">
+          <button type="button" class="nav-link w-full" role="menuitem" (click)="export('xlsx')">
+            <i class="mdi mdi-file-excel-outline text-lg leading-none text-success" aria-hidden="true"></i>
+            Excel (.xlsx)
+          </button>
+          <button type="button" class="nav-link w-full" role="menuitem" (click)="export('pdf')">
+            <i class="mdi mdi-file-pdf-box text-lg leading-none text-danger" aria-hidden="true"></i>
+            PDF
+          </button>
+          <p class="px-3 pt-1 pb-1.5 text-2xs text-muted">Exporta los casos con los filtros actuales.</p>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="card flex flex-wrap items-center gap-2 p-2">
+    <div class="relative min-w-52 flex-1">
+      <i class="mdi mdi-magnify pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-base text-muted" aria-hidden="true"></i>
+      <input
+        class="input pl-8"
+        type="search"
+        placeholder="Buscar empresa, descripción, observación o código"
+        aria-label="Buscar casos"
+        [ngModel]="searchText()"
+        (ngModelChange)="onSearch($event)"
+      />
+    </div>
+
+    <div class="flex rounded-control bg-elevated p-0.5" role="group" aria-label="Filtrar por estado">
+      <button type="button" class="segment" [attr.aria-pressed]="status() === ''" (click)="status.set('')">
+        Todos
+      </button>
+      @for (s of statuses; track s) {
+        <button type="button" class="segment" [attr.aria-pressed]="status() === s" (click)="status.set(s)">
+          {{ statusLabel[s] }}
+        </button>
+      }
+    </div>
+
+    <button type="button" class="btn btn-soft px-2.5 py-1.5 text-xs md:hidden" [attr.aria-expanded]="moreFilters()" (click)="moreFilters.set(!moreFilters())">
+      <i class="mdi mdi-filter-variant" aria-hidden="true"></i>
+      Más filtros
+    </button>
+
+    <!-- On phones these stay folded so the list keeps the screen. -->
+    <div [class]="moreFilters() ? 'contents' : 'hidden md:contents'">
+      <select class="input w-auto" aria-label="Filtrar por responsable" [(ngModel)]="assignee">
+        <option value="">Responsable: todos</option>
+        @for (user of catalogs.users(); track user.id) {
+          <option [value]="user.id">{{ user.name }}</option>
+        }
+        <option value="client">Cliente</option>
+        <option value="none">Sin asignar</option>
+      </select>
+
+      <input class="input w-auto" type="date" aria-label="Fecha del caso desde" title="Fecha del caso desde" [(ngModel)]="from" />
+      <input class="input w-auto" type="date" aria-label="Fecha del caso hasta" title="Fecha del caso hasta" [(ngModel)]="to" />
+
+      <label class="flex cursor-pointer items-center gap-1.5 px-1 text-xs text-muted">
+        <input type="checkbox" class="accent-danger" [(ngModel)]="overdue" />
+        Vencidos
+      </label>
+
+      <select class="input w-auto" aria-label="Filtrar por promesa de entrega" title="Promesa de entrega al cliente" [(ngModel)]="promise">
+        <option value="">Promesa: todas</option>
+        <option value="any">Con promesa de entrega</option>
+        <option value="due">Por atender (vencidas, hoy y próximas)</option>
+        <option value="overdue">Promesa vencida</option>
+        <option value="today">Promesa para hoy</option>
+        <option value="soon">Promesa próxima</option>
+      </select>
+
+      <label class="flex cursor-pointer items-center gap-1.5 px-1 text-xs text-muted" title="Abiertos y sin movimiento desde hace más del tiempo configurado en Recordatorios">
+        <input type="checkbox" class="accent-warning" [(ngModel)]="stale" />
+        Olvidados
+      </label>
+    </div>
+
+    @if (hasFilters()) {
+      <button type="button" class="btn btn-ghost px-2 py-1.5 text-xs" (click)="clearFilters()">
+        <i class="mdi mdi-filter-off-outline" aria-hidden="true"></i>
+        Limpiar
+      </button>
+    }
+  </div>
+
+  <datalist id="company-options">
+    @for (company of companyOptions(); track company) {
+      <option [value]="company"></option>
+    }
+  </datalist>
+
+  <!-- Desktop: editable table -->
+  <div class="card hidden min-h-0 flex-1 overflow-auto md:block">
+    <!-- Fixed layout: Descripción and Observación share the space the other columns leave. -->
+    <table class="w-full min-w-[1200px] table-fixed border-collapse text-left">
+      <colgroup>
+        <col class="w-[88px]" />
+        <col class="w-[136px]" />
+        <col class="w-[100px]" />
+        <col class="w-[168px]" />
+        <col />
+        <col class="w-[128px]" />
+        <col class="w-[152px]" />
+        <col />
+      </colgroup>
+      <thead class="sticky top-0 z-10 bg-primary text-xs text-white">
+        <tr>
+          <th class="px-3 py-2.5 font-semibold" [attr.aria-sort]="sortDir() === 'asc' ? 'ascending' : 'descending'">
+            <button type="button" class="inline-flex items-center gap-0.5 font-semibold" (click)="toggleSort()" [title]="sortDir() === 'asc' ? 'Orden: número de caso de menor a mayor. Clic para invertir' : 'Orden: número de caso de mayor a menor. Clic para invertir'">
+              Código
+              <i class="mdi text-sm leading-none" [class]="sortDir() === 'asc' ? 'mdi-arrow-up' : 'mdi-arrow-down'" aria-hidden="true"></i>
+            </button>
+          </th>
+          <th class="px-3 py-2.5 font-semibold" title="Día en que el cliente reportó el problema">Fecha del caso</th>
+          <th class="px-3 py-2.5 font-semibold" title="Día en que se registró el ticket en este sistema. Automática">Registro</th>
+          <th class="px-3 py-2.5 font-semibold">Empresa</th>
+          <th class="px-3 py-2.5 font-semibold">Descripción</th>
+          <th class="px-3 py-2.5 font-semibold">Estado</th>
+          <th class="px-3 py-2.5 font-semibold">Responsable</th>
+          <th class="px-3 py-2.5 font-semibold">Observación</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Quick add: type and press Enter, like a new spreadsheet row -->
+        <tr class="border-b border-line bg-primary/5 align-top" (keydown.enter)="add()">
+          <td class="px-3 py-2 text-xs text-muted">
+            <span class="inline-flex items-center gap-1 pt-2"><i class="mdi mdi-plus" aria-hidden="true"></i>Nuevo</span>
+          </td>
+          <td class="px-1.5 py-1.5">
+            <input class="input px-2 py-1.5" type="date" aria-label="Fecha del caso nuevo: día en que el cliente lo reportó" title="Día en que el cliente reportó el problema" [max]="today" [(ngModel)]="newDate" />
+          </td>
+          <td class="px-3 py-2 text-xs text-muted" title="La fecha de registro la pone el sistema al guardar"><span class="inline-block pt-2">Hoy</span></td>
+          <td class="px-1.5 py-1.5">
+            <input class="input px-2 py-1.5" list="company-options" placeholder="Empresa" aria-label="Empresa del caso nuevo" [ngModel]="newCompany()" (ngModelChange)="onCompanyInput($event)" />
+          </td>
+          <td class="px-1.5 py-1.5">
+            <input class="input px-2 py-1.5" placeholder="Descripción del caso (Enter para guardar)" aria-label="Descripción del caso nuevo" [(ngModel)]="newDescription" />
+          </td>
+          <td class="px-1.5 py-1.5">
+            <select class="input px-2 py-1.5" aria-label="Estado del caso nuevo" [(ngModel)]="newStatus">
+              @for (s of statuses; track s) {
+                <option [value]="s">{{ statusLabel[s] }}</option>
+              }
+            </select>
+          </td>
+          <td class="px-1.5 py-1.5">
+            <select class="input px-2 py-1.5" aria-label="Responsable del caso nuevo" [(ngModel)]="newAssignee">
+              <option value="">Sin asignar</option>
+              @for (user of catalogs.activeUsers(); track user.id) {
+                <option [value]="user.id">{{ user.name }}</option>
+              }
+              <option value="client">Cliente</option>
+            </select>
+          </td>
+          <td class="px-1.5 py-1.5">
+            <div class="flex gap-1.5">
+              <input class="input px-2 py-1.5" placeholder="Observación (opcional)" aria-label="Observación del caso nuevo" [(ngModel)]="newNote" />
+              <button type="button" class="btn btn-primary px-2.5 py-1.5" [disabled]="adding()" (click)="add()" aria-label="Agregar caso">
+                <i class="mdi mdi-plus text-base" aria-hidden="true"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+
+        @for (t of items(); track t.id) {
+          <tr class="border-b border-line align-top hover:bg-elevated/60">
+            <td class="px-3 py-2">
+              <button type="button" class="font-mono text-xs text-primary hover:underline" (click)="openId.set(t.id)">{{ t.code }}</button>
+              <!-- Without the promise icon: this row writes the promise out under the description. -->
+              <app-ticket-flags class="mt-0.5" [ticket]="t" [showPromise]="false" />
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap">{{ formatDay(t.date) }}</td>
+            <td class="px-3 py-2 whitespace-nowrap text-muted" [title]="'Registrado el ' + formatDateTime(t.createdAt)">{{ formatMomentDay(t.createdAt) }}</td>
+            <td class="px-3 py-2 font-medium">
+              <button type="button" class="text-left hover:underline" (click)="openId.set(t.id)">{{ t.company }}</button>
+            </td>
+            <td class="px-3 py-2">
+              <button type="button" class="line-clamp-3 text-left whitespace-pre-line" (click)="openId.set(t.id)">{{ t.description }}</button>
+              @if (t.moduleName) {
+                <div class="mt-0.5 text-2xs text-muted">{{ t.moduleName }}</div>
+              }
+              @if (t.promisedDate) {
+                <div class="mt-0.5 flex items-center gap-1 text-2xs" [class]="t.promiseState ? promiseClass[t.promiseState] : 'text-muted'">
+                  <i class="mdi mdi-calendar-clock-outline" aria-hidden="true"></i>
+                  Entrega prometida: {{ formatDay(t.promisedDate) }}{{ t.promiseState ? ' · ' + promiseText(t.promisedDate) : '' }}
+                </div>
+              }
+            </td>
+            <td class="px-2 py-1.5">
+              <select
+                class="badge cursor-pointer appearance-none border-0 py-1 outline-none focus:ring-2 focus:ring-primary/40"
+                [class]="'st-' + t.status"
+                [attr.aria-label]="'Estado de ' + t.code"
+                [ngModel]="t.status"
+                (ngModelChange)="patch(t, { status: $event })"
+              >
+                @for (s of statuses; track s) {
+                  <option [value]="s">{{ statusLabel[s] }}</option>
+                }
+              </select>
+            </td>
+            <td class="px-1.5 py-1">
+              <select class="cell-control" [attr.aria-label]="'Responsable de ' + t.code" [ngModel]="assigneeValue(t)" (ngModelChange)="patchAssignee(t, $event)">
+                <option value="">Sin asignar</option>
+                @for (user of catalogs.users(); track user.id) {
+                  @if (user.active || user.id === t.assigneeId) {
+                    <option [value]="user.id">{{ user.name }}</option>
+                  }
+                }
+                <option value="client">Cliente</option>
+              </select>
+            </td>
+            <td class="px-1.5 py-1">
+              @if (noteRowId() === t.id) {
+                <input
+                  appAutofocus
+                  class="input px-2 py-1"
+                  placeholder="Nueva observación (Enter guarda, Esc cancela)"
+                  [attr.aria-label]="'Nueva observación de ' + t.code"
+                  [(ngModel)]="noteText"
+                  (keydown.enter)="saveNote(t)"
+                  (keydown.escape)="noteRowId.set(null)"
+                  (blur)="saveNote(t)"
+                />
+              } @else {
+                <button type="button" class="cell-control flex items-start gap-1 text-left" (click)="startNote(t)" title="Agregar observación">
+                  @if (t.lastNote) {
+                    <span class="line-clamp-2 flex-1 whitespace-pre-line">{{ t.lastNote }}</span>
+                    @if (t.notesCount > 1) {
+                      <span class="badge bg-elevated text-muted">{{ t.notesCount }}</span>
+                    }
+                  } @else {
+                    <span class="text-muted/60">Agregar…</span>
+                  }
+                </button>
+              }
+            </td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="8" class="px-3 py-12 text-center text-muted">
+              @if (loading()) {
+                Cargando…
+              } @else if (hasFilters()) {
+                Ningún caso coincide con los filtros.
+              } @else {
+                Todavía no hay casos. Escribe en la primera fila, pega una captura (Ctrl+V) o importa tu hoja de Excel.
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Mobile: quick add and card list -->
+  <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-auto md:hidden">
+    <form class="card space-y-2 p-2.5" (ngSubmit)="add()">
+      <input class="input" name="company" list="company-options" placeholder="Empresa" aria-label="Empresa" [ngModel]="newCompany()" (ngModelChange)="onCompanyInput($event)" />
+      <div class="flex gap-2">
+        <input class="input" name="description" placeholder="Descripción del caso" aria-label="Descripción" [(ngModel)]="newDescription" />
+        <button type="submit" class="btn btn-primary" [disabled]="adding()" aria-label="Agregar caso"><i class="mdi mdi-plus text-base" aria-hidden="true"></i></button>
+      </div>
+    </form>
+
+    @for (t of items(); track t.id) {
+      <button type="button" class="card p-3 text-left" (click)="openId.set(t.id)">
+        <div class="flex items-center gap-2">
+          <span class="font-mono text-xs text-primary">{{ t.code }}</span>
+          <span class="text-xs text-muted" title="Fecha del caso">{{ formatDay(t.date) }}</span>
+          <app-ticket-flags [ticket]="t" />
+          <span class="badge ml-auto" [class]="'st-' + t.status">{{ statusLabel[t.status] }}</span>
+        </div>
+        <div class="mt-1 font-medium">{{ t.company }}</div>
+        <div class="line-clamp-2 text-muted">{{ t.description }}</div>
+        @if (t.assigneeName) {
+          <div class="mt-1 text-xs text-muted"><i class="mdi mdi-account-outline" aria-hidden="true"></i> {{ t.assigneeName }}</div>
+        }
+      </button>
+    } @empty {
+      <p class="py-10 text-center text-muted">{{ loading() ? 'Cargando…' : 'No hay casos para mostrar.' }}</p>
+    }
+  </div>
+
+  <!-- Footer -->
+  <div class="flex items-center gap-3 text-xs text-muted">
+    <span>{{ total() }} caso(s)</span>
+    @if (loading()) {
+      <span>Actualizando…</span>
+    }
+    <span class="hidden lg:inline">Consejo: pega una captura con Ctrl+V para crear un caso con IA.</span>
+    @if (pageCount() > 1) {
+      <div class="ml-auto flex items-center gap-1">
+        <button type="button" class="btn btn-soft px-2 py-1" [disabled]="page() <= 1" (click)="page.set(page() - 1)" aria-label="Página anterior">
+          <i class="mdi mdi-chevron-left" aria-hidden="true"></i>
+        </button>
+        <span>Página {{ page() }} de {{ pageCount() }}</span>
+        <button type="button" class="btn btn-soft px-2 py-1" [disabled]="page() >= pageCount()" (click)="page.set(page() + 1)" aria-label="Página siguiente">
+          <i class="mdi mdi-chevron-right" aria-hidden="true"></i>
+        </button>
+      </div>
+    }
+  </div>
+</div>
+
+@if (openId(); as id) {
+  <app-ticket-panel [ticketId]="id" [autoReply]="replyOnOpen()" (closed)="closePanel()" />
+}
+@if (aiOpen()) {
+  <app-ai-draft [initialImages]="aiImages()" (closed)="aiOpen.set(false)" (created)="onCreated()" />
+}
+@if (importOpen()) {
+  <app-import-dialog (closed)="importOpen.set(false)" (imported)="onImported()" />
+}

@@ -1,0 +1,74 @@
+name: support-tickets
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: support
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: support
+      # Platform-independent UTF-8 locale built into PostgreSQL 17+.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8"
+      TZ: ${TZ:-America/Guayaquil}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support -d support"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://support:${POSTGRES_PASSWORD}@db:5432/support?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      APP_SECRET: ${APP_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrador}
+      MCP_USERNAME: ${MCP_USERNAME:-claude}
+      MCP_NAME: ${MCP_NAME:-Claude}
+      MCP_PASSWORD: ${MCP_PASSWORD:-}
+      UPLOAD_DIR: /data/uploads
+      PORT: 3000
+      TZ: ${TZ:-America/Guayaquil}
+    volumes:
+      - uploads:/data/uploads
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-4300}:80"
+
+  # Copies of the database and the attachments in a folder of this machine, outside Docker's
+  # volumes: one when it starts, then every few hours (see backup/backup.sh and the README).
+  backup:
+    build: ./backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: support
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: support
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-6}
+      TZ: ${TZ:-America/Guayaquil}
+    volumes:
+      - uploads:/data/uploads:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+
+volumes:
+  pgdata:
+  uploads:
