@@ -16,6 +16,7 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
     id: 7,
     code: 'SOP-00007',
     date: '2026-11-05',
+    time: null,
     company: 'Acme',
     description: 'No imprime',
     status: 'PENDING',

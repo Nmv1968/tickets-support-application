@@ -16,8 +16,20 @@ export interface AuthUser {
 
 export interface User extends AuthUser {
   active: boolean;
-  /** False for people created by the spreadsheet import until a password is set. */
+  /** False for a user without a password, until one is set. */
   canLogin: boolean;
+  /** The responsible this user is. Null for a user who does not attend cases. */
+  assigneeId: number | null;
+}
+
+/** A person a case can be assigned to ("Responsable"). Need not be a user of the app. */
+export interface Assignee {
+  id: number;
+  name: string;
+  /** False keeps the cases they have and takes them out of the lists for new ones. */
+  active: boolean;
+  /** Cases assigned to them, open or closed. With any, the responsible cannot be deleted. */
+  tickets: number;
 }
 
 export interface SystemModule {
@@ -33,6 +45,8 @@ export interface Ticket {
   code: string;
   /** "Fecha del caso": day the client reported the problem, `YYYY-MM-DD`. Editable. */
   date: string;
+  /** "Hora del caso": time of day the client reported it, `HH:mm`. Optional. */
+  time: string | null;
   company: string;
   description: string;
   status: TicketStatus;
@@ -99,6 +113,8 @@ export interface TicketDetail extends Ticket {
 
 export interface TicketInput {
   date?: string;
+  /** Null removes the time of the case. */
+  time?: string | null;
   company?: string;
   description?: string;
   status?: TicketStatus;
@@ -118,7 +134,7 @@ export interface TicketInput {
 /** Query-string filters. Empty values are not sent. */
 export interface TicketFilters {
   status?: string;
-  /** User id, `client` or `none`. */
+  /** Id of a responsible, `client` or `none`. */
   assignee?: string;
   company?: string;
   priority?: string;
@@ -178,6 +194,8 @@ export interface AiModel {
 export interface TicketDraft {
   /** Day the client reported the problem, when the evidence shows it. */
   date: string | null;
+  /** Time of day it was reported, `HH:mm`, when the evidence shows it. */
+  time: string | null;
   company: string | null;
   description: string;
   moduleId: number | null;
@@ -211,13 +229,13 @@ export interface Dashboard {
 
 export interface ImportResult {
   dryRun: boolean;
-  columns: Record<'date' | 'company' | 'description' | 'status' | 'assignee' | 'note', string | null>;
+  columns: Record<'date' | 'time' | 'company' | 'description' | 'status' | 'assignee' | 'note', string | null>;
   totalRows: number;
   skippedEmpty: number;
   duplicates: number;
   toCreate: number;
   newPeople: string[];
-  sample: { date: string; company: string; description: string; status: TicketStatus; assignee: string | null; note: string | null }[];
+  sample: { date: string; time: string | null; company: string; description: string; status: TicketStatus; assignee: string | null; note: string | null }[];
 }
 
 type Params = Record<string, string | number | undefined | null>;
@@ -298,11 +316,25 @@ export class Api {
   users(): Promise<User[]> {
     return this.get('users');
   }
-  createUser(input: { username: string; name: string; password: string }): Promise<User> {
+  createUser(input: { username: string; name: string; password: string; assigneeId?: number | null }): Promise<User> {
     return this.send('POST', 'users', input);
   }
-  updateUser(id: number, input: { name?: string; active?: boolean; password?: string }): Promise<User> {
+  updateUser(id: number, input: { name?: string; active?: boolean; password?: string; assigneeId?: number | null }): Promise<User> {
     return this.send('PATCH', `users/${id}`, input);
+  }
+
+  // Responsibles
+  assignees(): Promise<Assignee[]> {
+    return this.get('assignees');
+  }
+  createAssignee(name: string): Promise<Assignee> {
+    return this.send('POST', 'assignees', { name });
+  }
+  updateAssignee(id: number, input: { name?: string; active?: boolean }): Promise<Assignee> {
+    return this.send('PATCH', `assignees/${id}`, input);
+  }
+  deleteAssignee(id: number): Promise<void> {
+    return this.send('DELETE', `assignees/${id}`);
   }
 
   // Catalogs

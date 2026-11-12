@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { errorMessage, formatDay, formatHours, formatMinutes, formatMomentDay, imagesFrom, pastedImages, promiseText, timeAgo, todayIso } from './ui';
+import { errorMessage, formatCaseDate, formatDay, formatHours, formatMinutes, formatMomentDay, imagesFrom, pastedImages, promiseText, timeAgo, todayIso } from './ui';
 
 /**
  * Sets "now" from local date parts, so every expectation holds in any time zone. The cases
@@ -334,5 +334,13 @@ describe('ui', () => {
     it('leaves imagesFrom, used for drops, taking the images even next to text', () => {
       expect(imagesFrom(clipboard([picture], 'texto'))).toEqual([picture]);
     });
+  });
+});
+
+describe('formatCaseDate', () => {
+  it('writes the day of the case, and its time when it has one', () => {
+    expect(formatCaseDate({ date: '2026-11-10', time: '14:35' })).toBe('10/11/2026 14:35');
+    expect(formatCaseDate({ date: '2026-11-10', time: null })).toBe('10/11/2026');
+    expect(formatCaseDate({ date: '2026-11-10' })).toBe('10/11/2026');
   });
 });

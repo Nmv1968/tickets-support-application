@@ -1,9 +1,8 @@
 import { A11yModule } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, inject, input, linkedSignal, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import type { Priority, TicketDetail, TicketStatus } from '../../core/api';
-import { Auth } from '../../core/auth';
 import { Catalogs, assigneeInput } from '../../core/catalogs';
 import { Toast } from '../../core/toast';
 import { PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, errorMessage, imagesFrom, pastedImages, shrinkImage, todayIso } from '../../core/ui';
@@ -98,7 +97,10 @@ const MAX_IMAGES = 4;
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="label" for="ai-date" title="Día en que el cliente reportó el problema">Fecha del caso</label>
-                <input id="ai-date" class="input" type="date" [max]="today" [(ngModel)]="date" />
+                <div class="flex gap-2">
+                  <input id="ai-date" class="input min-w-0 flex-1" type="date" [max]="today" [(ngModel)]="date" />
+                  <input class="input w-28" type="time" aria-label="Hora del caso (opcional)" title="Hora en que lo reportó el cliente (opcional)" [(ngModel)]="time" />
+                </div>
                 <p class="mt-1 text-2xs text-muted">Día en que lo reportó el cliente. La fecha de registro será hoy, automática.</p>
               </div>
               <div>
@@ -126,8 +128,8 @@ const MAX_IMAGES = 4;
                 <label class="label" for="ai-assignee">Responsable</label>
                 <select id="ai-assignee" class="input" [(ngModel)]="assignee">
                   <option value="">Sin asignar</option>
-                  @for (user of catalogs.activeUsers(); track user.id) {
-                    <option [value]="user.id">{{ user.name }}</option>
+                  @for (person of catalogs.activeAssignees(); track person.id) {
+                    <option [value]="person.id">{{ person.name }}</option>
                   }
                   <option value="client">Cliente</option>
                 </select>
@@ -203,7 +205,6 @@ const MAX_IMAGES = 4;
 export class AiDraftDialog {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
-  private readonly auth = inject(Auth);
   protected readonly catalogs = inject(Catalogs);
 
   /** Images already available when the dialog opens (a screenshot pasted on the list). */
@@ -232,10 +233,13 @@ export class AiDraftDialog {
 
   // Draft fields
   protected readonly date = signal(todayIso());
+  /** Time of the case. Empty: the case has only its date. */
+  protected readonly time = signal('');
   protected readonly status = signal<TicketStatus>('PENDING');
   protected readonly company = signal('');
   protected readonly description = signal('');
-  protected readonly assignee = signal(String(this.auth.user()?.id ?? ''));
+  /** Starts as the responsible the logged-in user is. */
+  protected readonly assignee = linkedSignal(() => this.catalogs.ownAssignee());
   protected readonly priority = signal<Priority | ''>('');
   protected readonly moduleId = signal('');
   protected readonly estimated = signal<number | null>(null);
@@ -318,6 +322,7 @@ export class AiDraftDialog {
       const draft = await this.api.aiAnalyze(this.text().trim(), small);
       // The reported day only when the evidence shows one; otherwise it stays on today.
       if (draft.date) this.date.set(draft.date);
+      this.time.set(draft.time ?? '');
       this.company.set(draft.company ?? '');
       this.description.set(draft.description);
       this.priority.set(draft.priority ?? '');
@@ -349,6 +354,7 @@ export class AiDraftDialog {
       const estimated = Number(this.estimated());
       let ticket = await this.api.createTicket({
         date: this.date() || todayIso(),
+        time: this.time() || undefined,
         status: this.status(),
         company: this.company().trim(),
         description: this.description().trim(),

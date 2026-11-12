@@ -4,10 +4,11 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import type { ImportResult } from '../../core/api';
 import { Toast } from '../../core/toast';
-import { STATUS_LABEL, downloadBlob, errorMessage, formatDay } from '../../core/ui';
+import { STATUS_LABEL, downloadBlob, errorMessage, formatCaseDate } from '../../core/ui';
 
 const COLUMN_LABEL: Record<keyof ImportResult['columns'], string> = {
   date: 'Fecha',
+  time: 'Hora',
   company: 'Empresa',
   description: 'Descripción',
   status: 'Estado',
@@ -34,7 +35,7 @@ const COLUMN_LABEL: Record<keyof ImportResult['columns'], string> = {
 
         <div class="min-h-0 flex-1 space-y-4 overflow-auto p-4">
           <p class="text-muted">
-            Archivo <strong>.xlsx</strong> o <strong>.csv</strong> con encabezados como los de la hoja actual: Fecha, Empresa, Descripción, Estado, Responsable, Observación.
+            Archivo <strong>.xlsx</strong> o <strong>.csv</strong> con encabezados como los de la hoja actual: Fecha, Hora, Empresa, Descripción, Estado, Responsable, Observación.
             Solo Empresa y Descripción son obligatorias. La columna Fecha se toma como fecha del caso; la fecha de registro de todos será la de hoy.
           </p>
 
@@ -98,8 +99,8 @@ const COLUMN_LABEL: Record<keyof ImportResult['columns'], string> = {
 
             @if (p.newPeople.length) {
               <p class="text-xs text-muted">
-                Se crean como responsables sin acceso: <strong>{{ p.newPeople.join(', ') }}</strong>.
-                Para que inicien sesión, ponles contraseña en Configuración &gt; Usuarios.
+                Se agregan a la lista de responsables: <strong>{{ p.newPeople.join(', ') }}</strong>.
+                Puedes corregirlos después en Configuración &gt; Responsables.
               </p>
             }
 
@@ -118,7 +119,7 @@ const COLUMN_LABEL: Record<keyof ImportResult['columns'], string> = {
                   <tbody>
                     @for (row of p.sample; track $index) {
                       <tr class="border-t border-line">
-                        <td class="px-2 py-1.5 whitespace-nowrap">{{ formatDay(row.date) }}</td>
+                        <td class="px-2 py-1.5 whitespace-nowrap">{{ formatCaseDate(row) }}</td>
                         <td class="px-2 py-1.5">{{ row.company }}</td>
                         <td class="px-2 py-1.5">{{ row.description }}</td>
                         <td class="px-2 py-1.5 whitespace-nowrap">{{ statusLabel[row.status] }}</td>
@@ -153,7 +154,7 @@ export class ImportDialog {
   protected readonly columnLabel = COLUMN_LABEL;
   protected readonly columnKeys = Object.keys(COLUMN_LABEL) as (keyof ImportResult['columns'])[];
   protected readonly statusLabel = STATUS_LABEL;
-  protected readonly formatDay = formatDay;
+  protected readonly formatCaseDate = formatCaseDate;
 
   protected readonly dateOrder = signal<'mdy' | 'dmy'>('mdy');
   protected readonly preview = signal<ImportResult | null>(null);

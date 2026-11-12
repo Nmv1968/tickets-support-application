@@ -484,6 +484,7 @@ describe('draftFromAnswer', () => {
   it('reads every field of a complete answer', () => {
     const raw = JSON.stringify({
       reportDate: '2026-11-10',
+      reportTime: '14:35',
       company: ' ACME S.A. ',
       description: ' Error al guardar cierres especiales ',
       errorText: 'Violación de llave única',
@@ -495,6 +496,7 @@ describe('draftFromAnswer', () => {
 
     expect(draftFromAnswer(raw, modules, TODAY)).toEqual({
       date: '2026-11-10',
+      time: '14:35',
       company: 'ACME S.A.',
       description: 'Error al guardar cierres especiales',
       moduleId: 9,
@@ -530,6 +532,7 @@ describe('draftFromAnswer', () => {
   it('leaves empty what the model did not send', () => {
     expect(draft({})).toEqual({
       date: null,
+      time: null,
       company: null,
       description: 'Error al facturar',
       moduleId: null,
@@ -587,6 +590,15 @@ describe('draftFromAnswer', () => {
     expect(draft({ reportDate: '2024-02-29' }).date).toBe('2024-02-29');
     for (const reportDate of ['2026-11-12', '2026-02-30', '2026-13-01', '10/11/2026', '2026-1-5', 'ayer']) {
       expect(draft({ reportDate }).date).toBeNull();
+    }
+  });
+
+  it('accepts as the reported time only a time of day, and pads a single-digit hour', () => {
+    expect(draft({ reportTime: '14:35' }).time).toBe('14:35');
+    expect(draft({ reportTime: '9:05' }).time).toBe('09:05');
+    expect(draft({ reportTime: '00:00' }).time).toBe('00:00');
+    for (const reportTime of ['25:00', '14:60', '2:35 pm', 'por la tarde', '', null, 1435]) {
+      expect(draft({ reportTime }).time).toBeNull();
     }
   });
 

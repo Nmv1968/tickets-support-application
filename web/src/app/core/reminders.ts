@@ -3,6 +3,7 @@ import type { Subscription } from 'rxjs';
 import { Api } from './api';
 import type { ReminderList, Ticket } from './api';
 import { Auth } from './auth';
+import { Catalogs } from './catalogs';
 import { TicketEvents } from './ticket-events';
 
 const MINE_KEY = 'st.reminders.mine';
@@ -17,11 +18,14 @@ const REFRESH_MS = 120_000;
 export class Reminders {
   private readonly api = inject(Api);
   private readonly auth = inject(Auth);
+  private readonly catalogs = inject(Catalogs);
   private readonly ticketEvents = inject(TicketEvents);
 
   private readonly data = signal<ReminderList | null>(null);
   /** Show only cases assigned to the logged-in user. Remembered per browser. */
   readonly onlyMine = signal(localStorage.getItem(MINE_KEY) === '1');
+  /** False for a user who is not a responsible: no case is theirs, so there is nothing to narrow to. */
+  readonly canShowMine = computed(() => this.catalogs.ownAssigneeId() !== null);
 
   readonly staleHours = computed(() => this.data()?.staleHours ?? 0);
   readonly promiseSoonDays = computed(() => this.data()?.promiseSoonDays ?? 0);
@@ -74,7 +78,7 @@ export class Reminders {
   }
 
   private visible(tickets: Ticket[]): Ticket[] {
-    const me = this.auth.user()?.id;
-    return this.onlyMine() ? tickets.filter((t) => t.assigneeId === me) : tickets;
+    const mine = this.catalogs.ownAssigneeId();
+    return this.onlyMine() && mine !== null ? tickets.filter((t) => t.assigneeId === mine) : tickets;
   }
 }

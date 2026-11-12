@@ -18,7 +18,8 @@ const OLDEST_DATE = '1900-01-01';
 /** How long a date field has to be left alone before the date in it is saved. */
 const DATE_PAUSE_MS = 700;
 
-type DateField = 'date' | 'promisedDate';
+/** The two dates of a case and its time of day: the browser reports all three the same way while they are typed. */
+type DateField = 'date' | 'promisedDate' | 'time';
 
 /** A date typed or picked in a field, waiting for the pause that saves it. */
 interface PendingDate {
@@ -102,6 +103,26 @@ interface Sending {
               />
             </div>
             <div>
+              <label class="label" for="tp-time" title="Hora en que el cliente reportó el problema. Opcional">Hora del caso</label>
+              <div class="flex gap-1.5">
+                <input
+                  #caseTime="storedValue"
+                  id="tp-time"
+                  class="input min-w-0 flex-1"
+                  type="time"
+                  [appStoredValue]="t.time ?? ''"
+                  [saving]="!!sending().time"
+                  (input)="onDateInput('time', caseTime)"
+                  (blur)="onDateBlur('time', caseTime)"
+                />
+                @if (t.time) {
+                  <button type="button" class="btn btn-ghost px-2" aria-label="Quitar la hora del caso" title="Quitar la hora" [disabled]="!!sending().time" (click)="clearTime(caseTime)">
+                    <i class="mdi mdi-close" aria-hidden="true"></i>
+                  </button>
+                }
+              </div>
+            </div>
+            <div class="col-span-2">
               <span class="label" id="tp-registered-label" title="Momento en que se registró el ticket. La pone el sistema y no se edita">Fecha de registro</span>
               <div class="input truncate bg-elevated text-muted" aria-labelledby="tp-registered-label" [title]="t.createdByName ? 'Registrado por ' + t.createdByName : ''">
                 {{ formatDateTime(t.createdAt) }}{{ t.createdByName ? ' · ' + t.createdByName : '' }}
@@ -161,9 +182,9 @@ interface Sending {
               <label class="label" for="tp-assignee">Responsable</label>
               <select id="tp-assignee" class="input" [ngModel]="assigneeValue(t)" (ngModelChange)="save(assigneeInput($event))">
                 <option value="">Sin asignar</option>
-                @for (user of catalogs.users(); track user.id) {
-                  @if (user.active || user.id === t.assigneeId) {
-                    <option [value]="user.id">{{ user.name }}</option>
+                @for (person of catalogs.assignees(); track person.id) {
+                  @if (person.active || person.id === t.assigneeId) {
+                    <option [value]="person.id">{{ person.name }}</option>
                   }
                 }
                 <option value="client">Cliente</option>
@@ -595,7 +616,9 @@ export class TicketPanel {
   protected onDateInput(field: DateField, box: StoredValue): void {
     this.dropPendingDate(field);
     const value = box.value;
-    if (!value || value < OLDEST_DATE || value === this.awaited(field)) return;
+    // A time has no year to be half typed.
+    const yearBeingTyped = field !== 'time' && value < OLDEST_DATE;
+    if (!value || yearBeingTyped || value === this.awaited(field)) return;
     const timer = setTimeout(() => this.flushDate(field), DATE_PAUSE_MS);
     this.pendingDates[field] = { id: this.ticketId(), value, box, timer };
   }
@@ -641,9 +664,20 @@ export class TicketPanel {
     if (saved !== null && !box.focused) this.showCaseDate(field, box);
   }
 
+  /**
+   * Takes the time off the case, which then has only its date. A button and not the emptied
+   * field: a time field is also empty while a time is being typed in it.
+   */
+  protected async clearTime(box: StoredValue): Promise<void> {
+    this.dropPendingDate('time');
+    // Null: the field went with its case. False: refused, the toast said why and the time stays.
+    if (await this.saveTyped('time', null)) box.show('');
+  }
+
   private flushDates(): void {
     this.flushDate('date');
     this.flushDate('promisedDate');
+    this.flushDate('time');
   }
 
   private dropPendingDate(field: DateField): void {

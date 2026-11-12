@@ -120,6 +120,7 @@ const PROMISE_FILTER = { 'con promesa': 'any', 'por atender': 'due', vencida: 'o
 const estado = z.enum(Object.keys(STATUS));
 const prioridad = z.enum(Object.keys(PRIORITY));
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Usa el formato AAAA-MM-DD');
+const hora = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Usa el formato HH:MM de 24 horas, por ejemplo 14:35');
 const caso = z.string().describe('Código del caso, por ejemplo "SOP-00020" o solo "20"');
 
 /** Lowercase without accents, to compare names the way people type them. */
@@ -138,26 +139,63 @@ function caseId(reference) {
   return Number(match[1]);
 }
 
-async function moduleId(name) {
-  if (!key(name)) return null;
-  const modules = await api('GET', 'modules');
-  const found = modules.find((m) => key(m.fullName) === key(name)) ?? modules.find((m) => key(m.name) === key(name));
-  if (!found) throw new Error(`No existe el módulo "${name}". Módulos disponibles: ${modules.map((m) => m.fullName).join('; ')}`);
-  return found.id;
+/** The module called `name`, by its full name ("Ventas > Notas de crédito") or by its own, among `modules`. */
+function findModule(modules, name) {
+  const wanted = key(name);
+  return modules.find((m) => key(m.fullName) === wanted) ?? modules.find((m) => key(m.name) === wanted);
 }
 
-/** "cliente" → the client is responsible; "ninguno" or empty → nobody; otherwise a person's name. */
+/**
+ * A name that is not in a catalog is never settled here: not by picking the closest one, not by
+ * creating it. The error tells the assistant to put the choice to the person.
+ */
+async function moduleId(name) {
+  if (!key(name)) return null;
+  const modules = await api('GET', 'modules', { query: { all: 1 } });
+  const active = modules.filter((m) => m.active);
+  const found = findModule(active, name);
+  if (found) return found.id;
+  const list = `Módulos existentes: ${active.map((m) => m.fullName).join('; ')}.`;
+  const inactive = findModule(modules, name);
+  if (inactive) {
+    throw new Error(
+      `El módulo "${inactive.fullName}" existe pero está inactivo. No uses otro por tu cuenta: pregunta a la persona si lo reactiva ` +
+        `(Configuración > Módulos), si el caso va en otro módulo o si queda sin módulo. ${list}`,
+    );
+  }
+  throw new Error(
+    `No existe el módulo "${name}". No lo crees ni elijas otro por tu cuenta: pregunta a la persona si quiere que lo crees ` +
+      `(herramienta crear_modulo), usar uno de los existentes o dejar el caso sin módulo. ${list}`,
+  );
+}
+
+/** "cliente" → the client is responsible; "ninguno" or empty → nobody; otherwise the name of a responsible of the catalog. */
 async function assignee(name) {
   const wanted = key(name);
   if (!wanted || wanted === 'ninguno' || wanted === 'sin asignar') return { assigneeId: null, assignedToClient: false };
   if (wanted === 'cliente') return { assigneeId: null, assignedToClient: true };
-  const users = (await api('GET', 'users')).filter((u) => u.active);
-  const exact = users.filter((u) => key(u.name) === wanted || u.username === wanted);
-  const matches = exact.length ? exact : users.filter((u) => key(u.name).startsWith(wanted));
-  if (matches.length !== 1) {
-    throw new Error(`${matches.length ? 'Hay varios responsables que coinciden con' : 'No existe el responsable'} "${name}". Responsables: ${users.map((u) => u.name).join(', ')}, Cliente.`);
+  const everyone = await api('GET', 'assignees');
+  const people = everyone.filter((person) => person.active);
+  const exact = people.filter((person) => key(person.name) === wanted);
+  const matches = exact.length ? exact : people.filter((person) => key(person.name).startsWith(wanted));
+  if (matches.length === 1) return { assigneeId: matches[0].id, assignedToClient: false };
+
+  // As with a module: the choice is put to the person, never made here.
+  const list = `Responsables existentes: ${[...people.map((person) => person.name), 'Cliente'].join(', ')}.`;
+  if (matches.length > 1) {
+    throw new Error(`Hay varios responsables que coinciden con "${name}": ${matches.map((person) => person.name).join(', ')}. Pregunta a la persona cuál es.`);
   }
-  return { assigneeId: matches[0].id, assignedToClient: false };
+  const inactive = everyone.find((person) => key(person.name) === wanted);
+  if (inactive) {
+    throw new Error(
+      `"${inactive.name}" está en la lista de responsables pero inactivo. No asignes el caso a otro por tu cuenta: pregunta a la persona ` +
+        `si lo reactiva (Configuración > Responsables), si el caso va a otro responsable o si queda sin asignar. ${list}`,
+    );
+  }
+  throw new Error(
+    `No existe el responsable "${name}". No lo agregues ni elijas otro por tu cuenta: pregunta a la persona si quiere que lo agregues ` +
+      `a la lista (herramienta crear_responsable), asignar el caso a uno de los existentes o dejarlo sin asignar. ${list}`,
+  );
 }
 
 function brief(t) {
@@ -165,6 +203,8 @@ function brief(t) {
     codigo: t.code,
     // Two dates: the day the client reported it (editable) and the moment it was registered (automatic).
     fecha_caso: t.date,
+    // Optional: the time of day the client reported it.
+    hora_caso: t.time,
     fecha_registro: t.createdAt,
     empresa: t.company,
     descripcion: t.description,
@@ -238,15 +278,60 @@ function tool(name, title, description, inputSchema, handler) {
 
 tool('leer_guia', 'Leer la guía de soporte', 'Devuelve las reglas del equipo para registrar, dar seguimiento y cerrar casos, y para redactar la respuesta al cliente. Incluye la guía de estilo del equipo para mensajes a clientes. Léela una vez antes de usar las demás herramientas.', {}, () => guide());
 
-tool('listar_catalogos', 'Listar catálogos', 'Devuelve los módulos, responsables, estados y prioridades vigentes. Úsalo antes de registrar o modificar un caso: el catálogo de módulos cambia.', {}, async () => {
-  const [modules, users] = await Promise.all([api('GET', 'modules'), api('GET', 'users')]);
+tool('listar_catalogos', 'Listar catálogos', 'Devuelve los módulos, responsables, estados y prioridades vigentes. Úsalo antes de registrar o modificar un caso: los catálogos cambian. Si la persona nombra un módulo o un responsable que no está aquí, pregúntale qué hacer antes de crear nada.', {}, async () => {
+  const [modules, people] = await Promise.all([api('GET', 'modules'), api('GET', 'assignees')]);
   return {
     modulos: modules.map((m) => m.fullName),
-    responsables: [...users.filter((u) => u.active && u.username !== USERNAME).map((u) => u.name), 'Cliente'],
+    responsables: [...people.filter((person) => person.active).map((person) => person.name), 'Cliente'],
     estados: Object.keys(STATUS),
     prioridades: Object.keys(PRIORITY),
   };
 });
+
+tool(
+  'crear_responsable',
+  'Agregar un responsable',
+  'Agrega una persona a la lista de responsables para poder asignarle casos. Basta el nombre: no necesita ser usuario del sistema. Úsalo solo cuando la persona lo pidió o lo confirmó después de que le preguntaste; nunca por tu cuenta porque un nombre no existía.',
+  { nombre: z.string().min(1).max(80).describe('Nombre de la persona, como debe verse en los casos') },
+  async (args) => {
+    const created = await api('POST', 'assignees', { body: { name: args.nombre } });
+    return { responsable: created.name, mensaje: `"${created.name}" ya está en la lista de responsables. Úsalo con ese nombre.` };
+  },
+);
+
+tool(
+  'crear_modulo',
+  'Agregar un módulo',
+  'Agrega un módulo al catálogo para poder clasificar casos en él. Úsalo solo cuando la persona lo pidió o lo confirmó después de que le preguntaste; nunca por tu cuenta porque un nombre no existía. Si no sabes si es un módulo principal o va dentro de otro, pregúntalo.',
+  {
+    nombre: z.string().min(1).max(80).describe('Nombre del módulo'),
+    dentro_de: z.string().optional().describe('Nombre del módulo principal al que pertenece, si es un submódulo. Sin este dato se crea como módulo principal'),
+  },
+  async (args) => {
+    const name = args.nombre.replace(/\s+/g, ' ').trim();
+    if (!name) throw new Error('El nombre del módulo es obligatorio.');
+    const modules = await api('GET', 'modules', { query: { all: 1 } });
+    let parent = null;
+    if (key(args.dentro_de)) {
+      const mains = modules.filter((m) => m.parentId === null && m.active);
+      parent = mains.find((m) => key(m.name) === key(args.dentro_de)) ?? null;
+      if (!parent) {
+        throw new Error(`No existe el módulo principal "${args.dentro_de}". Pregunta a la persona dentro de cuál va. Módulos principales: ${mains.map((m) => m.name).join('; ')}.`);
+      }
+    }
+    const fullName = parent ? `${parent.name} > ${name}` : name;
+    const same = modules.find((m) => key(m.fullName) === key(fullName));
+    if (same) {
+      throw new Error(
+        same.active
+          ? `El módulo "${same.fullName}" ya existe: úsalo con ese nombre.`
+          : `El módulo "${same.fullName}" ya existe pero está inactivo. Se reactiva en Configuración > Módulos; dile a la persona.`,
+      );
+    }
+    await api('POST', 'modules', { body: { name, parentId: parent?.id ?? null } });
+    return { modulo: fullName, mensaje: `El módulo "${fullName}" ya está en el catálogo. Úsalo con ese nombre.` };
+  },
+);
 
 tool(
   'buscar_casos',
@@ -301,12 +386,13 @@ tool(
     empresa: z.string().min(1).max(200).describe('Empresa cliente que reporta. No la supongas: si no la sabes, pregunta'),
     descripcion: z.string().min(1).max(5000).describe('Qué problema reporta el cliente, en una o dos frases estilo bitácora'),
     fecha_caso: fecha.optional().describe('Día en que el cliente reportó el problema, AAAA-MM-DD, si se conoce. Por defecto hoy. La fecha de registro la pone el sistema'),
+    hora_caso: hora.optional().describe('Hora en que el cliente lo reportó, HH:MM de 24 horas, solo si la evidencia la muestra (la hora de un mensaje) o la persona la dijo'),
     estado: estado.optional().describe('Por defecto Pendiente'),
     prioridad: prioridad.optional(),
-    modulo: z.string().optional().describe('Nombre de un módulo de listar_catalogos'),
+    modulo: z.string().optional().describe('Nombre de un módulo de listar_catalogos. Si la persona nombra uno que no existe, pregúntale antes de crearlo'),
     minutos_estimados: z.number().int().min(1).max(100000).optional(),
     promesa_entrega: fecha.optional().describe('Día en que se le prometió al cliente tener el caso resuelto, AAAA-MM-DD. Solo si la persona lo indicó; no la propongas tú'),
-    responsable: z.string().optional().describe('Nombre de quien atiende el caso, o "Cliente". Sin este dato el caso queda sin asignar'),
+    responsable: z.string().optional().describe('Nombre de un responsable de listar_catalogos, o "Cliente". Sin este dato el caso queda sin asignar. Si la persona nombra a alguien que no está en la lista, pregúntale antes de agregarlo'),
     observacion: z.string().max(5000).optional().describe('Datos útiles de la evidencia: mensaje de error, pantalla, documento, usuario'),
     imagenes: z.array(z.string()).max(10).optional().describe('Rutas en disco de imágenes o archivos para adjuntar al caso'),
   },
@@ -316,6 +402,7 @@ tool(
         company: args.empresa,
         description: args.descripcion,
         date: args.fecha_caso,
+        time: args.hora_caso,
         status: args.estado ? STATUS[args.estado] : undefined,
         priority: args.prioridad ? PRIORITY[args.prioridad] : null,
         moduleId: await moduleId(args.modulo),
@@ -352,6 +439,7 @@ tool(
     empresa: z.string().min(1).max(200).optional(),
     descripcion: z.string().min(1).max(5000).optional(),
     fecha_caso: fecha.optional().describe('Día en que el cliente reportó el problema, AAAA-MM-DD. La fecha de registro no se puede cambiar'),
+    hora_caso: hora.nullable().optional().describe('Hora en que el cliente lo reportó, HH:MM de 24 horas. null quita la hora'),
     promesa_entrega: fecha.nullable().optional().describe('Día prometido al cliente para tener el caso resuelto, AAAA-MM-DD. null quita la promesa'),
     minutos_estimados: z.number().int().min(0).max(100000).nullable().optional(),
     minutos_reales: z.number().int().min(0).max(100000).optional(),
@@ -366,6 +454,7 @@ tool(
     if (args.empresa !== undefined) body.company = args.empresa;
     if (args.descripcion !== undefined) body.description = args.descripcion;
     if (args.fecha_caso !== undefined) body.date = args.fecha_caso;
+    if (args.hora_caso !== undefined) body.time = args.hora_caso;
     if (args.promesa_entrega !== undefined) body.promisedDate = args.promesa_entrega;
     if (args.minutos_estimados !== undefined) body.estimatedMinutes = args.minutos_estimados;
     if (args.minutos_reales !== undefined) body.spentMinutes = args.minutos_reales;

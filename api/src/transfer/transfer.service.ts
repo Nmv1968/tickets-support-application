@@ -24,10 +24,12 @@ import { TicketsService, activityStamp, ticketOrder } from '../tickets/tickets.s
 import type { PromiseFilter, TicketFilters } from '../tickets/tickets.service';
 
 type DateOrder = 'mdy' | 'dmy';
-type ColumnKey = 'date' | 'company' | 'description' | 'status' | 'assignee' | 'note';
+type ColumnKey = 'date' | 'time' | 'company' | 'description' | 'status' | 'assignee' | 'note';
 
 interface ParsedRow {
   date: string;
+  /** Time of day of the case, `HH:mm`. Null when the sheet does not give one. */
+  time: string | null;
   company: string;
   description: string;
   status: TicketStatus;
@@ -53,6 +55,7 @@ export interface ImportResult {
 
 const HEADER_PATTERNS: Record<ColumnKey, RegExp> = {
   date: /^fecha/,
+  time: /^hora/,
   company: /^(empresa|cliente|compania)/,
   description: /^(descrip|detalle|problema|caso)/,
   status: /^estado/,
@@ -76,6 +79,7 @@ export const TEMPLATE_COLUMNS: { key: ColumnKey; header: string; width: number; 
     required: false,
     help: 'Día en que el cliente reportó el caso. Escríbela como fecha, por ejemplo 15/03/2026. Vacía: toma la fecha de la fila de arriba; en la primera fila, la de hoy.',
   },
+  { key: 'time', header: 'Hora', width: 9, required: false, help: 'Hora en que el cliente reportó el caso, por ejemplo 14:35. Vacía: el caso queda solo con la fecha.' },
   { key: 'company', header: 'Empresa', width: 30, required: true, help: 'Nombre de la empresa o del cliente. Máximo 200 caracteres.' },
   { key: 'description', header: 'Descripción', width: 60, required: true, help: 'Qué pasó o qué se pidió. Máximo 5000 caracteres.' },
   { key: 'status', header: 'Estado', width: 16, required: false, help: 'Pendiente, Resuelto o Sin resolver. Vacío: Pendiente.' },
@@ -84,7 +88,7 @@ export const TEMPLATE_COLUMNS: { key: ColumnKey; header: string; width: number; 
     header: 'Responsable',
     width: 24,
     required: false,
-    help: 'Persona a cargo: elígela de la lista o escribe su nombre. "Cliente" si depende del cliente. Vacío: sin asignar. Un nombre que no existe se crea como persona sin acceso al sistema.',
+    help: 'Persona a cargo: elígela de la lista o escribe su nombre. "Cliente" si depende del cliente. Vacío: sin asignar. Un nombre que no existe se agrega a la lista de responsables.',
   },
   { key: 'note', header: 'Observación', width: 60, required: false, help: 'Nota o solución del caso. Máximo 5000 caracteres.' },
 ];
@@ -130,7 +134,7 @@ export function buildTemplate(people: string[]): ExcelJS.Workbook {
     key: column.key,
     width: column.width,
     // A date cell keeps what is typed as a real date, so day and month cannot be swapped on import.
-    style: column.key === 'date' ? { numFmt: 'dd/mm/yyyy' } : { alignment: { vertical: 'top', wrapText: true } },
+    style: column.key === 'date' ? { numFmt: 'dd/mm/yyyy' } : column.key === 'time' ? { numFmt: 'hh:mm' } : { alignment: { vertical: 'top', wrapText: true } },
   }));
   const header = sheet.getRow(1);
   paintHeader(header);
@@ -156,6 +160,16 @@ export function buildTemplate(people: string[]): ExcelJS.Workbook {
     showErrorMessage: true,
     errorTitle: 'Fecha no válida',
     error: 'Escribe una fecha, por ejemplo 15/03/2026.',
+  });
+  // Excel keeps a time as the part of a day that has gone by: 0 is midnight and 0.5 is noon.
+  addRangeRule(sheet, rows('time'), {
+    type: 'decimal',
+    operator: 'between',
+    formulae: [0, 0.99999],
+    allowBlank: true,
+    showErrorMessage: true,
+    errorTitle: 'Hora no válida',
+    error: 'Escribe una hora, por ejemplo 14:35.',
   });
   addRangeRule(sheet, rows('status'), {
     type: 'list',
@@ -297,6 +311,48 @@ export function toDateOnly(value: unknown, order: DateOrder): string | null {
   const date = new Date(Date.UTC(year, month - 1, day));
   const valid = date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
   return valid ? formatDateOnly(date) : null;
+}
+
+/** Minutes since midnight as `HH:mm`. Null when they are not a time of day. */
+function clock(minutes: number): string | null {
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes >= 1440) return null;
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
+/**
+ * The time of day in a cell, as `HH:mm`. A spreadsheet gives it in three ways: a time cell (a
+ * date on Excel's day zero, read in UTC), the fraction of a day that has gone by, or text such
+ * as "14:35", "2:35 p. m." or "14h35". Null for an empty cell and for anything that is not a time.
+ */
+export function toTimeOnly(value: unknown): string | null {
+  const flat = cellValue(value);
+  if (flat === null || flat === '') return null;
+  if (flat instanceof Date) {
+    if (Number.isNaN(flat.getTime())) return null;
+    // Rounded to the minute: 14:35 can arrive as 14:34:59.999.
+    const seconds = flat.getUTCHours() * 3600 + flat.getUTCMinutes() * 60 + flat.getUTCSeconds() + flat.getUTCMilliseconds() / 1000;
+    return clock(Math.round(seconds / 60) % 1440);
+  }
+  if (typeof flat === 'number') return flat >= 0 ? clock(Math.round((flat % 1) * 1440) % 1440) : null;
+
+  const match = /^(\d{1,2})\s*[:h.]\s*(\d{2})(?::\d{2})?\s*(?:([ap])\.?\s*m\.?)?$/i.exec(flat);
+  if (!match) return null;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const half = match[3]?.toLowerCase();
+  if (minutes > 59 || (half ? hours < 1 || hours > 12 : hours > 23)) return null;
+  if (half === 'p' && hours < 12) hours += 12;
+  if (half === 'a' && hours === 12) hours = 0;
+  return clock(hours * 60 + minutes);
+}
+
+/** The time a date cell carries besides its day ("27/07/2023 14:35"). Null at midnight: a plain date. */
+function timeOfDateCell(value: unknown): string | null {
+  const flat = cellValue(value);
+  if (!(flat instanceof Date) || Number.isNaN(flat.getTime())) return null;
+  const time = toTimeOnly(flat);
+  return time === '00:00' ? null : time;
 }
 
 export function toStatus(value: string): TicketStatus {
@@ -454,6 +510,9 @@ export class TransferService {
       const toClient = searchKey(assignee) === 'cliente';
       rows.push({
         date: lastDate,
+        // A column of its own, or the time written in the date cell. Unlike the date, it is not
+        // taken from the row above.
+        time: toTimeOnly(at('time')) ?? timeOfDateCell(at('date')),
         company: company.slice(0, 200),
         description: description.slice(0, 5000),
         status: toStatus(cellText(at('status'))),
@@ -463,15 +522,18 @@ export class TransferService {
       });
     }
 
-    const users = await this.prisma.user.findMany({ select: { id: true, name: true, username: true } });
-    const userByName = new Map(users.map((u) => [searchKey(u.name), u.id]));
-    const newPeople = [
-      ...new Map(
-        rows
-          .filter((r) => r.assignee && !r.toClient && !userByName.has(searchKey(r.assignee)))
-          .map((r) => [searchKey(r.assignee as string), r.assignee as string]),
-      ).values(),
-    ];
+    // Active or not: a sheet that names a deactivated responsible means that person, not a new one.
+    const people = await this.prisma.assignee.findMany({ select: { id: true, name: true } });
+    const personByName = new Map(people.map((person) => [searchKey(person.name), person.id]));
+    // One entry per person, however the sheet spells the name from row to row. The first spelling
+    // is the one kept: it is the name the new responsible gets.
+    const unknown = new Map<string, string>();
+    for (const row of rows) {
+      if (!row.assignee || row.toClient) continue;
+      const key = searchKey(row.assignee);
+      if (!personByName.has(key) && !unknown.has(key)) unknown.set(key, row.assignee);
+    }
+    const newPeople = [...unknown.values()];
 
     const result: ImportResult = {
       dryRun: options.dryRun,
@@ -485,14 +547,10 @@ export class TransferService {
     };
     if (options.dryRun) return result;
 
-    const usernames = new Set(users.map((u) => u.username));
+    // The names in the sheet that nobody has yet join the catalog of responsibles.
     for (const name of newPeople) {
-      const base = searchKey(name).replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '') || 'persona';
-      let username = base;
-      for (let n = 2; usernames.has(username); n++) username = `${base}${n}`;
-      usernames.add(username);
-      const created = await this.prisma.user.create({ data: { username, name } });
-      userByName.set(searchKey(name), created.id);
+      const created = await this.prisma.assignee.create({ data: { name } });
+      personByName.set(searchKey(name), created.id);
     }
 
     for (const row of rows) {
@@ -502,11 +560,12 @@ export class TransferService {
       await this.prisma.ticket.create({
         data: {
           date: parseDateOnly(row.date),
+          time: row.time,
           company: row.company,
           description: row.description,
           searchText: ticketSearchKey(row.company, row.description),
           status: row.status,
-          assigneeId: row.assignee && !row.toClient ? (userByName.get(searchKey(row.assignee)) ?? null) : null,
+          assigneeId: row.assignee && !row.toClient ? (personByName.get(searchKey(row.assignee)) ?? null) : null,
           assignedToClient: row.toClient,
           createdById: user.id,
           // Last activity is the day of the case, so old open cases show up as forgotten.
@@ -519,9 +578,9 @@ export class TransferService {
     return result;
   }
 
-  /** The spreadsheet people fill in to import cases, with the active people to choose as responsible. */
+  /** The spreadsheet people fill in to import cases, with the active responsibles to choose from. */
   async template(): Promise<Buffer> {
-    const people = await this.prisma.user.findMany({ where: { active: true }, orderBy: { name: 'asc' }, select: { name: true } });
+    const people = await this.prisma.assignee.findMany({ where: { active: true }, orderBy: { name: 'asc' }, select: { name: true } });
     return Buffer.from(await buildTemplate(people.map((person) => person.name)).xlsx.writeBuffer());
   }
 
@@ -542,6 +601,7 @@ export class TransferService {
     sheet.columns = [
       { header: 'Código', key: 'code', width: 12 },
       { header: 'Fecha del caso', key: 'date', width: 15, style: { numFmt: 'dd/mm/yyyy' } },
+      { header: 'Hora del caso', key: 'time', width: 10 },
       { header: 'Fecha de registro', key: 'registered', width: 17, style: { numFmt: 'dd/mm/yyyy hh:mm' } },
       { header: 'Empresa', key: 'company', width: 28 },
       { header: 'Descripción', key: 'description', width: 60 },
@@ -564,6 +624,7 @@ export class TransferService {
       const row = sheet.addRow({
         code: ticketCode(t.id),
         date: t.date,
+        time: t.time ?? '',
         registered: excelMoment(t.createdAt),
         company: t.company,
         description: t.description,
@@ -607,7 +668,7 @@ export class TransferService {
       ['Código', 'Fecha caso', 'Registro', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Observación'].map(headerCell),
       ...rows.map((t): TableCell[] => [
         ticketCode(t.id),
-        formatDateEs(t.date),
+        t.time ? `${formatDateEs(t.date)} ${t.time}` : formatDateEs(t.date),
         formatMomentEs(t.createdAt),
         pdfSafe(t.company),
         pdfSafe(t.description),
@@ -692,7 +753,7 @@ export class TransferService {
   private async filterNames(filters: TicketFilters): Promise<FilterNames> {
     const [assignee, module] = await Promise.all([
       typeof filters.assignee === 'number'
-        ? this.prisma.user.findUnique({ where: { id: filters.assignee }, select: { name: true } })
+        ? this.prisma.assignee.findUnique({ where: { id: filters.assignee }, select: { name: true } })
         : null,
       filters.moduleId !== undefined
         ? this.prisma.systemModule.findUnique({

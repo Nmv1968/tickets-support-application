@@ -48,7 +48,7 @@ export class DashboardController {
 
   @Get()
   async get(@Query('from') from?: string, @Query('to') to?: string): Promise<DashboardDto> {
-    const [rows, users, modules] = await Promise.all([
+    const [rows, people, modules] = await Promise.all([
       this.prisma.ticket.findMany({
         where: this.tickets.buildWhere(parseTicketFilters({ from, to })),
         select: {
@@ -66,11 +66,11 @@ export class DashboardController {
           spentMinutes: true,
         },
       }),
-      this.prisma.user.findMany({ select: { id: true, name: true } }),
+      this.prisma.assignee.findMany({ select: { id: true, name: true } }),
       this.prisma.systemModule.findMany({ select: { id: true, name: true, parent: { select: { name: true } } } }),
     ]);
 
-    const userName = new Map(users.map((u) => [u.id, u.name]));
+    const personName = new Map(people.map((person) => [person.id, person.name]));
     // The full name, as the case shows it everywhere else: two submodules can share their own name.
     const moduleName = new Map(modules.map((m) => [m.id, moduleFullName(m)]));
     const now = new Date();
@@ -93,7 +93,7 @@ export class DashboardController {
       const resolved = t.status === 'RESOLVED';
       totals[statusKey]++;
 
-      const assignee = t.assignedToClient ? 'Cliente' : t.assigneeId ? (userName.get(t.assigneeId) ?? 'Sin asignar') : 'Sin asignar';
+      const assignee = t.assignedToClient ? 'Cliente' : t.assigneeId ? (personName.get(t.assigneeId) ?? 'Sin asignar') : 'Sin asignar';
       const entry = assignees.get(assignee) ?? { name: assignee, unresolved: 0, pending: 0, resolved: 0, total: 0 };
       entry[statusKey]++;
       entry.total++;

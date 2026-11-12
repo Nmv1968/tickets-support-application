@@ -40,6 +40,11 @@ export function formatDay(value: string | null | undefined): string {
   return `${d}/${m}/${y}`;
 }
 
+/** When a case was reported: its day and, when the case has one, its time. "10/11/2026 14:35". */
+export function formatCaseDate(ticket: { date: string; time?: string | null }): string {
+  return ticket.time ? `${formatDay(ticket.date)} ${ticket.time}` : formatDay(ticket.date);
+}
+
 /** A moment in time (ISO timestamp) → local `DD/MM/YYYY`. For timestamps such as the registration date. */
 export function formatMomentDay(value: string | null | undefined): string {
   if (!value) return '';

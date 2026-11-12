@@ -5,6 +5,8 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { Ticket, TicketDetail, TicketPage } from '../../core/api';
+import { Auth } from '../../core/auth';
+import { Catalogs } from '../../core/catalogs';
 import { TicketEvents } from '../../core/ticket-events';
 import { Toast } from '../../core/toast';
 import { TicketsPage } from './tickets';
@@ -14,6 +16,7 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
     id: 7,
     code: 'SOP-00007',
     date: '2026-11-05',
+    time: null,
     company: 'Acme',
     description: 'No imprime',
     status: 'PENDING',
@@ -121,6 +124,60 @@ describe('TicketsPage', () => {
   /** The status select of the row of case 7 in the table. */
   const rowStatus = (): HTMLSelectElement => find('select[aria-label="Estado de SOP-00007"]');
   const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
+
+  describe('the responsible of the case being added', () => {
+    const newAssignee = (): HTMLSelectElement => el.querySelector<HTMLSelectElement>('select[aria-label="Responsable del caso nuevo"]')!;
+    const options = (): string[] => [...newAssignee().options].map((option) => option.textContent?.trim() ?? '');
+
+    /** The catalogs as they arrive from the server, some time after the screen is on. */
+    function catalogsArrive(ownAssigneeId: number | null): void {
+      const catalogs = TestBed.inject(Catalogs);
+      catalogs.users.set([{ id: 1, username: 'ana', name: 'Ana', active: true, canLogin: true, assigneeId: ownAssigneeId }]);
+      catalogs.assignees.set([
+        { id: 4, name: 'Ana', active: true, tickets: 0 },
+        { id: 5, name: 'Luis', active: true, tickets: 0 },
+        { id: 6, name: 'Zoe', active: false, tickets: 2 },
+      ]);
+      settle();
+    }
+
+    beforeEach(() => TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana' }));
+
+    // The people of the catalog, who need not be users; the deactivated ones take no new cases.
+    it('is chosen among the active responsibles, the client or nobody', fakeAsync(() => {
+      open();
+      catalogsArrive(4);
+
+      expect(options()).toEqual(['Sin asignar', 'Ana', 'Luis', 'Cliente']);
+    }));
+
+    it('starts as the responsible the logged-in user is', fakeAsync(() => {
+      open();
+      expect(newAssignee().value).toBe('');
+
+      catalogsArrive(4);
+      expect(newAssignee().value).toBe('4');
+    }));
+
+    it('starts as nobody for a user who attends no cases', fakeAsync(() => {
+      open();
+      catalogsArrive(null);
+
+      expect(newAssignee().value).toBe('');
+    }));
+
+    it('keeps the one chosen when the catalogs are read again', fakeAsync(() => {
+      open();
+      catalogsArrive(4);
+      newAssignee().value = '5';
+      newAssignee().dispatchEvent(new Event('change'));
+      render();
+
+      catalogsArrive(4);
+
+      expect(newAssignee().value).toBe('5');
+    }));
+  });
 
   describe('a case saved by this tab', () => {
     // The read may have been taken before the save was stored: shown, it would undo the save on screen.

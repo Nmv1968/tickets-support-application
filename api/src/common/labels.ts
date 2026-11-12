@@ -70,6 +70,11 @@ export function isDateOnly(value: unknown): value is string {
   return !Number.isNaN(date.getTime()) && formatDateOnly(date) === value;
 }
 
+/** True for a time of day written `HH:mm` on the 24-hour clock, from 00:00 to 23:59. */
+export function isTimeOnly(value: unknown): value is string {
+  return typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
 /** `DD/MM/YYYY` for exports. */
 export function formatDateEs(value: Date | null | undefined): string {
   if (!value) return '';

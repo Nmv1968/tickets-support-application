@@ -4,6 +4,7 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { AiController } from './ai/ai.controller';
 import { AiService } from './ai/ai.service';
+import { AssigneesController } from './assignees/assignees.controller';
 import { AuthController } from './auth/auth.controller';
 import { CatalogController } from './catalog/catalog.controller';
 import { JwtGuard } from './common/auth';
@@ -41,6 +42,7 @@ import { UsersController } from './users/users.controller';
   controllers: [
     AuthController,
     UsersController,
+    AssigneesController,
     CatalogController,
     TicketsController,
     AttachmentsController,

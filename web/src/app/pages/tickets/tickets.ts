@@ -1,17 +1,16 @@
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, linkedSignal, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Api } from '../../core/api';
 import type { Ticket, TicketFilters, TicketInput, TicketPage, TicketStatus } from '../../core/api';
-import { Auth } from '../../core/auth';
 import { Autofocus } from '../../core/autofocus';
 import { Catalogs, assigneeInput, assigneeValue } from '../../core/catalogs';
 import { TicketEvents } from '../../core/ticket-events';
 import type { TicketEvent } from '../../core/ticket-events';
 import { TicketFlags } from '../../core/ticket-flags';
 import { Toast } from '../../core/toast';
-import { PROMISE_CLASS, STATUSES, STATUS_LABEL, downloadBlob, formatDateTime, formatDay, formatMomentDay, pastedImages, promiseText, todayIso } from '../../core/ui';
+import { PROMISE_CLASS, STATUSES, STATUS_LABEL, downloadBlob, formatCaseDate, formatDateTime, formatDay, formatMomentDay, pastedImages, promiseText, todayIso } from '../../core/ui';
 import { AiDraftDialog } from './ai-draft';
 import { ImportDialog } from './import-dialog';
 import { TicketPanel } from './ticket-panel';
@@ -29,7 +28,6 @@ const PAGE_SIZE = 50;
 export class TicketsPage {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
-  private readonly auth = inject(Auth);
   private readonly router = inject(Router);
   private readonly query = toSignal(inject(ActivatedRoute).queryParamMap);
   protected readonly catalogs = inject(Catalogs);
@@ -42,6 +40,7 @@ export class TicketsPage {
   protected readonly statuses = STATUSES;
   protected readonly statusLabel = STATUS_LABEL;
   protected readonly formatDay = formatDay;
+  protected readonly formatCaseDate = formatCaseDate;
   protected readonly formatDateTime = formatDateTime;
   protected readonly assigneeValue = assigneeValue;
 
@@ -84,10 +83,13 @@ export class TicketsPage {
 
   // Quick-add row
   protected readonly newDate = signal(todayIso());
+  /** Time of the case being added. Empty: the case has only its date. */
+  protected readonly newTime = signal('');
   protected readonly newCompany = signal('');
   protected readonly newDescription = signal('');
   protected readonly newStatus = signal<TicketStatus>('PENDING');
-  protected readonly newAssignee = signal(String(this.auth.user()?.id ?? ''));
+  /** Starts as the responsible the logged-in user is; follows it once the catalogs arrive. */
+  protected readonly newAssignee = linkedSignal(() => this.catalogs.ownAssignee());
   protected readonly newNote = signal('');
   protected readonly adding = signal(false);
   protected readonly companyOptions = signal<string[]>([]);
@@ -238,6 +240,7 @@ export class TicketsPage {
     try {
       await this.api.createTicket({
         date: this.newDate() || todayIso(),
+        time: this.newTime() || undefined,
         company,
         description,
         status: this.newStatus(),
@@ -247,6 +250,7 @@ export class TicketsPage {
       this.newCompany.set('');
       this.newDescription.set('');
       this.newNote.set('');
+      this.newTime.set('');
       this.newStatus.set('PENDING');
       this.toast.ok('Caso registrado');
       // The new case has already asked for the list again (see onTicketEvent): wait for that answer.

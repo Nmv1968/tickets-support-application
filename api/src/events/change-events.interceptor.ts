@@ -7,7 +7,7 @@ import type { ChangeEvent } from './events.service';
 
 const SCOPES: { pattern: RegExp; scope: ChangeEvent['scope'] }[] = [
   { pattern: /^\/api\/(tickets|attachments|import|ai\/reply)(\/|$)/, scope: 'tickets' },
-  { pattern: /^\/api\/(modules|users|sla|ai\/config)(\/|$)/, scope: 'catalogs' },
+  { pattern: /^\/api\/(modules|users|assignees|sla|ai\/config)(\/|$)/, scope: 'catalogs' },
   { pattern: /^\/api\/(settings|branding)(\/|$)/, scope: 'settings' },
 ];
 
@@ -38,9 +38,9 @@ export class ChangeEventsInterceptor implements NestInterceptor {
           created: ticket && req.method === 'POST' && req.path === '/api/tickets' ? { code: ticket.code, by: req.user?.name ?? '' } : null,
           clientId,
         });
-        // The import is the one write that also changes a catalog: it creates the people named in
+        // The import is the one write that also changes a catalog: it adds the responsibles named in
         // the sheet that did not exist yet (`newPeople` in its answer). The other browsers must
-        // reload the people list too, or the new cases show there without a responsible person.
+        // reload that list too, or the new cases show there without a responsible person.
         const newPeople = body && typeof body === 'object' && 'newPeople' in body ? body.newPeople : null;
         if (Array.isArray(newPeople) && newPeople.length) this.events.emit({ scope: 'catalogs', ticketId: null, created: null, clientId });
       }),

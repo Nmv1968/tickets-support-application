@@ -3,17 +3,18 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import { Toast } from '../../core/toast';
 import { AiTab } from './ai-tab';
+import { AssigneesTab } from './assignees-tab';
 import { BrandingTab } from './branding-tab';
 import { ModulesTab } from './modules-tab';
 import { RemindersTab } from './reminders-tab';
 import { SlaTab } from './sla-tab';
 import { UsersTab } from './users-tab';
 
-type TabId = 'users' | 'modules' | 'sla' | 'reminders' | 'ai' | 'branding' | 'account';
+type TabId = 'users' | 'assignees' | 'modules' | 'sla' | 'reminders' | 'ai' | 'branding' | 'account';
 
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule, UsersTab, ModulesTab, SlaTab, RemindersTab, AiTab, BrandingTab],
+  imports: [FormsModule, UsersTab, AssigneesTab, ModulesTab, SlaTab, RemindersTab, AiTab, BrandingTab],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="mx-auto max-w-4xl space-y-4 p-3 md:p-5">
@@ -39,6 +40,9 @@ type TabId = 'users' | 'modules' | 'sla' | 'reminders' | 'ai' | 'branding' | 'ac
       @switch (tab()) {
         @case ('users') {
           <app-users-tab />
+        }
+        @case ('assignees') {
+          <app-assignees-tab />
         }
         @case ('modules') {
           <app-modules-tab />
@@ -79,6 +83,7 @@ export class SettingsPage {
 
   protected readonly tabs: { id: TabId; label: string; icon: string }[] = [
     { id: 'users', label: 'Usuarios', icon: 'mdi-account-multiple-outline' },
+    { id: 'assignees', label: 'Responsables', icon: 'mdi-account-hard-hat-outline' },
     { id: 'modules', label: 'Módulos', icon: 'mdi-view-grid-outline' },
     { id: 'sla', label: 'SLA', icon: 'mdi-timer-cog-outline' },
     { id: 'reminders', label: 'Recordatorios', icon: 'mdi-bell-cog-outline' },

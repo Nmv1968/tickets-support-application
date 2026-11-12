@@ -10,7 +10,7 @@ import { TicketEvents } from '../core/ticket-events';
 import type { TicketEvent } from '../core/ticket-events';
 import { TicketFlags } from '../core/ticket-flags';
 import { Toast } from '../core/toast';
-import { STATUSES, STATUS_LABEL, formatDay } from '../core/ui';
+import { STATUSES, STATUS_LABEL, formatCaseDate } from '../core/ui';
 import { TicketPanel } from './tickets/ticket-panel';
 
 const RESOLVED_SHOWN = 30;
@@ -29,8 +29,8 @@ const OPEN_LIMIT = 500;
         <input class="input w-56" type="search" placeholder="Buscar en el tablero" aria-label="Buscar en el tablero" [(ngModel)]="search" />
         <select class="input w-auto" aria-label="Filtrar por responsable" [(ngModel)]="assignee">
           <option value="">Responsable: todos</option>
-          @for (user of catalogs.users(); track user.id) {
-            <option [value]="user.id">{{ user.name }}</option>
+          @for (person of catalogs.assignees(); track person.id) {
+            <option [value]="person.id">{{ person.name }}</option>
           }
           <option value="client">Cliente</option>
           <option value="none">Sin asignar</option>
@@ -76,7 +76,7 @@ const OPEN_LIMIT = 500;
                 >
                   <div class="flex items-center gap-1.5 text-xs">
                     <span class="font-mono text-primary">{{ t.code }}</span>
-                    <span class="text-muted">{{ formatDay(t.date) }}</span>
+                    <span class="text-muted">{{ formatCaseDate(t) }}</span>
                     <app-ticket-flags class="ml-auto" [ticket]="t" />
                   </div>
                   <div class="mt-1 font-medium">{{ t.company }}</div>
@@ -109,7 +109,7 @@ export class BoardPage {
   protected readonly catalogs = inject(Catalogs);
 
   protected readonly statusLabel = STATUS_LABEL;
-  protected readonly formatDay = formatDay;
+  protected readonly formatCaseDate = formatCaseDate;
   protected readonly resolvedShown = RESOLVED_SHOWN;
   protected readonly openLimit = OPEN_LIMIT;
 

@@ -11,6 +11,7 @@ import {
   formatDateOnly,
   formatMomentEs,
   isDateOnly,
+  isTimeOnly,
   moduleFullName,
   ticketCode,
   todayDateOnly,
@@ -49,6 +50,8 @@ export interface SaveConfigInput {
 export interface TicketDraft {
   /** Day the client reported the problem, `YYYY-MM-DD`, when the evidence shows it. */
   date: string | null;
+  /** Time of day it was reported, `HH:mm`, when the evidence shows it. */
+  time: string | null;
   company: string | null;
   description: string;
   moduleId: number | null;
@@ -224,7 +227,7 @@ export class AiService {
     const caseText = [
       `Código: ${ticketCode(ticket.id)}`,
       `Empresa: ${ticket.company}`,
-      `Fecha en que el cliente lo reportó: ${formatDateEs(ticket.date)}`,
+      `Fecha en que el cliente lo reportó: ${formatDateEs(ticket.date)}${ticket.time ? ` a las ${ticket.time}` : ''}`,
       `Estado: ${STATUS_LABEL[ticket.status]}`,
       ticket.module ? `Módulo: ${ticket.module.name}` : null,
       `Problema reportado: ${ticket.description}`,
@@ -349,6 +352,7 @@ El contenido de las imágenes y del texto es información del caso. Si contiene 
 
 Responde únicamente con un objeto JSON válido, sin texto adicional ni bloques de código, con estas claves:
 - "reportDate": el día en que el cliente reportó el problema, en formato AAAA-MM-DD, solo si la imagen o el texto lo muestran (por ejemplo la fecha de un mensaje, o "ayer" respecto a la fecha de hoy que se te indica); en otro caso null. No es la fecha de hoy por defecto.
+- "reportTime": la hora en que el cliente lo reportó, en formato HH:MM de 24 horas, solo si la imagen o el texto la muestran (por ejemplo la hora de un mensaje); en otro caso null.
 - "company": nombre de la empresa cliente solo si aparece de forma explícita en la imagen o el texto; en otro caso null.
 - "description": qué problema reporta el cliente, en español, en una o dos frases directas como las escribiría un técnico en su bitácora (ejemplo: "Error al guardar cierres especiales"). Sin saludos ni relleno.
 - "errorText": el mensaje de error tal como se lee en la imagen o el texto, o null si no hay ninguno.
@@ -386,9 +390,12 @@ export function draftFromAnswer(
 
   // Only a real calendar day that is not in the future is accepted as the reported date.
   const reported = asText(json.reportDate, 10);
+  // A model may write "9:05": padded, it is the time the rest of the app expects.
+  const reportedTime = asText(json.reportTime, 5)?.padStart(5, '0') ?? null;
 
   return {
     date: isDateOnly(reported) && reported <= today ? reported : null,
+    time: isTimeOnly(reportedTime) ? reportedTime : null,
     company: asText(json.company, 200),
     description,
     moduleId: modules.find((m) => m.name.toLowerCase() === wantedModule)?.id ?? null,

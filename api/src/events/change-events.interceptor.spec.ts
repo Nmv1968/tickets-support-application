@@ -46,6 +46,9 @@ describe('ChangeEventsInterceptor', () => {
       ['PATCH', '/api/modules/3'],
       ['POST', '/api/users'],
       ['PATCH', '/api/users/5'],
+      ['POST', '/api/assignees'],
+      ['PATCH', '/api/assignees/4'],
+      ['DELETE', '/api/assignees/4'],
       ['PUT', '/api/sla'],
       ['PUT', '/api/ai/config/openai'],
     ])('%s %s announces a change in the catalogs', (method, path) => {

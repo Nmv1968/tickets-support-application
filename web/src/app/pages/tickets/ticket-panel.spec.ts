@@ -15,6 +15,7 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
     id: 7,
     code: 'SOP-00007',
     date: '2026-11-05',
+    time: null,
     company: 'Acme',
     description: 'No imprime',
     status: 'PENDING',
@@ -1461,6 +1462,97 @@ describe('TicketPanel', () => {
       settle();
       expect(closed).toBe(1);
       expect(toasts()).toEqual(['Este caso fue eliminado desde otra sesión']);
+    }));
+  });
+
+  describe('the time of the case', () => {
+    const caseTime = (): HTMLInputElement => find('#tp-time');
+    const clearButton = (): HTMLButtonElement | null => el.querySelector('button[aria-label="Quitar la hora del caso"]');
+
+    it('is empty, with nothing to remove, on a case that only has its date', fakeAsync(() => {
+      open();
+
+      expect(caseTime().value).toBe('');
+      expect(caseTime().type).toBe('time');
+      expect(clearButton()).toBeNull();
+    }));
+
+    // "14:35" sorts before "1900-01-01": the guard against a year still being typed must not reach it.
+    it('is saved after the pause, once, with the last time typed', fakeAsync(() => {
+      open();
+      typeDate(caseTime(), '01:00');
+      wait(200);
+      typeDate(caseTime(), '14:00');
+      wait(200);
+      typeDate(caseTime(), '14:35');
+      wait(PAUSE - 1);
+      noPatch();
+
+      wait(1);
+      const save = patch();
+      expect(save.request.body).toEqual({ time: '14:35' });
+      save.flush(ticket({ time: '14:35' }));
+      settle();
+
+      expect(caseTime().value).toBe('14:35');
+      expect(clearButton()).not.toBeNull();
+    }));
+
+    it('is saved at once when the field is left', fakeAsync(() => {
+      open();
+      typeDate(caseTime(), '09:05');
+      fire(caseTime(), 'blur');
+
+      const save = patch();
+      expect(save.request.body).toEqual({ time: '09:05' });
+      save.flush(ticket({ time: '09:05' }));
+      settle();
+      expect(caseTime().value).toBe('09:05');
+    }));
+
+    // The browser reports an empty value while a time is half typed.
+    it('left half typed, sends nothing and shows the time the case has', fakeAsync(() => {
+      open(ticket({ time: '14:35' }));
+      typeDate(caseTime(), '');
+      wait(PAUSE);
+      noPatch();
+
+      fire(caseTime(), 'blur');
+      noPatch();
+      expect(caseTime().value).toBe('14:35');
+    }));
+
+    it('is removed with its button, and the field is left empty', fakeAsync(() => {
+      open(ticket({ time: '14:35' }));
+
+      click(clearButton()!);
+      const save = patch();
+      expect(save.request.body).toEqual({ time: null });
+      save.flush(ticket({ time: null }));
+      settle();
+
+      expect(caseTime().value).toBe('');
+      expect(clearButton()).toBeNull();
+    }));
+
+    it('stays when the server refuses to remove it', fakeAsync(() => {
+      open(ticket({ time: '14:35' }));
+
+      click(clearButton()!);
+      patch().flush({ message: 'No se pudo guardar' }, REFUSED);
+      settle();
+
+      expect(caseTime().value).toBe('14:35');
+      expect(toasts()).toEqual(['No se pudo guardar']);
+    }));
+
+    it('follows a change made elsewhere', fakeAsync(() => {
+      open();
+      events.outdated(7);
+      read().flush(ticket({ time: '08:15' }));
+      settle();
+
+      expect(caseTime().value).toBe('08:15');
     }));
   });
 

@@ -13,6 +13,7 @@ import {
   formatDateEs,
   formatDateOnly,
   isDateOnly,
+  isTimeOnly,
   moduleFullName,
   noteSearchKey,
   parseDateOnly,
@@ -28,6 +29,11 @@ import type { ReminderRules } from '../settings/settings.service';
 /** Accepts only a day that exists, written `YYYY-MM-DD`. `message` is the text of the 400 the person reads. */
 function IsDateOnly(message: string): PropertyDecorator {
   return ValidateBy({ name: 'isDateOnly', validator: { validate: isDateOnly } }, { message });
+}
+
+/** Accepts only a time of day written `HH:mm`, 24-hour clock. */
+function IsTimeOnly(message: string): PropertyDecorator {
+  return ValidateBy({ name: 'isTimeOnly', validator: { validate: isTimeOnly } }, { message });
 }
 
 // Texts of the 400 the person reads when a value of a case is too long or out of range.
@@ -46,6 +52,8 @@ const noModule = { message: 'El módulo no existe' };
 export class TicketInput {
   /** Day the client reported the problem. The registration moment (`createdAt`) is not an input. */
   @IsOptional() @IsDateOnly('La fecha del caso no es válida. Debe ser una fecha real con el formato AAAA-MM-DD.') date?: string;
+  /** Time of day the client reported it, `HH:mm`. Optional; null removes it. */
+  @IsOptional() @IsTimeOnly('La hora del caso no es válida. Usa el formato HH:MM, de 00:00 a 23:59.') time?: string | null;
   @IsOptional() @IsString() @MaxLength(200, tooLong('La empresa', 200)) company?: string;
   @IsOptional() @IsString() @MaxLength(5000, tooLong('La descripción', 5000)) description?: string;
   @IsOptional() @IsEnum(TicketStatus) status?: TicketStatus;
@@ -198,7 +206,10 @@ type DetailRow = Prisma.TicketGetPayload<{ include: typeof detailInclude }>;
  */
 export function ticketOrder(filters: TicketFilters): Prisma.TicketOrderByWithRelationInput[] {
   const dir = filters.dir ?? 'desc';
-  return filters.sort ? [{ [filters.sort]: dir }, { id: 'asc' }] : [{ id: dir }];
+  if (!filters.sort) return [{ id: dir }];
+  // Within a day, the cases that have a time go by it; the ones without it come after them.
+  if (filters.sort === 'date') return [{ date: dir }, { time: { sort: dir, nulls: 'last' } }, { id: 'asc' }];
+  return [{ [filters.sort]: dir }, { id: 'asc' }];
 }
 
 export function uploadDir(): string {
@@ -248,6 +259,7 @@ function baseDto(t: StoredTicket, rules: ReminderRules) {
     id: t.id,
     code: ticketCode(t.id),
     date: formatDateOnly(t.date),
+    time: t.time,
     company: t.company,
     description: t.description,
     status: t.status,
@@ -314,7 +326,7 @@ export type TicketDetailDto = ReturnType<typeof detailDto>;
 /** What an edit needs from outside the case itself. The caller looks it up: see `TicketsService.lookups`. */
 export interface TicketUpdateContext {
   now: Date;
-  /** Name of the person in `dto.assigneeId`. */
+  /** Name of the responsible in `dto.assigneeId`. */
   assigneeName: string | null;
   /** Name of the module in `dto.moduleId`, as shown in the history. */
   moduleName: string | null;
@@ -354,6 +366,11 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
     assertReportDate(dto.date, now);
     data.date = parseDateOnly(dto.date);
     track('Fecha del caso', formatDateOnly(before.date), dto.date);
+  }
+  // The time is optional on a case: here null is a value, and removes it.
+  if (dto.time !== undefined && dto.time !== before.time) {
+    data.time = dto.time;
+    track('Hora del caso', before.time, dto.time);
   }
 
   let company = before.company;
@@ -569,12 +586,13 @@ export class TicketsService {
     const ticket = await this.prisma.ticket.create({
       data: {
         date: dto.date ? parseDateOnly(dto.date) : todayDateOnly(now),
+        time: dto.time ?? null,
         company,
         description,
         searchText: ticketSearchKey(company, description),
         status,
         // Whoever registers the case takes it unless another responsible is chosen.
-        assigneeId: toClient ? null : dto.assigneeId === undefined ? user.id : dto.assigneeId,
+        assigneeId: toClient ? null : dto.assigneeId === undefined ? await this.ownAssigneeId(user.id) : dto.assigneeId,
         assignedToClient: toClient,
         priority: dto.priority ?? null,
         estimatedMinutes: dto.estimatedMinutes ?? null,
@@ -691,13 +709,22 @@ export class TicketsService {
    */
   private async lookups(dto: TicketInput): Promise<Omit<TicketUpdateContext, 'now'>> {
     const [assignee, module, sla] = await Promise.all([
-      dto.assigneeId != null ? this.prisma.user.findUnique({ where: { id: dto.assigneeId }, select: { name: true } }) : null,
+      dto.assigneeId != null ? this.prisma.assignee.findUnique({ where: { id: dto.assigneeId }, select: { name: true } }) : null,
       dto.moduleId != null ? this.prisma.systemModule.findUnique({ where: { id: dto.moduleId }, select: baseInclude.module.select }) : null,
       dto.priority ? this.prisma.slaPolicy.findUnique({ where: { priority: dto.priority } }) : null,
     ]);
     if (dto.assigneeId != null && !assignee) throw new BadRequestException('El responsable no existe');
     if (dto.moduleId != null && !module) throw new BadRequestException('El módulo no existe');
     return { assigneeName: assignee?.name ?? null, moduleName: moduleName(module), slaHours: sla?.hours ?? null };
+  }
+
+  /**
+   * The responsible a user is, for the cases they register without choosing one. Null for a user
+   * who does not attend cases, and for one whose responsible was deactivated.
+   */
+  private async ownAssigneeId(userId: number): Promise<number | null> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { assignee: { select: { id: true, active: true } } } });
+    return user?.assignee?.active ? user.assignee.id : null;
   }
 }
 

@@ -18,6 +18,7 @@ const TODAY = day('2026-11-11');
 const stored = (changes: Partial<StoredTicket> = {}): StoredTicket => ({
   id: 7,
   date: day('2026-11-02'),
+  time: null,
   company: 'ACME',
   description: 'No abre la factura',
   searchText: 'acme no abre la factura',
@@ -157,7 +158,9 @@ describe('ticket list filters', () => {
       expect(ticketOrder({})).toEqual([{ id: 'desc' }]);
       expect(ticketOrder({ dir: 'asc' })).toEqual([{ id: 'asc' }]);
       expect(ticketOrder({ sort: 'company', dir: 'asc' })).toEqual([{ company: 'asc' }, { id: 'asc' }]);
-      expect(ticketOrder({ sort: 'date' })).toEqual([{ date: 'desc' }, { id: 'asc' }]);
+      // By date, the time of the case orders the cases of one day; the ones without a time go after them.
+      expect(ticketOrder({ sort: 'date' })).toEqual([{ date: 'desc' }, { time: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]);
+      expect(ticketOrder({ sort: 'date', dir: 'asc' })).toEqual([{ date: 'asc' }, { time: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }]);
     });
   });
 
@@ -301,6 +304,20 @@ describe('search keys', () => {
   });
 });
 
+describe('ticket input time', () => {
+  it('accepts a time of day written HH:MM on the 24-hour clock, and null to remove it', async () => {
+    for (const time of ['00:00', '08:05', '14:35', '23:59']) expect(await errors({ time })).toEqual([]);
+    expect(await errors({ time: null })).toEqual([]);
+    expect(await errors({})).toEqual([]);
+  });
+
+  it('rejects anything else, with a message in Spanish', async () => {
+    for (const time of ['24:00', '14:60', '2:35', '14:35:10', '2:35 pm', '1435', '', 1435]) {
+      expect(await errors({ time })).toEqual(['La hora del caso no es válida. Usa el formato HH:MM, de 00:00 a 23:59.']);
+    }
+  });
+});
+
 describe('planTicketUpdate', () => {
   const context = (changes: Partial<TicketUpdateContext> = {}): TicketUpdateContext => ({
     now: NOW,
@@ -415,6 +432,34 @@ describe('planTicketUpdate', () => {
       const { data, history } = planTicketUpdate(urgent, { priority: 'HIGH' }, context({ slaHours: 24 }));
       expect(data).not.toHaveProperty('dueAt');
       expect(history).toEqual([]);
+    });
+  });
+
+  describe('time of the case', () => {
+    it('sets the time and writes it in the history', () => {
+      const { data, history } = planTicketUpdate(stored(), { time: '14:35' }, context());
+      expect(data.time).toBe('14:35');
+      expect(history).toEqual([{ field: 'Hora del caso', oldValue: null, newValue: '14:35' }]);
+    });
+
+    // Unlike the date, a case can be left without a time.
+    it('removes the time with null', () => {
+      const { data, history } = planTicketUpdate(stored({ time: '14:35' }), { time: null }, context());
+      expect(data.time).toBeNull();
+      expect(history).toEqual([{ field: 'Hora del caso', oldValue: '14:35', newValue: null }]);
+    });
+
+    it('does nothing when the time sent is the one the case has, or when none is sent', () => {
+      const timed = stored({ time: '14:35' });
+      expect(planTicketUpdate(timed, { time: '14:35' }, context())).toEqual({ data: { lastActivityAt: NOW }, history: [] });
+      expect(planTicketUpdate(timed, { priority: null }, context())).toEqual({ data: { lastActivityAt: NOW }, history: [] });
+      expect(planTicketUpdate(stored(), { time: null }, context())).toEqual({ data: { lastActivityAt: NOW }, history: [] });
+    });
+
+    it('changes with the date in one edit', () => {
+      const { data, history } = planTicketUpdate(stored(), { date: '2026-11-05', time: '09:10' }, context());
+      expect(data).toMatchObject({ date: day('2026-11-05'), time: '09:10' });
+      expect(history.map((change) => change.field)).toEqual(['Fecha del caso', 'Hora del caso']);
     });
   });
 
@@ -560,6 +605,9 @@ describe('TicketsService', () => {
       updateMany: jest.fn().mockResolvedValue({ count: found ? 1 : 0 }),
     },
     ticketNote: { create: jest.fn().mockResolvedValue({}), deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    // The user who registers the cases is the responsible 4.
+    user: { findUnique: jest.fn().mockResolvedValue({ assignee: { id: 4, active: true } }) },
+    assignee: { findUnique: jest.fn().mockResolvedValue({ name: 'Luis' }) },
   });
 
   /** A fake database whose list of cases is `rows`. */
@@ -753,7 +801,7 @@ describe('TicketsService', () => {
               searchText: 'acme no abre',
               status: 'PENDING',
               spentMinutes: 0,
-              assigneeId: 1,
+              assigneeId: 4,
               assignedToClient: false,
               aiGenerated: false,
               lastActivityAt: NOW,
@@ -762,6 +810,53 @@ describe('TicketsService', () => {
           },
         ],
       ]);
+    });
+
+    /** The responsible of the case the service stores for this input. */
+    const storedAssignee = async (db: ReturnType<typeof caseDb>, input: Partial<TicketInput>): Promise<unknown> => {
+      await serviceOn(db).create({ company: 'ACME', description: 'No abre', ...input }, user);
+      return (db.ticket.create.mock.calls[0] as [{ data: { assigneeId: unknown } }])[0].data.assigneeId;
+    };
+
+    // The responsible of a case is a person of the catalog, not the user: id 1 registers, 4 attends.
+    it('gives the case to the responsible its user is, when none is chosen', async () => {
+      const db = caseDb();
+
+      expect(await storedAssignee(db, {})).toBe(4);
+      expect(db.user.findUnique).toHaveBeenCalledWith({ where: { id: 1 }, select: { assignee: { select: { id: true, active: true } } } });
+    });
+
+    it('leaves it without a responsible when its user attends no cases, or their responsible is deactivated', async () => {
+      const notLinked = caseDb();
+      notLinked.user.findUnique.mockResolvedValue({ assignee: null });
+      expect(await storedAssignee(notLinked, {})).toBeNull();
+
+      const deactivated = caseDb();
+      deactivated.user.findUnique.mockResolvedValue({ assignee: { id: 4, active: false } });
+      expect(await storedAssignee(deactivated, {})).toBeNull();
+    });
+
+    it('keeps the responsible chosen, nobody included, without asking who the user is', async () => {
+      const chosen = caseDb();
+      expect(await storedAssignee(chosen, { assigneeId: 9 })).toBe(9);
+      expect(chosen.assignee.findUnique).toHaveBeenCalledWith({ where: { id: 9 }, select: { name: true } });
+      expect(chosen.user.findUnique).not.toHaveBeenCalled();
+
+      const nobody = caseDb();
+      expect(await storedAssignee(nobody, { assigneeId: null })).toBeNull();
+      expect(nobody.user.findUnique).not.toHaveBeenCalled();
+
+      const client = caseDb();
+      expect(await storedAssignee(client, { assignedToClient: true })).toBeNull();
+      expect(client.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('refuses a responsible that is not in the catalog', async () => {
+      const db = caseDb();
+      db.assignee.findUnique.mockResolvedValue(null);
+
+      await expect(serviceOn(db).create({ company: 'ACME', description: 'No abre', assigneeId: 9 }, user)).rejects.toThrow('El responsable no existe');
+      expect(db.ticket.create).not.toHaveBeenCalled();
     });
 
     it('refuses a case whose company or description is null', async () => {

@@ -68,8 +68,8 @@
     <div [class]="moreFilters() ? 'contents' : 'hidden md:contents'">
       <select class="input w-auto" aria-label="Filtrar por responsable" [(ngModel)]="assignee">
         <option value="">Responsable: todos</option>
-        @for (user of catalogs.users(); track user.id) {
-          <option [value]="user.id">{{ user.name }}</option>
+        @for (person of catalogs.assignees(); track person.id) {
+          <option [value]="person.id">{{ person.name }}</option>
         }
         <option value="client">Cliente</option>
         <option value="none">Sin asignar</option>
@@ -151,6 +151,7 @@
           </td>
           <td class="px-1.5 py-1.5">
             <input class="input px-2 py-1.5" type="date" aria-label="Fecha del caso nuevo: día en que el cliente lo reportó" title="Día en que el cliente reportó el problema" [max]="today" [(ngModel)]="newDate" />
+            <input class="input mt-1 px-2 py-1.5" type="time" aria-label="Hora del caso nuevo (opcional)" title="Hora en que el cliente lo reportó (opcional)" [(ngModel)]="newTime" />
           </td>
           <td class="px-3 py-2 text-xs text-muted" title="La fecha de registro la pone el sistema al guardar"><span class="inline-block pt-2">Hoy</span></td>
           <td class="px-1.5 py-1.5">
@@ -169,8 +170,8 @@
           <td class="px-1.5 py-1.5">
             <select class="input px-2 py-1.5" aria-label="Responsable del caso nuevo" [(ngModel)]="newAssignee">
               <option value="">Sin asignar</option>
-              @for (user of catalogs.activeUsers(); track user.id) {
-                <option [value]="user.id">{{ user.name }}</option>
+              @for (person of catalogs.activeAssignees(); track person.id) {
+                <option [value]="person.id">{{ person.name }}</option>
               }
               <option value="client">Cliente</option>
             </select>
@@ -192,7 +193,12 @@
               <!-- Without the promise icon: this row writes the promise out under the description. -->
               <app-ticket-flags class="mt-0.5" [ticket]="t" [showPromise]="false" />
             </td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ formatDay(t.date) }}</td>
+            <td class="px-3 py-2 whitespace-nowrap">
+              {{ formatDay(t.date) }}
+              @if (t.time) {
+                <div class="text-xs text-muted" title="Hora del caso">{{ t.time }}</div>
+              }
+            </td>
             <td class="px-3 py-2 whitespace-nowrap text-muted" [title]="'Registrado el ' + formatDateTime(t.createdAt)">{{ formatMomentDay(t.createdAt) }}</td>
             <td class="px-3 py-2 font-medium">
               <button type="button" class="text-left hover:underline" (click)="openId.set(t.id)">{{ t.company }}</button>
@@ -225,9 +231,9 @@
             <td class="px-1.5 py-1">
               <select class="cell-control" [attr.aria-label]="'Responsable de ' + t.code" [ngModel]="assigneeValue(t)" (ngModelChange)="patchAssignee(t, $event)">
                 <option value="">Sin asignar</option>
-                @for (user of catalogs.users(); track user.id) {
-                  @if (user.active || user.id === t.assigneeId) {
-                    <option [value]="user.id">{{ user.name }}</option>
+                @for (person of catalogs.assignees(); track person.id) {
+                  @if (person.active || person.id === t.assigneeId) {
+                    <option [value]="person.id">{{ person.name }}</option>
                   }
                 }
                 <option value="client">Cliente</option>
@@ -290,7 +296,7 @@
       <button type="button" class="card p-3 text-left" (click)="openId.set(t.id)">
         <div class="flex items-center gap-2">
           <span class="font-mono text-xs text-primary">{{ t.code }}</span>
-          <span class="text-xs text-muted" title="Fecha del caso">{{ formatDay(t.date) }}</span>
+          <span class="text-xs text-muted" title="Fecha del caso">{{ formatCaseDate(t) }}</span>
           <app-ticket-flags [ticket]="t" />
           <span class="badge ml-auto" [class]="'st-' + t.status">{{ statusLabel[t.status] }}</span>
         </div>

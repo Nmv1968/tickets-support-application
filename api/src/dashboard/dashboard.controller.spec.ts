@@ -29,7 +29,7 @@ describe('dashboard', () => {
   const setup = (tickets: Record<string, unknown>[] = [], modules: Record<string, unknown>[] = []) => {
     const db = {
       ticket: { findMany: jest.fn().mockResolvedValue(tickets) },
-      user: { findMany: jest.fn().mockResolvedValue([]) },
+      assignee: { findMany: jest.fn().mockResolvedValue([]) },
       systemModule: { findMany: jest.fn().mockResolvedValue(modules) },
     };
     const prisma = db as unknown as PrismaService;

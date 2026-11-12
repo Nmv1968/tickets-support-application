@@ -263,14 +263,17 @@ Todo va en el archivo `.env` de la raíz, que nunca se sube al repositorio.
 El API revisa estos valores al arrancar. No inicia sin `JWT_SECRET` y `APP_SECRET`, ni, en producción
 (Docker), mientras `JWT_SECRET`, `APP_SECRET`, `ADMIN_PASSWORD` o `MCP_PASSWORD` sigan en `change-me`.
 
-Lo demás se configura desde la aplicación, en **Configuración**: usuarios, catálogo de módulos, horas
-de SLA por prioridad, recordatorios, proveedor de IA y logo de la empresa.
+Lo demás se configura desde la aplicación, en **Configuración**: usuarios, responsables, catálogo de
+módulos, horas de SLA por prioridad, recordatorios, proveedor de IA y logo de la empresa.
 
 ### Personalizar
 
 - **Logo.** En **Configuración > Empresa** sube el logo de tu empresa (PNG, JPG, WebP o SVG). Se
   guarda reducido y se usa en el menú, en la pantalla de ingreso y como icono de la pestaña del
   navegador. Va en la base de datos, así que entra en los respaldos.
+- **Responsables.** En **Configuración > Responsables** agrega a quienes atienden los casos. Basta el
+  nombre: no necesitan ser usuarios del sistema. Si un usuario también atiende casos, dile cuál
+  responsable es en **Configuración > Usuarios**.
 - **Módulos.** El catálogo inicial es un ejemplo para un software de gestión. Cámbialo por los
   módulos o áreas de tu producto en **Configuración > Módulos**.
 - **Guía de estilo de los mensajes a clientes.** La IA redacta siguiendo
@@ -369,6 +372,8 @@ Cómo se comporta el asistente:
 - Entra solo, con el usuario asistente (`MCP_USERNAME` y `MCP_PASSWORD` de `.env`). El API crea ese
   usuario al arrancar. Todo lo que hace queda en el historial de cada caso con ese nombre.
 - No tiene herramienta para eliminar casos.
+- Si le nombras un responsable o un módulo que no existe, no lo crea ni elige otro por su cuenta: te
+  pregunta si lo agrega, si usa uno de los existentes o si deja el caso sin ese dato.
 - Antes de actuar lee las reglas del equipo con la herramienta `leer_guia`: `mcp/GUIA.md` (cómo
   registrar y cerrar un caso) y la guía de estilo de los mensajes a clientes. Editar esos archivos
   cambia el comportamiento de todos los asistentes, sin tocar código.
@@ -545,15 +550,17 @@ casos de soporte.
 ## Importar una hoja de cálculo
 
 **Casos > Importar** acepta `.xlsx` o `.csv` con una fila de encabezados. Reconoce las columnas
-Fecha, Empresa, Descripción, Estado, Responsable y Observación; solo Empresa y Descripción son
+Fecha, Hora, Empresa, Descripción, Estado, Responsable y Observación; solo Empresa y Descripción son
 obligatorias.
 
 Para armar la hoja desde cero, el mismo diálogo tiene **Descargar plantilla**: un Excel con esas
 columnas listas para llenar, que evita los errores de formato más comunes:
 
 - La columna Fecha es de tipo fecha, así que el día y el mes no se confunden.
+- La columna Hora es de tipo hora y es opcional. Al importar una hoja propia también se acepta
+  escrita como texto ("14:35", "2:35 p. m.") o dentro de la celda de la fecha.
 - Estado se elige de una lista (Pendiente, Resuelto, Sin resolver).
-- Responsable ofrece las personas activas del sistema y "Cliente"; también admite un nombre nuevo.
+- Responsable ofrece los responsables activos y "Cliente"; también admite un nombre nuevo.
 - Cada encabezado tiene una nota con lo que va en la columna, y la hoja "Instrucciones" resume las
   reglas.
 
@@ -562,8 +569,8 @@ Cómo se importa:
 - Primero muestra una vista previa: cuántos casos entran, cuántos ya existen y las primeras filas.
 - Un caso con la misma fecha, empresa y descripción que uno existente se omite, así que importar dos
   veces el mismo archivo no duplica.
-- Los responsables que no existen se crean como personas sin acceso. Para que inicien sesión, ponles
-  contraseña en **Configuración > Usuarios**.
+- Los responsables que no existen se agregan a la lista de **Configuración > Responsables**. No se
+  crean usuarios: un responsable es solo un nombre.
 - "Cliente" como responsable marca el caso como a cargo del cliente.
 - Si las fechas están escritas como texto, elige el orden (mes/día/año o día/mes/año) antes de
   importar.
@@ -578,9 +585,16 @@ incompleto.
   quien registra, por defecto es hoy y no puede ser futura. La *fecha de registro* es el momento en
   que se creó el caso en el sistema: la pone el servidor y no se edita. Los filtros y el dashboard
   usan la primera; el SLA cuenta desde la segunda.
+- **Hora del caso.** Opcional: la hora en que el cliente lo reportó, por ejemplo la de su mensaje. Un
+  caso sin hora queda solo con su fecha. Se escribe al registrar el caso o en su detalle, y la IA la
+  toma de la captura cuando se ve.
 - **Estados.** Sin resolver, Pendiente y Resuelto. Un caso nuevo empieza en Pendiente.
-- **Responsable.** Un usuario, "Cliente" o nadie. Quien registra el caso queda como responsable si no
-  elige otro.
+- **Responsable.** Quien atiende el caso: una persona de la lista de responsables, "Cliente" o nadie.
+  La lista es un catálogo de nombres aparte de los usuarios, porque quien atiende un caso no siempre
+  usa el sistema. Un usuario puede estar enlazado a un responsable (**Configuración > Usuarios**):
+  los casos que registra quedan a su nombre si no elige otro, y "Míos" en Avisos le muestra los
+  suyos. Un responsable inactivo conserva sus casos y deja de ofrecerse para los nuevos; solo se
+  puede eliminar a quien no tiene casos.
 - **Fecha límite.** Hora de registro más las horas del SLA de la prioridad, en horas corridas. Sin
   prioridad no hay fecha límite. Un caso abierto cuya fecha límite pasó está *vencido*.
 - **Promesa de entrega.** Fecha opcional en que se le prometió al cliente tener el caso resuelto.

@@ -21,6 +21,7 @@ import {
   pdfSafe,
   toDateOnly,
   toStatus,
+  toTimeOnly,
 } from './transfer.service';
 import type { FilterNames } from './transfer.service';
 
@@ -110,9 +111,42 @@ describe('spreadsheet import parsing', () => {
   });
 });
 
+describe('toTimeOnly', () => {
+  it('reads a time cell of Excel, which arrives as a date on its day zero', () => {
+    expect(toTimeOnly(new Date('1899-12-30T14:35:00.000Z'))).toBe('14:35');
+    expect(toTimeOnly(new Date('1899-12-30T00:00:00.000Z'))).toBe('00:00');
+    // 14:35 as the sum of fractions gives it: a hair before the minute.
+    expect(toTimeOnly(new Date('1899-12-30T14:34:59.999Z'))).toBe('14:35');
+  });
+
+  it('reads the part of a day gone by, alone or after the day of a date', () => {
+    expect(toTimeOnly(0.5)).toBe('12:00');
+    expect(toTimeOnly((14 * 60 + 35) / 1440)).toBe('14:35');
+    expect(toTimeOnly(45000.25)).toBe('06:00');
+    expect(toTimeOnly(0)).toBe('00:00');
+  });
+
+  it('reads a time written as text, on either clock', () => {
+    expect(toTimeOnly('14:35')).toBe('14:35');
+    expect(toTimeOnly(' 9:05 ')).toBe('09:05');
+    expect(toTimeOnly('14:35:20')).toBe('14:35');
+    expect(toTimeOnly('14h35')).toBe('14:35');
+    expect(toTimeOnly('2:35 PM')).toBe('14:35');
+    expect(toTimeOnly('2:35 p. m.')).toBe('14:35');
+    expect(toTimeOnly('12:10 am')).toBe('00:10');
+    expect(toTimeOnly('12:10 pm')).toBe('12:10');
+  });
+
+  it('gives nothing for an empty cell or for what is not a time of day', () => {
+    for (const value of [null, undefined, '', '   ', 'por la tarde', '25:00', '14:60', '13:00 pm', '0:30 am', -0.5, new Date('x')]) {
+      expect(toTimeOnly(value)).toBeNull();
+    }
+  });
+});
+
 describe('spreadsheet import', () => {
   const user: AuthUser = { id: 1, username: 'admin', name: 'Admin' };
-  const people = [{ id: 3, name: 'Ana', username: 'ana' }];
+  const people = [{ id: 3, name: 'Ana' }];
   const csv = (...lines: string[]): { buffer: Buffer; originalname: string } => ({
     buffer: Buffer.from(lines.join('\n'), 'utf8'),
     originalname: 'casos.csv',
@@ -122,7 +156,7 @@ describe('spreadsheet import', () => {
   it('stores each row with the day of the case as its last activity and with its search keys', async () => {
     const db = {
       ticket: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({}) },
-      user: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn() },
+      assignee: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn() },
     };
     const sheet = csv(HEADERS, '7/27/2023,CORPORACIÓN Ñandú,No abre la Facturación,Pendiente,Ana,Se REINICIÓ el servicio');
 
@@ -134,6 +168,7 @@ describe('spreadsheet import', () => {
     expect(db.ticket.create).toHaveBeenCalledWith({
       data: {
         date: day('2023-07-27'),
+        time: null,
         company: 'CORPORACIÓN Ñandú',
         description: 'No abre la Facturación',
         searchText: 'corporacion nandu no abre la facturacion',
@@ -145,24 +180,64 @@ describe('spreadsheet import', () => {
         notes: { create: { text: 'Se REINICIÓ el servicio', searchText: 'se reinicio el servicio', createdAt: midday } },
       },
     });
-    expect(db.user.create).not.toHaveBeenCalled();
+    expect(db.assignee.create).not.toHaveBeenCalled();
   });
 
-  it('creates the people it does not know and leaves a case of the client without a person', async () => {
+  // A name is all a responsible has: nobody becomes a user of the app by being named in a sheet.
+  it('adds the responsibles it does not know and leaves a case of the client without a person', async () => {
     const db = {
       ticket: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({}) },
-      user: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn().mockResolvedValue({ id: 9 }) },
+      assignee: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn().mockResolvedValue({ id: 9 }) },
     };
     const sheet = csv(HEADERS, '7/27/2023,ACME,No imprime,Resuelto,José Pérez,', '7/28/2023,ACME,No abre,Sin resolver,CLIENTE,');
 
     const result = await serviceOn(db).import(sheet, { dryRun: false, dateOrder: 'mdy' }, user);
 
     expect(result.newPeople).toEqual(['José Pérez']);
-    expect(db.user.create).toHaveBeenCalledWith({ data: { username: 'jose.perez', name: 'José Pérez' } });
+    expect(db.assignee.create.mock.calls).toEqual([[{ data: { name: 'José Pérez' } }]]);
     expect(db.ticket.create.mock.calls).toMatchObject([
       [{ data: { company: 'ACME', description: 'No imprime', assigneeId: 9, assignedToClient: false } }],
       [{ data: { company: 'ACME', description: 'No abre', assigneeId: null, assignedToClient: true } }],
     ]);
+  });
+
+  // People type a name with and without capitals or accents from one row to the next.
+  it('adds a person once however the sheet spells the name, as it is first written, and knows the ones it has', async () => {
+    const db = {
+      ticket: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({}) },
+      assignee: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn().mockResolvedValue({ id: 9 }) },
+    };
+    const sheet = csv(HEADERS, '7/27/2023,ACME,Uno,Pendiente,José Pérez,', '7/27/2023,ACME,Dos,Pendiente,jose perez,', '7/27/2023,ACME,Tres,Pendiente,JOSÉ  PÉREZ,', '7/27/2023,ACME,Cuatro,Pendiente,ANA,');
+
+    const result = await serviceOn(db).import(sheet, { dryRun: false, dateOrder: 'mdy' }, user);
+
+    expect(result.newPeople).toEqual(['José Pérez']);
+    expect(db.assignee.create.mock.calls).toEqual([[{ data: { name: 'José Pérez' } }]]);
+    expect(db.ticket.create.mock.calls.map(([call]: [{ data: { assigneeId: number | null } }]) => call.data.assigneeId)).toEqual([9, 9, 9, 3]);
+  });
+
+  it('takes the time of a case from its own column or from the date cell, and from nowhere else', async () => {
+    const db = {
+      ticket: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({}) },
+      assignee: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn() },
+    };
+    const sheet = csv(
+      'Fecha,Hora,Empresa,Descripción',
+      '27/07/2023,2:35 pm,ACME,Con hora en su columna',
+      // The date is repeated from the row above; the time is not.
+      ',,ACME,Sin hora',
+      '28/07/2023,no sé,ACME,Con algo que no es una hora',
+    );
+
+    const result = await serviceOn(db).import(sheet, { dryRun: false, dateOrder: 'dmy' }, user);
+
+    expect(result.columns.time).toBe('Hora');
+    expect(result.sample.map((row) => [row.date, row.time])).toEqual([
+      ['2023-07-27', '14:35'],
+      ['2023-07-27', null],
+      ['2023-07-28', null],
+    ]);
+    expect(db.ticket.create.mock.calls.map(([call]: [{ data: { time: string | null } }]) => call.data.time)).toEqual(['14:35', null, null]);
   });
 
   it('previews without writing: repeats the date above, skips rows already stored and incomplete rows', async () => {
@@ -171,7 +246,7 @@ describe('spreadsheet import', () => {
         findMany: jest.fn().mockResolvedValue([{ date: day('2023-07-27'), company: 'Acme', description: 'no ABRE la facturación' }]),
         create: jest.fn(),
       },
-      user: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn() },
+      assignee: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn() },
     };
     const sheet = csv(
       HEADERS,
@@ -185,10 +260,10 @@ describe('spreadsheet import', () => {
 
     expect(result).toMatchObject({ dryRun: true, totalRows: 4, skippedEmpty: 1, duplicates: 2, toCreate: 1, newPeople: ['Luis'] });
     expect(result.sample).toEqual([
-      { date: '2023-07-27', company: 'ACME', description: 'No imprime', status: 'RESOLVED', assignee: 'Luis', toClient: false, note: 'Se cambió el cable' },
+      { date: '2023-07-27', time: null, company: 'ACME', description: 'No imprime', status: 'RESOLVED', assignee: 'Luis', toClient: false, note: 'Se cambió el cable' },
     ]);
     expect(db.ticket.create).not.toHaveBeenCalled();
-    expect(db.user.create).not.toHaveBeenCalled();
+    expect(db.assignee.create).not.toHaveBeenCalled();
   });
 });
 
@@ -197,12 +272,12 @@ describe('spreadsheet import', () => {
 describe('import template', () => {
   const user: AuthUser = { id: 1, username: 'admin', name: 'Admin' };
   const people = [
-    { id: 3, name: 'Ana', username: 'ana' },
-    { id: 4, name: 'Luis Ñáñez', username: 'luis' },
+    { id: 3, name: 'Ana' },
+    { id: 4, name: 'Luis Ñáñez' },
   ];
-  const database = (): { ticket: { findMany: jest.Mock; create: jest.Mock }; user: { findMany: jest.Mock; create: jest.Mock } } => ({
+  const database = (): { ticket: { findMany: jest.Mock; create: jest.Mock }; assignee: { findMany: jest.Mock; create: jest.Mock } } => ({
     ticket: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
-    user: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn() },
+    assignee: { findMany: jest.fn().mockResolvedValue(people), create: jest.fn() },
   });
   const open = async (file: Buffer): Promise<ExcelJS.Workbook> => {
     const workbook = new ExcelJS.Workbook();
@@ -219,7 +294,7 @@ describe('import template', () => {
 
     expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Casos', 'Listas', 'Instrucciones']);
     const headers = (workbook.worksheets[0].getRow(1).values as unknown[]).slice(1);
-    expect(headers).toEqual(['Fecha', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Observación']);
+    expect(headers).toEqual(['Fecha', 'Hora', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Observación']);
     expect(TEMPLATE_COLUMNS.map((column) => column.header)).toEqual(headers);
     expect(TEMPLATE_COLUMNS.filter((column) => column.required).map((column) => column.header)).toEqual(['Empresa', 'Descripción']);
   });
@@ -233,6 +308,7 @@ describe('import template', () => {
 
     expect(result.columns).toEqual({
       date: 'Fecha',
+      time: 'Hora',
       company: 'Empresa',
       description: 'Descripción',
       status: 'Estado',
@@ -249,17 +325,18 @@ describe('import template', () => {
     const workbook = await open(await service.template());
     const sheet = workbook.worksheets[0];
     // Day 3 of month 4: read as a date cell it cannot be taken for March 4th, whatever order is chosen.
-    sheet.addRow([day('2026-04-03'), 'ACME', 'No imprime', 'Sin resolver', 'Luis Ñáñez', 'Se cambió el cable']);
-    sheet.addRow([null, 'ACME', 'No abre', 'Resuelto', 'Cliente', null]);
-    sheet.addRow([null, 'Beta', 'Pide una capacitación', null, null, null]);
+    // The time as Excel stores it when a person types 14:35 in the cell: the part of the day gone by.
+    sheet.addRow([day('2026-04-03'), (14 * 60 + 35) / 1440, 'ACME', 'No imprime', 'Sin resolver', 'Luis Ñáñez', 'Se cambió el cable']);
+    sheet.addRow([null, null, 'ACME', 'No abre', 'Resuelto', 'Cliente', null]);
+    sheet.addRow([null, null, 'Beta', 'Pide una capacitación', null, null, null]);
 
     const result = await service.import(await asUpload(workbook), { dryRun: true, dateOrder: 'mdy' }, user);
 
     expect(result).toMatchObject({ totalRows: 3, skippedEmpty: 0, toCreate: 3, newPeople: [] });
     expect(result.sample).toEqual([
-      { date: '2026-04-03', company: 'ACME', description: 'No imprime', status: 'UNRESOLVED', assignee: 'Luis Ñáñez', toClient: false, note: 'Se cambió el cable' },
-      { date: '2026-04-03', company: 'ACME', description: 'No abre', status: 'RESOLVED', assignee: 'Cliente', toClient: true, note: null },
-      { date: '2026-04-03', company: 'Beta', description: 'Pide una capacitación', status: 'PENDING', assignee: null, toClient: false, note: null },
+      { date: '2026-04-03', time: '14:35', company: 'ACME', description: 'No imprime', status: 'UNRESOLVED', assignee: 'Luis Ñáñez', toClient: false, note: 'Se cambió el cable' },
+      { date: '2026-04-03', time: null, company: 'ACME', description: 'No abre', status: 'RESOLVED', assignee: 'Cliente', toClient: true, note: null },
+      { date: '2026-04-03', time: null, company: 'Beta', description: 'Pide una capacitación', status: 'PENDING', assignee: null, toClient: false, note: null },
     ]);
   });
 
@@ -268,21 +345,23 @@ describe('import template', () => {
     const workbook = await open(await serviceOn(db).template());
     const [sheet, lists] = workbook.worksheets;
 
-    // The people offered are the active ones.
-    expect(db.user.findMany).toHaveBeenCalledWith({ where: { active: true }, orderBy: { name: 'asc' }, select: { name: true } });
+    // The responsibles offered are the active ones.
+    expect(db.assignee.findMany).toHaveBeenCalledWith({ where: { active: true }, orderBy: { name: 'asc' }, select: { name: true } });
     expect((lists.getColumn(1).values as unknown[]).slice(1)).toEqual(['Cliente', 'Ana', 'Luis Ñáñez']);
     expect(lists.state).toBe('hidden');
 
     for (const row of [2, TEMPLATE_ROWS + 1]) {
       expect(sheet.getCell(`A${row}`).dataValidation).toMatchObject({ type: 'date', operator: 'between', showErrorMessage: true });
-      expect(sheet.getCell(`D${row}`).dataValidation).toMatchObject({ type: 'list', formulae: ['"Pendiente,Resuelto,Sin resolver"'], showErrorMessage: true });
+      expect(sheet.getCell(`B${row}`).dataValidation).toMatchObject({ type: 'decimal', operator: 'between', showErrorMessage: true });
+      expect(sheet.getCell(`E${row}`).dataValidation).toMatchObject({ type: 'list', formulae: ['"Pendiente,Resuelto,Sin resolver"'], showErrorMessage: true });
       // A name that is not in the list is allowed: the import creates that person.
-      const person = sheet.getCell(`E${row}`).dataValidation;
+      const person = sheet.getCell(`F${row}`).dataValidation;
       expect(person).toMatchObject({ type: 'list', formulae: ['Listas!$A$1:$A$3'] });
       expect(person.showErrorMessage).toBeFalsy();
     }
     expect(sheet.getCell(`A${TEMPLATE_ROWS + 2}`).dataValidation).toBeUndefined();
     expect(sheet.getColumn(1).numFmt).toBe('dd/mm/yyyy');
+    expect(sheet.getColumn(2).numFmt).toBe('hh:mm');
   });
 
   // Set cell by cell, ExcelJS writes ranges that overlap ("A10:A2001" next to "A2:A2001"), and Excel
@@ -291,7 +370,7 @@ describe('import template', () => {
     const sheet = buildTemplate(['Ana']).worksheets[0];
     const rules = (sheet as unknown as { dataValidations: { model: Record<string, unknown> } }).dataValidations.model;
 
-    expect(Object.keys(rules).sort()).toEqual([`A2:A${TEMPLATE_ROWS + 1}`, `D2:D${TEMPLATE_ROWS + 1}`, `E2:E${TEMPLATE_ROWS + 1}`]);
+    expect(Object.keys(rules).sort()).toEqual([`A2:A${TEMPLATE_ROWS + 1}`, `B2:B${TEMPLATE_ROWS + 1}`, `E2:E${TEMPLATE_ROWS + 1}`, `F2:F${TEMPLATE_ROWS + 1}`]);
   });
 
   it('words each status the way the import reads it back', () => {
