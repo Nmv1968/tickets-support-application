@@ -30,7 +30,12 @@ Sigue la sección [Desarrollo en local](README.md#desarrollo-en-local) del READM
    ```bash
    cd api && npx tsc --noEmit -p tsconfig.json && npm test
    cd web && npx ng build && npm run test:ci
+   cd mcp && npm test
    ```
+
+   Si el cambio toca algo que una persona hace en la pantalla, corre también las pruebas de extremo
+   a extremo (ver [Pruebas](README.md#pruebas)): `cd e2e && npm run stack:up && npm test`, y al
+   terminar `npm run stack:down`.
 
 4. Abre un pull request que explique qué cambia y por qué. Si cambia algo que se ve, agrega una
    captura (con datos inventados).
@@ -96,6 +101,26 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   ruta, un parámetro o un campo que el servidor o el API simulado usan: al cambiar el API, ajusta
   también el simulado. Antes de publicar, pruébalo además contra un API de desarrollo, nunca contra
   una instalación con casos reales.
+
+### Pruebas de extremo a extremo (`e2e/`)
+
+- Playwright con Chromium, contra la aplicación construida con Docker Compose bajo el proyecto
+  `support-e2e` (`scripts/stack.mjs`). Nunca contra una instalación con casos reales, y nunca con el
+  servicio `backup` encendido.
+- Cada prueba crea sus propios datos, con nombres únicos (el `uid` de `support/fixtures.ts`), a
+  través del API o de la pantalla. Ninguna depende de otra ni del orden: corren en paralelo sobre la
+  misma base de datos. Lo que se guarda por usuario (columnas, filtros a la vista) se prueba con un
+  usuario propio de la prueba (`newUser` y `pageAs`).
+- Los selectores son los que usa una persona: roles, etiquetas y textos en español de las
+  plantillas. Los desplegables se eligen con `chooseOption` de `support/ui.ts`.
+- Sin esperas fijas: se espera lo que muestra la pantalla o la respuesta del API.
+
+### Integración continua
+
+Cada push y cada pull request a `main` corre `.github/workflows/ci.yml`: el API (tipos y Jest), la
+web (tipos, Karma y compilación), el servidor MCP y las pruebas de extremo a extremo. Si fallan las de extremo a extremo, descarga el
+artefacto `playwright-report` de la ejecución y ábrelo con `npx playwright show-report` (las
+trazas, con `npx playwright show-trace`).
 
 ### Datos de prueba
 

@@ -13,3 +13,8 @@ api/assets/*.local.md
 .claude/
 # Editor settings of whoever works on the project. web/.vscode is the one the project ships.
 /.vscode/
+# End-to-end tests (e2e/): secrets of the throwaway stack, saved sessions and the results of each run.
+e2e/.stack.env
+e2e/.auth/
+e2e/test-results/
+e2e/playwright-report/

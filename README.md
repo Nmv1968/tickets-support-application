@@ -243,6 +243,35 @@ cd mcp && npm test            # servidor MCP de los asistentes: node:test contra
 
 `cd web && npm test` deja las pruebas de la web en modo observación.
 
+Las pruebas de extremo a extremo (`e2e/`, con [Playwright](https://playwright.dev/) en Chromium)
+recorren la aplicación como lo haría una persona: ingresar, registrar un caso y crear su empresa,
+editarlo, archivarlo y eliminarlo, elegir columnas, los tipos de soporte, la importación y los
+reportes del dashboard. Corren contra una instalación desechable que se construye con Docker
+Compose desde el código del repositorio, con su propio proyecto (`support-e2e`), sus propios
+volúmenes y su propio puerto (4321). No tocan la instalación con Docker de la máquina ni sus
+respaldos: el servicio `backup` nunca se enciende ahí.
+
+```bash
+cd e2e
+npm install
+npx playwright install chromium   # una sola vez
+npm run stack:up                  # construye db, api y web y espera a que el API responda
+npm test                          # todas las pruebas; npm run test:ui para verlas paso a paso
+npm run stack:down                # borra contenedores, volúmenes, red e imágenes de support-e2e
+```
+
+`stack:up` genera `e2e/.stack.env` con contraseñas aleatorias y el puerto, y `stack:down` lo borra.
+Necesitan Docker, como la instalación. Para usar otro puerto: `E2E_PORT=4322 npm run stack:up` (en
+PowerShell: `$env:E2E_PORT=4322; npm run stack:up`). Se niega a usar el proyecto
+`support-tickets` o el puerto 4300, los de una instalación real. Si algo falla,
+`npm run stack:logs` muestra lo que escribieron sus servicios y `npm run report` abre el informe
+de la última corrida.
+
+En GitHub, cada push y cada pull request a `main` pasa por
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml): las pruebas del API, de la web y del
+servidor MCP, la revisión de tipos, la compilación de la web y las pruebas de extremo a extremo.
+Cuando estas fallan, el informe de Playwright y sus trazas quedan como artefacto de la ejecución.
+
 ### Cambios en la base de datos
 
 Después de editar `api/prisma/schema.prisma`, con la base de desarrollo encendida:
@@ -824,6 +853,7 @@ mcp/                       servidor MCP y guía para asistentes
 skills/                    skill para asistentes de IA (formato Agent Skills)
 backup/                    contenedor de respaldos
 devdb/                     PostgreSQL local para desarrollo
+e2e/                       pruebas de extremo a extremo (Playwright) y su instalación desechable
 docker-compose.yml
 ```
 

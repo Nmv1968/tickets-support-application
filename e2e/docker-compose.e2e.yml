@@ -1,0 +1,17 @@
+# Laid over the docker-compose.yml of the repository for the throwaway stack of the end-to-end
+# tests. Used only by scripts/stack.mjs, always with its own project name (support-e2e).
+services:
+  # Nothing of this stack comes back by itself after a restart of Docker: it lives for a test run.
+  db:
+    restart: "no"
+  api:
+    restart: "no"
+  web:
+    restart: "no"
+    # Reachable from this machine only: its admin password sits in a plain file next to the tests.
+    ports: !override
+      - "127.0.0.1:${WEB_PORT}:80"
+  # Never part of this stack, not even by mistake: it writes into the backups folder of the real
+  # installation (BACKUP_DIR). A profile nobody enables keeps `up` from starting it.
+  backup:
+    profiles: ["never"]
