@@ -73,7 +73,8 @@ describe('companies catalog', () => {
       const { db, controller } = setup();
 
       expect(await controller.create({ name: '  Beta   Sur ' })).toEqual({ id: 9, name: 'Beta Sur', active: true, tickets: 0 });
-      expect(db.company.create).toHaveBeenCalledWith({ data: { name: 'Beta Sur' }, include: { _count: { select: { tickets: true } } } });
+      // With the key the list of cases orders the companies by.
+      expect(db.company.create).toHaveBeenCalledWith({ data: { name: 'Beta Sur', sortKey: 'beta sur' }, include: { _count: { select: { tickets: true } } } });
     });
 
     it.each([undefined, null, '', '   '])('needs a name: %p is refused', async (name) => {
@@ -129,7 +130,17 @@ describe('companies catalog', () => {
       const { db, controller } = setup();
 
       expect(await controller.update(2, { name: 'Corporacion Nandu' })).toMatchObject({ id: 2, name: 'Corporacion Nandu', tickets: 0 });
-      expect(db.company.update.mock.calls[0][0]).toMatchObject({ where: { id: 2 }, data: { name: 'Corporacion Nandu' } });
+      expect(db.company.update.mock.calls[0][0]).toMatchObject({ where: { id: 2 }, data: { name: 'Corporacion Nandu', sortKey: 'corporacion nandu' } });
+    });
+
+    // The list of cases orders by company by this key: left as it was, the company would keep the
+    // place of its old name.
+    it('gives a renamed company the order key of its new name', async () => {
+      const { db, controller } = setup();
+
+      await controller.update(1, { name: ' Óptica  del Sur ' });
+
+      expect(db.company.update.mock.calls[0][0].data).toEqual({ name: 'Óptica del Sur', sortKey: 'optica del sur', active: undefined });
     });
 
     // The search box matches a key stored on each case, and that key starts with the company's name.
@@ -169,7 +180,7 @@ describe('companies catalog', () => {
       const { db, controller } = setup();
 
       expect(await controller.update(1, { active: false })).toMatchObject({ id: 1, name: 'Acme', active: false, tickets: 3 });
-      expect(db.company.update.mock.calls[0][0].data).toEqual({ name: undefined, active: false });
+      expect(db.company.update.mock.calls[0][0].data).toEqual({ name: undefined, sortKey: undefined, active: false });
       // Nothing to compare the name with, and no search key to redo: neither the others nor the cases are read.
       expect(db.company.findMany).not.toHaveBeenCalled();
       expect(db.ticket.findMany).not.toHaveBeenCalled();
@@ -182,7 +193,7 @@ describe('companies catalog', () => {
 
       await controller.update(1, { name: null, active: null } as unknown as CompanyInput);
 
-      expect(db.company.update.mock.calls[0][0].data).toEqual({ name: undefined, active: undefined });
+      expect(db.company.update.mock.calls[0][0].data).toEqual({ name: undefined, sortKey: undefined, active: undefined });
       expect(db.ticket.update).not.toHaveBeenCalled();
     });
   });

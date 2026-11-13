@@ -63,3 +63,32 @@ describe('the key the migration groups the companies by', () => {
     expect(differences).toEqual([]);
   });
 });
+
+// The list of cases orders the companies by `Company.sortKey`, which the API writes as
+// `searchKey(name)`. The migration that adds it fills it in SQL for the companies that exist, and a
+// company it gave another key would stand out of its place in the list until it was renamed.
+describe('the key the migration orders the companies by', () => {
+  const migration = (name: string): string => readFileSync(join(__dirname, '../../prisma/migrations', name, 'migration.sql'), 'utf8');
+  const sql = migration('20261114090000_company_sort_key');
+  const listsOf = (text: string): string[] => [...new Set(text.match(/\[(?:\\u[0-9a-f]{4}-?)+\]/g))];
+  const [marks, whitespace] = listsOf(sql);
+  const compact = (text: string): string => text.replace(/\s+/g, '');
+
+  // The lists of the migration that grouped the companies are checked above, character by character, against searchKey.
+  it('is written in plain ASCII, with the two lists of characters of the key the companies were grouped by', () => {
+    expect(sql).toMatch(/^[\x00-\x7f]*$/);
+    expect(listsOf(sql)).toEqual(listsOf(migration('20261113100000_companies_support_types_archive')));
+  });
+
+  it('is filled from the name with the steps of searchKey, in the same order', () => {
+    expect(compact(sql)).toContain(
+      compact(`UPDATE "Company" SET "sortKey" = btrim(regexp_replace(lower(regexp_replace(normalize("name", NFD), '${marks}', '', 'g')), '${whitespace}+', ' ', 'g'));`),
+    );
+    expect(sql).not.toContain('translate(');
+  });
+
+  it('leaves no company without it, and indexes it', () => {
+    expect(compact(sql)).toContain(compact('ALTER TABLE "Company" ALTER COLUMN "sortKey" SET NOT NULL;'));
+    expect(compact(sql)).toContain(compact('CREATE INDEX "Company_sortKey_idx" ON "Company"("sortKey");'));
+  });
+});

@@ -1,14 +1,18 @@
 import { inflateSync } from 'node:zlib';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import PdfPrinter from 'pdfmake';
 import type { AuthUser } from '../common/auth';
+import { CATALOG_LOCK_HOLD_MS, CATALOG_LOCK_TRANSACTION } from '../common/catalog-lock';
 import { searchKey } from '../common/labels';
 import type { PrismaService } from '../prisma.service';
 import type { SettingsService } from '../settings/settings.service';
 import { TicketsService, parseTicketFilters } from '../tickets/tickets.service';
 import type { TicketFilters } from '../tickets/tickets.service';
 import {
+  IMPORT_TRANSACTION,
+  MAX_IMPORT_ROWS,
   PDF_EXPORT_LIMIT,
   RULE_MESSAGE_MAX,
   RULE_TITLE_MAX,
@@ -217,9 +221,13 @@ describe('spreadsheet import', () => {
     const db = {
       // The work of a transaction is done at once, with the database itself as its client.
       $transaction: jest.fn((work: (tx: unknown) => Promise<unknown>): Promise<unknown> => work(db)),
-      /** The lock of a catalog is all the import asks for in plain SQL. */
+      /** The lock of a catalog is what the import asks for in plain SQL... */
       $executeRaw: jest.fn().mockResolvedValue(1),
-      ticket: { findMany: jest.fn().mockResolvedValue(cases), create: jest.fn().mockResolvedValue({}) },
+      /** ...and the ids of its cases, taken from the sequence of the table: from 100 on here. */
+      $queryRaw: jest.fn((_sql: TemplateStringsArray, count: number) => Promise.resolve(Array.from({ length: count }, (_, index) => ({ id: 100 + index })))),
+      ticket: { findMany: jest.fn().mockResolvedValue(cases), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      ticketSupportType: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      ticketNote: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
       assignee: { findMany: jest.fn().mockResolvedValue(people), createManyAndReturn: creating(90) },
       company: { findMany: jest.fn().mockResolvedValue(companies), createManyAndReturn: creating(80) },
       supportType: { findMany: jest.fn().mockResolvedValue(types), createManyAndReturn: creating(70) },
@@ -228,15 +236,28 @@ describe('spreadsheet import', () => {
     };
     return db;
   };
-  /** What the import stored of each case, in order: the fields named. */
-  const stored = (db: ReturnType<typeof database>, ...fields: string[]): unknown[][] =>
-    db.ticket.create.mock.calls.map(([call]: [{ data: Record<string, unknown> }]) => fields.map((field) => call.data[field]));
+  /**
+   * What the import stored of each case, in order: the fields named. `supportTypes` is the ids of
+   * the types the case got, in their order, and `note` the text of its observation.
+   */
+  const stored = (db: ReturnType<typeof database>, ...fields: string[]): unknown[][] => {
+    type Rows = [{ data: Record<string, unknown>[] }][];
+    const rows = (mock: jest.Mock): Record<string, unknown>[] => (mock.mock.calls as Rows).flatMap(([call]) => call.data);
+    const [types, notes] = [rows(db.ticketSupportType.createMany), rows(db.ticketNote.createMany)];
+    return rows(db.ticket.createMany).map((data) =>
+      fields.map((field) => {
+        if (field === 'supportTypes') return types.filter((type) => type.ticketId === data.id).map((type) => type.supportTypeId);
+        if (field === 'note') return notes.find((note) => note.ticketId === data.id)?.text ?? null;
+        return data[field];
+      }),
+    );
+  };
   const nothingAdded = (db: ReturnType<typeof database>): void => {
     expect(db.company.createManyAndReturn).not.toHaveBeenCalled();
     expect(db.assignee.createManyAndReturn).not.toHaveBeenCalled();
     expect(db.supportType.createManyAndReturn).not.toHaveBeenCalled();
     // Nor is there a lock to wait for when there is nothing to add.
-    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.$executeRaw).not.toHaveBeenCalled();
   };
   /** How the import reads a catalog of names, and how it gets back the entries it adds. */
   const named = { select: { id: true, name: true } };
@@ -248,25 +269,32 @@ describe('spreadsheet import', () => {
     await serviceOn(db).import(sheet, plain, user);
 
     const midday = new Date('2023-07-27T12:00:00.000Z');
-    expect(db.ticket.create).toHaveBeenCalledTimes(1);
+    expect(db.ticket.createMany).toHaveBeenCalledTimes(1);
     // Neither `createdAt` nor `updatedAt`: the registration moment is the time of the import.
-    expect(db.ticket.create).toHaveBeenCalledWith({
-      data: {
-        date: day('2023-07-27'),
-        time: null,
-        companyId: 5,
-        description: 'No abre la Facturación',
-        searchText: 'corporacion nandu no abre la facturacion',
-        status: 'PENDING',
-        assigneeId: 3,
-        priority: null,
-        dueAt: null,
-        moduleId: null,
-        createdById: 1,
-        lastActivityAt: midday,
-        notes: { create: { text: 'Se REINICIÓ el servicio', searchText: 'se reinicio el servicio', createdAt: midday } },
-      },
+    expect(db.ticket.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          id: 100,
+          date: day('2023-07-27'),
+          time: null,
+          companyId: 5,
+          description: 'No abre la Facturación',
+          searchText: 'corporacion nandu no abre la facturacion',
+          status: 'PENDING',
+          assigneeId: 3,
+          priority: null,
+          dueAt: null,
+          moduleId: null,
+          createdById: 1,
+          lastActivityAt: midday,
+        },
+      ],
     });
+    // The observation points at the case by the id the case got from the sequence.
+    expect(db.ticketNote.createMany).toHaveBeenCalledWith({
+      data: [{ ticketId: 100, text: 'Se REINICIÓ el servicio', searchText: 'se reinicio el servicio', createdAt: midday }],
+    });
+    expect(db.ticketSupportType.createMany).not.toHaveBeenCalled();
     nothingAdded(db);
   });
 
@@ -334,16 +362,17 @@ describe('spreadsheet import', () => {
       expect(result.unknown).toMatchObject({ companies: ['Beta Sur'], assignees: ['José Pérez'], supportTypes: ['Consulta'] });
       expect(result.created).toEqual({ companies: ['Beta Sur'], assignees: ['José Pérez'], supportTypes: ['Consulta'] });
       // Each one once, under its first spelling, tidied as the catalogs tidy a name.
-      expect(db.company.createManyAndReturn.mock.calls).toEqual([[{ data: [{ name: 'Beta Sur' }], ...named }]]);
+      // With the key the list of cases orders the companies by.
+      expect(db.company.createManyAndReturn.mock.calls).toEqual([[{ data: [{ name: 'Beta Sur', sortKey: 'beta sur' }], ...named }]]);
       // A name is all a responsible has: nobody becomes a user of the app by being named in a sheet.
       expect(db.assignee.createManyAndReturn.mock.calls).toEqual([[{ data: [{ name: 'José Pérez' }], ...named }]]);
       expect(db.supportType.createManyAndReturn.mock.calls).toEqual([[{ data: [{ name: 'Consulta', color: '#64748b' }], ...named }]]);
       expect(stored(db, 'description', 'companyId', 'assigneeId', 'supportTypes')).toEqual([
-        ['Uno', 2, 3, { create: [{ supportTypeId: 11 }] }],
-        ['Dos', 80, 3, undefined],
-        ['Tres', 2, 90, undefined],
-        ['Cuatro', 80, 90, { create: [{ supportTypeId: 70 }] }],
-        ['Cinco', 2, null, { create: [{ supportTypeId: 70 }] }],
+        ['Uno', 2, 3, [11]],
+        ['Dos', 80, 3, []],
+        ['Tres', 2, 90, []],
+        ['Cuatro', 80, 90, [70]],
+        ['Cinco', 2, null, [70]],
       ]);
       expect(result.sample.map((row) => [row.company, row.assignee, row.supportTypes])).toEqual([
         ['ACME', 'Ana', ['Capacitación']],
@@ -363,7 +392,7 @@ describe('spreadsheet import', () => {
 
       expect(without).toMatchObject({ dryRun: true, toCreate: 1, rejected: 4, created: { companies: [], assignees: [], supportTypes: [] } });
       expect(withIt).toMatchObject({ dryRun: true, toCreate: 5, rejected: 0, created: { companies: ['Beta Sur'], assignees: ['José Pérez'], supportTypes: ['Consulta'] } });
-      expect(db.ticket.create).not.toHaveBeenCalled();
+      expect(db.ticket.createMany).not.toHaveBeenCalled();
       nothingAdded(db);
     });
 
@@ -453,9 +482,9 @@ describe('spreadsheet import', () => {
       expect(withoutAdding.unknown.supportTypes).toEqual(['Consulta']);
     });
 
-    // As a person who adds a company by hand: one at a time, and after looking. The catalogs were
-    // read before the sheet was, and someone may have registered "Beta Sur" in the meantime.
-    it('adds what is missing behind the lock of each catalog, and takes what someone registered meanwhile instead of adding it again', async () => {
+    // As a person who adds a company by hand: after looking. The catalogs were read before the
+    // sheet was, and someone may have registered "Beta Sur" in the meantime.
+    it('adds what is missing behind the locks of the catalogs, and takes what someone registered meanwhile instead of adding it again', async () => {
       const db = database();
       // Read again behind the lock, the companies are one more: the one the sheet was going to add, written another way.
       db.company.findMany.mockResolvedValueOnce(companies).mockResolvedValue([...companies, { id: 44, name: 'BETA SUR' }]);
@@ -472,14 +501,26 @@ describe('spreadsheet import', () => {
         ['Cuatro', 44],
         ['Cinco', 2],
       ]);
-      // A transaction per catalog, each with the lock of its own.
-      expect(db.$transaction).toHaveBeenCalledTimes(3);
-      expect(new Set(db.$executeRaw.mock.calls.map(([, key]: unknown[]) => key)).size).toBe(3);
-      // In each, the lock comes first, then the names are read again, and only then is anything added.
+      // One transaction for everything, with the locks of the three catalogs, each once and in their one order.
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(db.$executeRaw.mock.calls.map(([, key]: unknown[]) => key)).toEqual([7301, 7302, 7303]);
+      // The locks come first, then the names are read again, and only then is anything added; the cases come last.
       const moment = (mock: jest.Mock, call: number): number => mock.mock.invocationCallOrder[call];
-      expect(moment(db.$executeRaw, 1)).toBeLessThan(moment(db.assignee.findMany, 1));
+      expect(moment(db.$executeRaw, 2)).toBeLessThan(moment(db.company.findMany, 1));
       expect(moment(db.assignee.findMany, 1)).toBeLessThan(moment(db.assignee.createManyAndReturn, 0));
-      expect(moment(db.assignee.createManyAndReturn, 0)).toBeLessThan(moment(db.ticket.create, 0));
+      expect(moment(db.supportType.createManyAndReturn, 0)).toBeLessThan(moment(db.ticket.createMany, 0));
+    });
+
+    it('takes only the locks of the catalogs it adds to', async () => {
+      const db = database();
+      // Of what the sheet names, only the support type is missing.
+      db.company.findMany.mockResolvedValue([...companies, { id: 44, name: 'Beta Sur' }]);
+      db.assignee.findMany.mockResolvedValue([...people, { id: 45, name: 'José Pérez' }]);
+
+      const result = await serviceOn(db).import(sheet, adding, user);
+
+      expect(result.created).toEqual({ companies: [], assignees: [], supportTypes: ['Consulta'] });
+      expect(db.$executeRaw.mock.calls.map(([, key]: unknown[]) => key)).toEqual([7302]);
     });
 
     it('is listed among the first twenty, and counted with all the others', async () => {
@@ -532,7 +573,7 @@ describe('spreadsheet import', () => {
 
     expect(result).toMatchObject({ duplicates: 1, toCreate: 0, rejected: 0 });
     expect(result.unknown.assignees).toEqual([]);
-    expect(db.ticket.create).not.toHaveBeenCalled();
+    expect(db.ticket.createMany).not.toHaveBeenCalled();
     nothingAdded(db);
   });
 
@@ -553,7 +594,7 @@ describe('spreadsheet import', () => {
     expect(result).toMatchObject({ toCreate: 1, rejected: 0 });
     expect(result.unknown).toEqual({ companies: [], assignees: [], supportTypes: [], modules: [], priorities: [], statuses: [] });
     expect(stored(db, 'companyId', 'description', 'priority', 'moduleId', 'assigneeId', 'supportTypes')).toEqual([
-      [5, 'No abre la facturación', 'CRITICAL', 22, 3, { create: [{ supportTypeId: 11 }] }],
+      [5, 'No abre la facturación', 'CRITICAL', 22, 3, [11]],
     ]);
     nothingAdded(db);
   });
@@ -585,10 +626,10 @@ describe('spreadsheet import', () => {
       expect(result.columns.supportTypes).toBe('Tipo de soporte, Otro tipo de soporte, Tipos');
       expect(result).toMatchObject({ toCreate: 4, rejected: 0 });
       expect(stored(db, 'supportTypes')).toEqual([
-        [{ create: [{ supportTypeId: 11 }, { supportTypeId: 12 }] }],
-        [{ create: [{ supportTypeId: 11 }, { supportTypeId: 12 }] }],
-        [{ create: [{ supportTypeId: 12 }, { supportTypeId: 11 }] }],
-        [undefined],
+        [[11, 12]],
+        [[11, 12]],
+        [[12, 11]],
+        [[]],
       ]);
       expect(result.sample[1].supportTypes).toEqual(['Capacitación', 'Falla del sistema']);
     });
@@ -600,7 +641,7 @@ describe('spreadsheet import', () => {
 
       const result = await serviceOn(db).import(sheet, plain, user);
 
-      expect(stored(db, 'description', 'supportTypes')).toEqual([['Uno', { create: [{ supportTypeId: 13 }] }]]);
+      expect(stored(db, 'description', 'supportTypes')).toEqual([['Uno', [13]]]);
       expect(result.rejectedSample).toEqual([{ row: 3, reasons: ['El tipo de soporte «Consulta» no existe'] }]);
     });
 
@@ -730,8 +771,206 @@ describe('spreadsheet import', () => {
         note: 'Se cambió el cable',
       },
     ]);
-    expect(db.ticket.create).not.toHaveBeenCalled();
+    expect(db.ticket.createMany).not.toHaveBeenCalled();
     nothingAdded(db);
+  });
+
+  it('refuses a sheet with more rows than one import stores, before reading any of them, in the preview too', async () => {
+    const rows = (count: number): string[] => Array.from({ length: count }, (_, index) => `7/27/2023,ACME,Caso ${index + 1},,,`);
+
+    await expect(serviceOn(database()).import(csv(HEADERS, ...rows(MAX_IMPORT_ROWS + 1)), { ...plain, dryRun: true }, user)).rejects.toThrow(
+      new BadRequestException(
+        `El archivo tiene ${MAX_IMPORT_ROWS + 1} filas debajo de los encabezados y se pueden importar hasta ${MAX_IMPORT_ROWS} a la vez. Divídelo en varios archivos.`,
+      ),
+    );
+    const db = database();
+    await expect(serviceOn(db).import(csv(HEADERS, ...rows(MAX_IMPORT_ROWS + 1)), plain, user)).rejects.toThrow(BadRequestException);
+    expect(db.ticket.createMany).not.toHaveBeenCalled();
+    // As many as it stores are read.
+    await expect(serviceOn(database()).import(csv(HEADERS, ...rows(MAX_IMPORT_ROWS)), { ...plain, dryRun: true }, user)).resolves.toMatchObject({
+      toCreate: MAX_IMPORT_ROWS,
+    });
+  });
+
+  // A failure halfway used to leave part of the sheet in, with the companies it had added; importing
+  // the file again skipped that part as duplicates, and nobody could tell which rows had gone in.
+  describe('all or nothing', () => {
+    type Row = Record<string, unknown>;
+    type Table = 'company' | 'assignee' | 'supportType' | 'ticket' | 'ticketSupportType' | 'ticketNote';
+    type Tables = Record<Table, Row[]>;
+    const sheet = csv(
+      'Fecha,Empresa,Descripción,Responsable,Tipo de soporte,Observación',
+      '7/27/2023,ACME,Uno,Ana,Capacitación,Se llamó al cliente',
+      '7/27/2023,Beta Sur,Dos,José Pérez,Consulta,',
+      '7/27/2023,ACME,Tres,,,Espera respuesta',
+      '7/27/2023,Beta Sur,Cuatro,Ana,,',
+      '7/27/2023,ACME,Cinco,José Pérez,Consulta,',
+    );
+
+    /**
+     * A database that keeps what is written, as PostgreSQL does: a write outside a transaction is in
+     * at once, and the writes of a transaction are in when its work ends well, none of them when it
+     * fails. `failing` makes the write of that row of that table fail, counted from 1 across the
+     * import: the fourth case of the sheet, say. `events` says where each lock and each write was.
+     */
+    const keeping = (failing?: { table: Table; row: number }) => {
+      const kept: Tables = { company: [...companies], assignee: [...people], supportType: [...types], ticket: [], ticketSupportType: [], ticketNote: [] };
+      const events: string[] = [];
+      const written: Partial<Record<Table, number>> = {};
+      let nextEntry = 80;
+      let nextCase = 100;
+      const insert = (tables: Tables, table: Table, rows: Row[], where: string): void => {
+        events.push(`${where}: ${table}`);
+        for (const row of rows) {
+          written[table] = (written[table] ?? 0) + 1;
+          if (failing?.table === table && failing.row === written[table]) throw new Error(`The database refused row ${failing.row} of ${table}`);
+          tables[table].push(row);
+        }
+      };
+      const clientOf = (tables: Tables, where: string) => {
+        const catalog = (table: 'company' | 'assignee' | 'supportType') => ({
+          findMany: () => Promise.resolve(tables[table].map(({ id, name }) => ({ id, name }))),
+          createManyAndReturn: ({ data }: { data: Row[] }) => {
+            const added: Row[] = data.map((row) => ({ ...row, id: nextEntry++ }));
+            insert(tables, table, added, where);
+            return Promise.resolve(added.map(({ id, name }) => ({ id, name })));
+          },
+        });
+        const many = (table: Table) => ({
+          createMany: ({ data }: { data: Row[] }) => {
+            insert(tables, table, data, where);
+            return Promise.resolve({ count: data.length });
+          },
+        });
+        return {
+          $executeRaw: (_sql: TemplateStringsArray, key: number) => {
+            events.push(`${where}: lock ${key}`);
+            return Promise.resolve(1);
+          },
+          $queryRaw: (_sql: TemplateStringsArray, count: number) => Promise.resolve(Array.from({ length: count }, () => ({ id: nextCase++ }))),
+          company: catalog('company'),
+          assignee: catalog('assignee'),
+          supportType: catalog('supportType'),
+          ticket: {
+            findMany: () => Promise.resolve([]),
+            ...many('ticket'),
+            // One case at a time, as the import stored them before.
+            create: ({ data }: { data: Row }) => {
+              insert(tables, 'ticket', [data], where);
+              return Promise.resolve({});
+            },
+          },
+          ticketSupportType: many('ticketSupportType'),
+          ticketNote: many('ticketNote'),
+          systemModule: { findMany: () => Promise.resolve(modules) },
+          slaPolicy: { findMany: () => Promise.resolve([]) },
+        };
+      };
+      const db = {
+        ...clientOf(kept, 'outside'),
+        $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>): Promise<unknown> => {
+          const pending = structuredClone(kept);
+          events.push('begin');
+          try {
+            const answer = await work(clientOf(pending, 'in'));
+            Object.assign(kept, pending);
+            events.push('commit');
+            return answer;
+          } catch (error) {
+            events.push('rollback');
+            throw error;
+          }
+        }),
+      };
+      return { db, kept, events };
+    };
+    const untouched = (kept: Tables): void => {
+      expect(kept).toEqual({ company: companies, assignee: people, supportType: types, ticket: [], ticketSupportType: [], ticketNote: [] });
+    };
+
+    it('stores nothing when a case fails: neither the cases before it nor what it added to the catalogs', async () => {
+      const { db, kept } = keeping({ table: 'ticket', row: 4 });
+
+      await expect(serviceOn(db).import(sheet, adding, user)).rejects.toThrow('The database refused row 4 of ticket');
+
+      untouched(kept);
+    });
+
+    it('stores nothing when the last write fails: the observations, after every case and its types', async () => {
+      const { db, kept, events } = keeping({ table: 'ticketNote', row: 2 });
+
+      await expect(serviceOn(db).import(sheet, adding, user)).rejects.toThrow('The database refused row 2 of ticketNote');
+
+      untouched(kept);
+      expect(events.at(-1)).toBe('rollback');
+    });
+
+    it('stores everything in one transaction, with the locks of the catalogs taken in it, in their order, before the first entry is added', async () => {
+      const { db, kept, events } = keeping();
+
+      const result = await serviceOn(db).import(sheet, adding, user);
+
+      expect(result).toMatchObject({ toCreate: 5, rejected: 0, created: { companies: ['Beta Sur'], assignees: ['José Pérez'], supportTypes: ['Consulta'] } });
+      expect(events).toEqual([
+        'begin',
+        'in: lock 7301',
+        'in: lock 7302',
+        'in: lock 7303',
+        'in: company',
+        'in: assignee',
+        'in: supportType',
+        'in: ticket',
+        'in: ticketSupportType',
+        'in: ticketNote',
+        'commit',
+      ]);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), IMPORT_TRANSACTION);
+      // In the order of the sheet, each with the ids of what it names and its rows in the other tables.
+      expect(kept.ticket.map((row) => [row.id, row.description, row.companyId, row.assigneeId])).toEqual([
+        [100, 'Uno', 2, 3],
+        [101, 'Dos', 80, 81],
+        [102, 'Tres', 2, null],
+        [103, 'Cuatro', 80, 3],
+        [104, 'Cinco', 2, 81],
+      ]);
+      expect(kept.ticketSupportType).toEqual([
+        { ticketId: 100, supportTypeId: 11 },
+        { ticketId: 101, supportTypeId: 82 },
+        { ticketId: 104, supportTypeId: 82 },
+      ]);
+      expect(kept.ticketNote.map((note) => [note.ticketId, note.text])).toEqual([
+        [100, 'Se llamó al cliente'],
+        [102, 'Espera respuesta'],
+      ]);
+      expect(kept.company.at(-1)).toEqual({ id: 80, name: 'Beta Sur', sortKey: 'beta sur' });
+    });
+
+    // Prisma gives an interactive transaction 5 s unless told otherwise: a sheet of thousands of rows
+    // can take longer on a slow server. And whoever adds a company by hand meanwhile waits for the
+    // lock the import holds: given as long as the import may hold it, and a little more.
+    it('gives its transaction a time limit for a large sheet, which whoever waits for its locks is given too', () => {
+      expect(IMPORT_TRANSACTION.timeout).toBeGreaterThanOrEqual(60_000);
+      expect(IMPORT_TRANSACTION.timeout).toBeLessThanOrEqual(CATALOG_LOCK_HOLD_MS);
+      expect(CATALOG_LOCK_TRANSACTION.timeout).toBeGreaterThan(CATALOG_LOCK_HOLD_MS);
+      expect(IMPORT_TRANSACTION.maxWait).toBeGreaterThan(2_000);
+    });
+
+    it('says in Spanish that nothing was stored when the transaction runs out of time', async () => {
+      const { db, kept } = keeping();
+      db.$transaction.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Transaction already closed: the timeout for this transaction was 120000 ms', {
+          code: 'P2028',
+          clientVersion: Prisma.prismaVersion.client,
+        }),
+      );
+
+      const failure = serviceOn(db).import(sheet, adding, user);
+
+      await expect(failure).rejects.toThrow(ServiceUnavailableException);
+      await expect(failure).rejects.toThrow(/no se guardó nada/);
+      untouched(kept);
+    });
   });
 });
 
@@ -761,7 +1000,7 @@ describe('import template', () => {
   };
   const nothing = { companies: [], people: [], types: [], modules: [] };
   const database = (has: { [K in keyof typeof catalogs]: (typeof catalogs)[K] } = catalogs) => ({
-    ticket: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
+    ticket: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn() },
     assignee: { findMany: jest.fn().mockResolvedValue(has.people), createManyAndReturn: jest.fn() },
     company: { findMany: jest.fn().mockResolvedValue(has.companies), createManyAndReturn: jest.fn() },
     supportType: { findMany: jest.fn().mockResolvedValue(has.types), createManyAndReturn: jest.fn() },
@@ -1273,6 +1512,15 @@ describe('export', () => {
       expect(paragraphs()).toContain('Total: 1   ·   Resueltos: 0   ·   Pendientes: 1   ·   Sin resolver: 0');
     });
 
+    // In the order of the list it was asked from. By company is by the key of its name, as the list orders.
+    it('orders the cases as the list does, by company too', async () => {
+      const db = { ticket: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) } };
+
+      await serviceOn(db).pdf({ sort: 'company', dir: 'desc' });
+
+      expect(db.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: [{ company: { sortKey: 'desc' } }, { id: 'asc' }] }));
+    });
+
     it('says that there are no filters only when there are none, and that the archived cases are not in it', async () => {
       const paragraphs = watchDocument();
       const db = { ticket: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) } };
@@ -1530,7 +1778,7 @@ describe('export', () => {
     ];
     /** A system with the catalogs the cases above use, and the cases given. */
     const database = (storedCases: Record<string, unknown>[]) => ({
-      ticket: { count: jest.fn().mockResolvedValue(storedCases.length), findMany: jest.fn().mockResolvedValue(storedCases), create: jest.fn() },
+      ticket: { count: jest.fn().mockResolvedValue(storedCases.length), findMany: jest.fn().mockResolvedValue(storedCases), createMany: jest.fn() },
       company: { findMany: jest.fn().mockResolvedValue([{ id: 2, name: 'ACME' }]), createManyAndReturn: jest.fn() },
       assignee: { findMany: jest.fn().mockResolvedValue([{ id: 3, name: 'Ana' }]), createManyAndReturn: jest.fn() },
       supportType: {
@@ -1555,7 +1803,7 @@ describe('export', () => {
 
       expect(result).toMatchObject({ totalRows: 2, duplicates: 2, toCreate: 0, rejected: 0 });
       expect(result.created).toEqual({ companies: [], assignees: [], supportTypes: [] });
-      expect(db.ticket.create).not.toHaveBeenCalled();
+      expect(db.ticket.createMany).not.toHaveBeenCalled();
       for (const catalog of [db.company, db.assignee, db.supportType]) expect(catalog.createManyAndReturn).not.toHaveBeenCalled();
     });
 

@@ -1,12 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Priority, Prisma, TicketStatus } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import PdfPrinter from 'pdfmake';
 import type { TDocumentDefinitions, TableCell } from 'pdfmake/interfaces';
 import { ASSIGNEE_NAME_MAX, meansNobody } from '../assignees/assignees.controller';
 import type { AuthUser } from '../common/auth';
-import { withCatalogLock } from '../common/catalog-lock';
-import type { NamedCatalog } from '../common/catalog-lock';
+import { CATALOG_LOCK_HOLD_MS, withCatalogLock } from '../common/catalog-lock';
 import {
   PRIORITIES,
   PRIORITY_LABEL,
@@ -112,6 +111,28 @@ export const NEW_SUPPORT_TYPE_COLOR = '#64748b';
 
 /** Rows of the template that carry the cell checks. Rows below them import the same, without the checks. */
 export const TEMPLATE_ROWS = 2_000;
+
+/**
+ * Rows a sheet may have below its headers, blank ones included. The cases of a sheet are stored in
+ * one transaction, and a transaction needs a time limit; the size of the file is no bound for it:
+ * the 20 MB the upload admits hold a million short rows of CSV. It is as many cases as an export to
+ * Excel carries (`XLSX_EXPORT_LIMIT`), so a whole export can be imported back.
+ */
+export const MAX_IMPORT_ROWS = 20_000;
+
+/**
+ * Time limits of the transaction that stores an import. Prisma gives an interactive transaction 5 s
+ * by default, and a large sheet can take longer than that, above all on a slow server: with the
+ * default, such an import would fail at its end every time, having stored nothing. Measured on
+ * PostgreSQL 17 on a development machine, the heaviest sheet there can be, `MAX_IMPORT_ROWS` rows
+ * each with an observation, two support types and a priority, adding 500 companies, took under
+ * 5 s from upload to answer, because the cases are written in a few statements for the whole sheet
+ * (see `storeCases`); one `create` per case took 5 s for 2,000. The limit is some twenty times
+ * that, for a slow disk or a busy server. It is `CATALOG_LOCK_HOLD_MS` because the transaction
+ * holds the locks of the catalogs it adds to, and whoever waits for them is given that long.
+ * `maxWait` is the wait for a free connection of the pool.
+ */
+export const IMPORT_TRANSACTION = { maxWait: 10_000, timeout: CATALOG_LOCK_HOLD_MS } as const;
 
 /** Sheet of the template with what the system has: the lists of "Casos" read it, and so does the person. */
 export const TEMPLATE_VALUES_SHEET = 'Valores del sistema';
@@ -847,6 +868,63 @@ export function renderPdf(definition: TDocumentDefinitions): Promise<Buffer> {
   });
 }
 
+/** How the cases of an import get the ids of what they name, and the deadline of their priority. */
+interface CaseLinks {
+  company: (name: string) => number;
+  assignee: (name: string) => number;
+  supportType: (name: string) => number;
+  /** By the full name of the module: "Ventas > Facturas". */
+  module: (fullName: string) => number | null;
+  /** Hours the SLA gives a priority, or null when it gives none. */
+  slaHours: (priority: Priority) => number | null;
+}
+
+/**
+ * Stores the cases of an import in `tx`: three statements for the whole sheet, the cases, their
+ * support types and their observations, where one `create` per case took several for each. A case
+ * with support types or an observation cannot go in a `createMany` with them, so its rows in those
+ * tables point at it by an id it gets beforehand: one taken from the sequence of the table, in a
+ * single query, the same way the database numbers a case it is given without one. The ids go to
+ * the cases in the order of the sheet, so their codes follow it, as they did case by case.
+ */
+async function storeCases(tx: Prisma.TransactionClient, rows: ParsedRow[], createdById: number, links: CaseLinks): Promise<void> {
+  const reserved = await tx.$queryRaw<{ id: number }[]>`
+    SELECT nextval(pg_get_serial_sequence('"Ticket"', 'id'))::int AS id FROM generate_series(1, ${rows.length}::int)`;
+  const ids = reserved.map((row) => row.id).sort((a, b) => a - b);
+  if (ids.length !== rows.length) throw new Error(`The import reserved ${ids.length} ids for ${rows.length} cases`);
+  // As in a case registered by hand, the deadline of the priority runs from the registration: from now.
+  const now = new Date();
+  // Midday UTC keeps the calendar day of the case stable in any time zone.
+  const reportedAt = (row: ParsedRow): Date => new Date(`${row.date}T12:00:00.000Z`);
+
+  await tx.ticket.createMany({
+    // The registration moment (`createdAt`) is left to the database: it is now, the time of the import.
+    data: rows.map((row, index) => ({
+      id: ids[index],
+      date: parseDateOnly(row.date),
+      time: row.time,
+      companyId: links.company(row.company),
+      description: row.description,
+      searchText: ticketSearchKey(row.company, row.description),
+      status: row.status,
+      assigneeId: row.assignee ? links.assignee(row.assignee) : null,
+      priority: row.priority,
+      dueAt: slaDueAt(now, row.priority ? links.slaHours(row.priority) : null),
+      moduleId: row.module ? links.module(row.module) : null,
+      createdById,
+      // Last activity is the day of the case, so old open cases show up as forgotten.
+      ...activityStamp(reportedAt(row)),
+    })),
+  });
+  const supportTypes = rows.flatMap((row, index) => row.supportTypes.map((type) => ({ ticketId: ids[index], supportTypeId: links.supportType(type) })));
+  if (supportTypes.length) await tx.ticketSupportType.createMany({ data: supportTypes });
+  // The sheet does not date its observations; the day of the case is the closest known date.
+  const notes = rows.flatMap((row, index) =>
+    row.note ? [{ ticketId: ids[index], text: row.note, searchText: noteSearchKey(row.note), createdAt: reportedAt(row) }] : [],
+  );
+  if (notes.length) await tx.ticketNote.createMany({ data: notes });
+}
+
 @Injectable()
 export class TransferService {
   constructor(
@@ -917,6 +995,12 @@ export class TransferService {
     let duplicates = 0;
     let lastDate = formatDateOnly(todayDateOnly());
     const dataRows = table.slice(headerIndex + 1);
+    // Refused in the preview too: it is where a person learns that the file has to be split.
+    if (dataRows.length > MAX_IMPORT_ROWS) {
+      throw new BadRequestException(
+        `El archivo tiene ${dataRows.length} filas debajo de los encabezados y se pueden importar hasta ${MAX_IMPORT_ROWS} a la vez. Divídelo en varios archivos.`,
+      );
+    }
 
     for (const { number, cells } of dataRows) {
       const at = (key: ColumnKey): unknown => (positions[key].length ? cells[positions[key][0]] : null);
@@ -1035,84 +1119,86 @@ export class TransferService {
       created: { companies: companies.toCreate, assignees: people.toCreate, supportTypes: types.toCreate },
       sample: rows.slice(0, 5),
     };
-    if (options.dryRun) return result;
-
-    // What the catalogs lacked joins them first, so the cases can point at it. The answer says
-    // what was really added: see `addMissing`.
-    result.created = {
-      companies: await this.addMissing('companies', companies, result.created.companies, {
-        stored: (tx) => tx.company.findMany(named),
-        add: (tx, names) => tx.company.createManyAndReturn({ data: names.map((name) => ({ name })), ...named }),
-      }),
-      // A name is all a responsible has: nobody becomes a user of the app by being named in a sheet.
-      assignees: await this.addMissing('assignees', people, result.created.assignees, {
-        stored: (tx) => tx.assignee.findMany(named),
-        add: (tx, names) => tx.assignee.createManyAndReturn({ data: names.map((name) => ({ name })), ...named }),
-      }),
-      supportTypes: await this.addMissing('supportTypes', types, result.created.supportTypes, {
-        stored: (tx) => tx.supportType.findMany(named),
-        add: (tx, names) => tx.supportType.createManyAndReturn({ data: names.map((name) => ({ name, color: NEW_SUPPORT_TYPE_COLOR })), ...named }),
-      }),
-    };
+    // A real import without a case to store has nothing to add either: only rows to import add names.
+    if (options.dryRun || !rows.length) return result;
 
     // Read only for a sheet that gives priorities: they are what a deadline comes from.
     const policies = rows.some((row) => row.priority) ? await this.prisma.slaPolicy.findMany() : [];
     const slaHours = new Map(policies.map((policy) => [policy.priority, policy.hours]));
 
-    for (const row of rows) {
-      // The registration moment (`createdAt`) is left to the database: it is now, the time of the import.
-      // Midday UTC keeps the calendar day of the case stable in any time zone.
-      const reportedAt = new Date(`${row.date}T12:00:00.000Z`);
-      await this.prisma.ticket.create({
-        data: {
-          date: parseDateOnly(row.date),
-          time: row.time,
-          companyId: companies.id(row.company),
-          description: row.description,
-          searchText: ticketSearchKey(row.company, row.description),
-          status: row.status,
-          assigneeId: row.assignee ? people.id(row.assignee) : null,
-          priority: row.priority,
-          // As in a case registered by hand, the deadline of the priority runs from the registration: from now.
-          dueAt: slaDueAt(new Date(), row.priority ? (slaHours.get(row.priority) ?? null) : null),
-          moduleId: row.module ? modules.id(row.module) : null,
-          supportTypes: row.supportTypes.length ? { create: row.supportTypes.map((type) => ({ supportTypeId: types.id(type) })) } : undefined,
-          createdById: user.id,
-          // Last activity is the day of the case, so old open cases show up as forgotten.
-          ...activityStamp(reportedAt),
-          // The sheet does not date its observations; the day of the case is the closest known date.
-          notes: row.note ? { create: { text: row.note, searchText: noteSearchKey(row.note), createdAt: reportedAt } } : undefined,
-        },
-      });
+    // All or nothing: what the catalogs lacked and every case of the sheet go in one transaction.
+    // Stored one by one, a failure halfway (a lost connection, the server stopping) left part of the
+    // sheet in, with the companies it had added, and importing the file again skipped that part as
+    // duplicates: nobody could tell which rows had gone in.
+    const lacking = result.created;
+    try {
+      result.created = await this.prisma.$transaction(async (tx) => {
+        // The locks of the catalogs that get names, all of them before the first name is added. They
+        // last until the cases are stored: the names added here are seen by nobody before that, and
+        // whoever adds one of them by hand meanwhile has to wait to find it.
+        const growing = (['companies', 'assignees', 'supportTypes'] as const).filter((catalog) => lacking[catalog].length);
+        // What the catalogs lacked joins them first, so the cases can point at it. The answer says
+        // what was really added: see `addMissing`.
+        const created = await withCatalogLock({ tx }, growing, async () => ({
+          companies: await this.addMissing(companies, lacking.companies, {
+            stored: () => tx.company.findMany(named),
+            add: (names) => tx.company.createManyAndReturn({ data: names.map((name) => ({ name, sortKey: searchKey(name) })), ...named }),
+          }),
+          // A name is all a responsible has: nobody becomes a user of the app by being named in a sheet.
+          assignees: await this.addMissing(people, lacking.assignees, {
+            stored: () => tx.assignee.findMany(named),
+            add: (names) => tx.assignee.createManyAndReturn({ data: names.map((name) => ({ name })), ...named }),
+          }),
+          supportTypes: await this.addMissing(types, lacking.supportTypes, {
+            stored: () => tx.supportType.findMany(named),
+            add: (names) => tx.supportType.createManyAndReturn({ data: names.map((name) => ({ name, color: NEW_SUPPORT_TYPE_COLOR })), ...named }),
+          }),
+        }));
+        await storeCases(tx, rows, user.id, {
+          company: (name) => companies.id(name),
+          assignee: (name) => people.id(name),
+          supportType: (name) => types.id(name),
+          module: (fullName) => modules.id(fullName),
+          slaHours: (priority) => slaHours.get(priority) ?? null,
+        });
+        return created;
+      }, IMPORT_TRANSACTION);
+    } catch (error) {
+      // Out of time, or no connection in time. Prisma has undone the transaction: nothing is in.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2028') {
+        throw new ServiceUnavailableException(
+          'La importación tardó más de lo permitido y no se guardó nada: ningún caso ni ningún registro nuevo de los catálogos. ' +
+            'Intenta de nuevo; si vuelve a pasar, divide el archivo en partes más pequeñas.',
+        );
+      }
+      throw error;
     }
     return result;
   }
 
   /**
    * Adds to a catalog the names of the sheet that it lacked, and gives `catalog` the id of each.
-   * Like a person who adds one by hand, behind the lock of the catalog and after looking again:
-   * the catalogs were read before the sheet was, and someone may have registered one of the names
-   * since. That one is used as it is. Returns the names that were added.
+   * Like a person who adds one by hand, behind the lock of the catalog, which the transaction of
+   * `table` already holds, and after looking again: the catalogs were read before the sheet was,
+   * and someone may have registered one of the names since. That one is used as it is. Returns the
+   * names that were added.
    */
   private async addMissing(
-    lock: NamedCatalog,
     catalog: NameCatalog,
     names: string[],
     table: {
-      stored: (tx: Prisma.TransactionClient) => Promise<CatalogEntry[]>;
-      /** One statement for them all: the lock is held for as little as it takes. */
-      add: (tx: Prisma.TransactionClient, names: string[]) => Promise<CatalogEntry[]>;
+      stored: () => Promise<CatalogEntry[]>;
+      /** One statement for them all. */
+      add: (names: string[]) => Promise<CatalogEntry[]>;
     },
   ): Promise<string[]> {
     if (!names.length) return [];
-    return withCatalogLock(this.prisma, lock, async (tx) => {
-      const stored = await table.stored(tx);
-      const taken = new Set(stored.map((entry) => searchKey(entry.name)));
-      const lacking = names.filter((name) => !taken.has(searchKey(name)));
-      const added = lacking.length ? await table.add(tx, lacking) : [];
-      for (const entry of [...stored, ...added]) catalog.add(entry.name, entry.id);
-      return lacking;
-    });
+    const stored = await table.stored();
+    const taken = new Set(stored.map((entry) => searchKey(entry.name)));
+    const lacking = names.filter((name) => !taken.has(searchKey(name)));
+    const added = lacking.length ? await table.add(lacking) : [];
+    for (const entry of [...stored, ...added]) catalog.add(entry.name, entry.id);
+    return lacking;
   }
 
   /**

@@ -52,6 +52,16 @@ describe('PrismaExceptionFilter', () => {
       400,
       { message: 'La operación hace referencia a un registro que no existe o que sigue en uso', error: 'Bad Request', statusCode: 400 },
     ],
+    // A transaction out of time, as one that waited behind an import for the lock of a catalog.
+    [
+      'P2028',
+      503,
+      {
+        message: 'El sistema está ocupado con otra operación y no se guardó nada. Intenta de nuevo en unos momentos.',
+        error: 'Service Unavailable',
+        statusCode: 503,
+      },
+    ],
   ])('answers Prisma error %s with HTTP %i and a message in Spanish', async (code, status, body) => {
     const response = await request(app.getHttpServer()).get(`/prisma/${code}`);
     expect(response.status).toBe(status);

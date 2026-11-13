@@ -52,6 +52,8 @@ const PASSWORD = process.env.SUPPORT_PASSWORD ?? fileEnv.MCP_PASSWORD;
 // ---------------------------------------------------------------------------
 
 let token;
+/** The login under way: the calls that need a token at the same time wait for the same one. */
+let pendingLogin;
 
 async function request(url, init) {
   try {
@@ -84,18 +86,26 @@ async function api(method, path, { query, body, form } = {}) {
   }
 
   for (let attempt = 0; ; attempt++) {
-    if (!token) await login();
+    if (!token) await (pendingLogin ??= login().finally(() => (pendingLogin = undefined)));
+    const used = token;
     const res = await request(url, {
       method,
-      headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { Authorization: `Bearer ${used}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: form ?? (body ? JSON.stringify(body) : undefined),
     });
     if (res.status === 401 && attempt === 0) {
-      token = undefined;
+      // Another call may have logged in again meanwhile: only the token that was refused is dropped.
+      if (token === used) token = undefined;
       continue;
     }
     const text = await res.text();
-    const data = text ? JSON.parse(text) : null;
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      // Not JSON: a proxy in front of the API answers with a page when the API is down.
+      if (res.ok) throw new Error(`El sistema de soporte respondió algo que no es JSON (HTTP ${res.status}).`);
+    }
     if (!res.ok) {
       const message = Array.isArray(data?.message) ? data.message.join('. ') : data?.message;
       throw new Error(message ?? `El sistema de soporte respondió HTTP ${res.status}`);

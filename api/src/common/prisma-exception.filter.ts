@@ -1,4 +1,4 @@
-import { ArgumentsHost, BadRequestException, Catch, ConflictException, HttpException, NotFoundException } from '@nestjs/common';
+import { ArgumentsHost, BadRequestException, Catch, ConflictException, HttpException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
 
@@ -15,6 +15,11 @@ function toHttpException(error: Prisma.PrismaClientKnownRequestError): HttpExcep
       return new ConflictException('Ya existe un registro con esos datos');
     case 'P2003':
       return new BadRequestException('La operación hace referencia a un registro que no existe o que sigue en uso');
+    // A transaction that ran out of time, or that waited too long for a connection: nothing of it
+    // was stored. The usual cause is a lock held by a long write, such as an import of cases that
+    // adds companies, and a moment later the same request goes through.
+    case 'P2028':
+      return new ServiceUnavailableException('El sistema está ocupado con otra operación y no se guardó nada. Intenta de nuevo en unos momentos.');
     default:
       return null;
   }

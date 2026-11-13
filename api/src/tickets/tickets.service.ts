@@ -240,8 +240,10 @@ export function ticketOrder(filters: TicketFilters): Prisma.TicketOrderByWithRel
   if (!filters.sort) return [{ id: dir }];
   // Within a day, the cases that have a time go by it; the ones without it come after them.
   if (filters.sort === 'date') return [{ date: dir }, { time: { sort: dir, nulls: 'last' } }, { id: 'asc' }];
-  // By the name of the company, which is what the list shows; its id says nothing to a person.
-  if (filters.sort === 'company') return [{ company: { name: dir } }, { id: 'asc' }];
+  // By the name of the company, which is what the list shows; its id says nothing to a person. By
+  // its key, not by the name itself: the database compares text by code point, and would put
+  // "Óptica" and "acme" after "Zapatería". See `Company.sortKey`.
+  if (filters.sort === 'company') return [{ company: { sortKey: dir } }, { id: 'asc' }];
   return [{ [filters.sort]: dir }, { id: 'asc' }];
 }
 

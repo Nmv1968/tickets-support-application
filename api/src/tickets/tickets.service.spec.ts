@@ -186,9 +186,9 @@ describe('ticket list filters', () => {
       expect(ticketOrder({})).toEqual([{ id: 'desc' }]);
       expect(ticketOrder({ dir: 'asc' })).toEqual([{ id: 'asc' }]);
       expect(ticketOrder({ sort: 'status', dir: 'asc' })).toEqual([{ status: 'asc' }, { id: 'asc' }]);
-      // By company is by its name, the text the list shows.
-      expect(ticketOrder({ sort: 'company', dir: 'asc' })).toEqual([{ company: { name: 'asc' } }, { id: 'asc' }]);
-      expect(ticketOrder({ sort: 'company' })).toEqual([{ company: { name: 'desc' } }, { id: 'asc' }]);
+      // By company is by the key of its name, the text the list shows, so that accents and capitals do not move it.
+      expect(ticketOrder({ sort: 'company', dir: 'asc' })).toEqual([{ company: { sortKey: 'asc' } }, { id: 'asc' }]);
+      expect(ticketOrder({ sort: 'company' })).toEqual([{ company: { sortKey: 'desc' } }, { id: 'asc' }]);
       // By date, the time of the case orders the cases of one day; the ones without a time go after them.
       expect(ticketOrder({ sort: 'date' })).toEqual([{ date: 'desc' }, { time: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]);
       expect(ticketOrder({ sort: 'date', dir: 'asc' })).toEqual([{ date: 'asc' }, { time: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }]);
@@ -852,6 +852,16 @@ describe('TicketsService', () => {
       const where = { AND: [active] };
       expect(db.ticket.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where, orderBy: [{ id: 'desc' }], skip: 50, take: 25 }));
       expect(db.ticket.count).toHaveBeenLastCalledWith({ where });
+    });
+
+    // The database compares text by code point: by the name itself, "Óptica" and "acme" would go
+    // after "Zapatería". The key of the name is in lowercase and without accents.
+    it('orders by company by the key of its name, and the cases of one company by number', async () => {
+      const db = listDb([]);
+
+      await serviceOn(db).list({ sort: 'company', dir: 'asc' });
+
+      expect(db.ticket.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ orderBy: [{ company: { sortKey: 'asc' } }, { id: 'asc' }] }));
     });
 
     it('lists the archived cases only when the filter asks for them', async () => {

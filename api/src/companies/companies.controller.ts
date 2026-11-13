@@ -67,7 +67,7 @@ export class CompaniesController {
     // is done by one request at a time.
     return withCatalogLock(this.prisma, 'companies', async (tx) => {
       await assertNameFree(tx, name, null);
-      return toDto(await tx.company.create({ data: { name }, include: withCount }));
+      return toDto(await tx.company.create({ data: { name, sortKey: searchKey(name) }, include: withCount }));
     });
   }
 
@@ -81,7 +81,8 @@ export class CompaniesController {
       this.prisma.company.update({
         where: { id },
         // `@IsOptional()` lets a null through, and neither column can be empty: null means "not sent".
-        data: { name: name ?? undefined, active: dto.active ?? undefined },
+        // The key the list of cases orders by goes with the name, or the company keeps its old place.
+        data: { name: name ?? undefined, sortKey: name === null ? undefined : searchKey(name), active: dto.active ?? undefined },
         include: withCount,
       }),
       ...caseWrites,

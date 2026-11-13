@@ -52,11 +52,18 @@ model Assignee {
 model Company {
   id        Int      @id @default(autoincrement())
   name      String
+  /// `searchKey(name)`: what the list of cases orders by when it orders by company. The database
+  /// orders text by code point ("Óptica" and "acme" after "Zapatería"); this, the way people
+  /// read the names ('Ñ' as 'n', since the accent goes). No default on purpose: a company created
+  /// without it must not compile; a rename writes it next to the name.
+  sortKey   String
   /// False keeps its cases and takes it out of the lists for new ones.
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
   tickets Ticket[]
+
+  @@index([sortKey])
 }
 
 /// "Tipos de soporte": labels a case can carry (a failure of the system, the user did not know

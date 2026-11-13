@@ -89,8 +89,13 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   `skills/soporte-casos/SKILL.md`.
 - Un nombre que no está en un catálogo nunca se resuelve en el servidor, ni creando la entrada ni
   eligiendo la más parecida: el error le dice al asistente qué preguntarle a la persona.
-- No tiene pruebas automáticas. `node --check mcp/server.mjs` comprueba la sintaxis; lo demás se
-  prueba contra un API de desarrollo, nunca contra una instalación con casos reales.
+- `cd mcp && npm test` prueba sus herramientas con `node:test`, sin dependencias nuevas: el
+  servidor se arranca como lo haría un asistente y habla con un API simulado
+  (`mcp/test/fake-api.mjs`) que anota cada petición. Un cambio en lo que el servidor envía o
+  responde lleva su prueba. `mcp/test/contract.test.mjs` lee `api/src` y falla si desaparece una
+  ruta, un parámetro o un campo que el servidor o el API simulado usan: al cambiar el API, ajusta
+  también el simulado. Antes de publicar, pruébalo además contra un API de desarrollo, nunca contra
+  una instalación con casos reales.
 
 ### Datos de prueba
 

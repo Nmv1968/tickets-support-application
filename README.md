@@ -238,6 +238,7 @@ Ninguna necesita la base de datos ni el API encendidos:
 ```bash
 cd api && npm test            # API: Jest
 cd web && npm run test:ci     # web: Karma con Chrome sin ventana, una sola pasada
+cd mcp && npm test            # servidor MCP de los asistentes: node:test contra un API simulado
 ```
 
 `cd web && npm test` deja las pruebas de la web en modo observación.
@@ -690,6 +691,9 @@ Cómo se importa:
   las prioridades y los estados nunca se crean desde una hoja.
 - Al terminar, un aviso dice cuántos casos se importaron y, si las hubo, cuántas filas se
   rechazaron y cuántas empresas, responsables y tipos de soporte se crearon.
+- La importación es todo o nada: si algo falla a mitad de camino, no queda ningún caso ni ninguna
+  entrada de catálogo de esa hoja, y se puede volver a importar tal cual.
+- Una hoja admite hasta 20.000 filas. Con más, divídela en varias.
 - No se crean usuarios: un responsable es solo un nombre. Una celda de Responsable vacía, o con
   "Sin asignar", deja el caso sin responsable.
 - La fecha de registro de un caso importado es el momento de la importación. Si la fila trae
