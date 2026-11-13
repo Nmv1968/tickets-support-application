@@ -13,7 +13,7 @@ import { ReminderCard } from './reminder-card';
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
-    <div class="fixed inset-0 z-40 bg-black/40" (click)="closed.emit()" aria-hidden="true"></div>
+    <div class="panel-backdrop" (click)="closed.emit()" aria-hidden="true"></div>
     <aside
       class="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-line bg-surface shadow-2xl"
       role="dialog"
@@ -25,17 +25,7 @@ import { ReminderCard } from './reminder-card';
       <header class="flex items-center gap-2 border-b border-line px-4 py-3">
         <i class="mdi mdi-bell-outline text-xl text-primary" aria-hidden="true"></i>
         <h2 class="font-semibold">Avisos</h2>
-        @if (reminders.canShowMine()) {
-          <div class="ml-auto flex rounded-control bg-elevated p-0.5" role="group" aria-label="Qué casos mostrar">
-            <button type="button" class="segment py-1" [attr.aria-pressed]="!reminders.onlyMine()" (click)="reminders.setOnlyMine(false)">
-              Todos
-            </button>
-            <button type="button" class="segment py-1" [attr.aria-pressed]="reminders.onlyMine()" (click)="reminders.setOnlyMine(true)">
-              Míos
-            </button>
-          </div>
-        }
-        <button type="button" class="btn btn-ghost px-2" [class.ml-auto]="!reminders.canShowMine()" (click)="closed.emit()" aria-label="Cerrar" cdkFocusInitial>
+        <button type="button" class="btn btn-ghost ml-auto px-2" (click)="closed.emit()" aria-label="Cerrar" cdkFocusInitial>
           <i class="mdi mdi-close text-lg" aria-hidden="true"></i>
         </button>
       </header>

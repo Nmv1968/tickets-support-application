@@ -6,9 +6,11 @@ import type { TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import type { Ticket, TicketDetail, TicketPage, TicketStatus } from '../core/api';
+import type { Assignee, Ticket, TicketDetail, TicketPage, TicketStatus } from '../core/api';
+import { Catalogs } from '../core/catalogs';
 import { TicketEvents } from '../core/ticket-events';
 import { Toast } from '../core/toast';
+import { chooseOption, clearSelect, closeSelect, ngSelect, optionTexts, selectedTexts } from '../testing/ng-select';
 import { BoardPage } from './board';
 
 function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
@@ -17,12 +19,13 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
     code: 'SOP-00007',
     date: '2026-11-05',
     time: null,
+    companyId: 1,
     company: 'Acme',
     description: 'No imprime',
     status: 'PENDING',
     assigneeId: null,
-    assignedToClient: false,
     assigneeName: null,
+    supportTypes: [],
     priority: null,
     estimatedMinutes: null,
     spentMinutes: 0,
@@ -39,6 +42,8 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
     aiGenerated: false,
     customerReply: null,
     createdAt: '2026-11-05T10:00:00.000Z',
+    createdById: null,
+    archivedAt: null,
     lastNote: null,
     notesCount: 0,
     attachmentsCount: 0,
@@ -62,6 +67,16 @@ interface BoardRead {
 
 const REFUSED = { status: 400, statusText: 'Bad Request' };
 
+// The responsibles of the catalog. One is deactivated: the cases they have are still theirs.
+const ASSIGNEES: Assignee[] = [
+  { id: 4, name: 'Ana', active: true, tickets: 1 },
+  { id: 5, name: 'Luis', active: true, tickets: 0 },
+  { id: 6, name: 'Zoe', active: false, tickets: 2 },
+];
+const OF_ANA = ticket({ id: 8, code: 'SOP-00008', assigneeId: 4, assigneeName: 'Ana' });
+const OF_ZOE = ticket({ id: 9, code: 'SOP-00009', status: 'RESOLVED', assigneeId: 6, assigneeName: 'Zoe' });
+const ARCHIVED = '2026-11-08T09:00:00.000Z';
+
 // The board with the real Api: the tests act on the page and on TicketEvents, and look at the
 // requests that leave and at the column each card is in. Answers arrive when the test sends
 // them (fakeAsync), which is what lets one arrive late.
@@ -75,6 +90,7 @@ describe('BoardPage', () => {
     TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
     events = TestBed.inject(TicketEvents);
+    TestBed.inject(Catalogs).assignees.set(ASSIGNEES);
   });
 
   // Also catches a read nobody expected: any request left unanswered fails the test.
@@ -92,9 +108,14 @@ describe('BoardPage', () => {
     pending.resolved.flush(page(tickets.filter((t) => t.status === 'RESOLVED')));
   }
 
+  /**
+   * A screen update as the browser runs it. ngModel does not write a changed value into its
+   * control while Angular goes through the page but right after, before any other event.
+   */
   function render(): void {
     fixture.detectChanges();
     flushMicrotasks();
+    fixture.detectChanges();
   }
 
   /** Lets what was answered reach the screen. */
@@ -148,6 +169,9 @@ describe('BoardPage', () => {
   }
 
   const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
+  /** The codes of the cards on the board, column after column. */
+  const cards = (): string[] => Array.from(el.querySelectorAll('article .font-mono'), (code) => code.textContent ?? '');
+  const filter = (): HTMLElement => ngSelect(el, 'Filtrar por responsable');
 
   describe('answers that arrive out of order', () => {
     it('the answer to an older read does not replace the one to the latest read', fakeAsync(() => {
@@ -215,6 +239,125 @@ describe('BoardPage', () => {
       expect(column('Sin resolver')).toContain('SOP-00007');
       expect(column('Pendiente')).toBe('');
       http.expectNone((request) => request.url === '/api/tickets');
+    }));
+  });
+
+  describe('the filter by responsible', () => {
+    it('is a list, not a native one, of everyone in the catalog, active or not, and of the cases nobody has', fakeAsync(() => {
+      open();
+      expect(el.querySelector('select')).toBeNull();
+      expect(selectedTexts(filter())).toEqual([]);
+      expect(filter().textContent).toContain('Responsable: todos');
+
+      expect(optionTexts(filter())).toEqual(['Sin asignar', 'Ana', 'Luis', 'Zoe']);
+      closeSelect(filter());
+      render();
+    }));
+
+    it('leaves on the board the cards of the responsible chosen, and brings the rest back when it is emptied', fakeAsync(() => {
+      open([ticket(), OF_ANA, OF_ZOE]);
+      expect(cards()).toEqual(['SOP-00007', 'SOP-00008', 'SOP-00009']);
+
+      chooseOption(filter(), 'Ana');
+      render();
+      expect(selectedTexts(filter())).toEqual(['Ana']);
+      expect(cards()).toEqual(['SOP-00008']);
+
+      // Someone deactivated still has the cases they had.
+      chooseOption(filter(), 'Zoe');
+      render();
+      expect(cards()).toEqual(['SOP-00009']);
+      expect(column('Resuelto')).toContain('SOP-00009');
+
+      clearSelect(filter());
+      render();
+      expect(cards()).toEqual(['SOP-00007', 'SOP-00008', 'SOP-00009']);
+      // The cards were already there: choosing reads nothing.
+      http.expectNone((request) => request.url === '/api/tickets');
+    }));
+
+    it('with "Sin asignar" leaves the cards of the cases nobody has', fakeAsync(() => {
+      open([ticket(), OF_ANA, OF_ZOE]);
+      chooseOption(filter(), 'Sin asignar');
+      render();
+
+      expect(cards()).toEqual(['SOP-00007']);
+    }));
+  });
+
+  describe('a card', () => {
+    it('shows the support types of its case as chips, each in its colour, and none for a case without them', fakeAsync(() => {
+      const types = [
+        { id: 1, name: 'Capacitación', color: '#12b76a' },
+        { id: 2, name: 'Falla del sistema', color: '#b91c1c' },
+      ];
+      open([ticket({ supportTypes: types }), OF_ANA]);
+
+      const [typed, plain] = Array.from(el.querySelectorAll('article'));
+      const chips = Array.from(typed.querySelectorAll<HTMLElement>('app-type-chip'));
+      expect(chips.map((chip) => chip.textContent?.trim())).toEqual(['Capacitación', 'Falla del sistema']);
+      expect(chips.map((chip) => chip.style.backgroundColor)).toEqual(['rgb(18, 183, 106)', 'rgb(185, 28, 28)']);
+      expect(plain.querySelector('app-type-chip')).toBeNull();
+    }));
+  });
+
+  // An archived case is put away: it is on no column, whatever its status.
+  describe('archived cases', () => {
+    it('are not asked for: the board reads what the API lists when nothing is said about them', fakeAsync(() => {
+      create();
+      const pending = read();
+      expect(pending.open.request.params.has('archived')).toBeFalse();
+      expect(pending.resolved.request.params.has('archived')).toBeFalse();
+      answer(pending, []);
+      settle();
+    }));
+
+    it('a case that is archived, in its form or anywhere else, leaves the board, and nothing is read for it', fakeAsync(() => {
+      open([ticket(), OF_ANA]);
+      events.saved(ticket({ archivedAt: ARCHIVED }));
+      render();
+
+      expect(cards()).toEqual(['SOP-00008']);
+      http.expectNone((request) => request.url === '/api/tickets');
+    }));
+
+    it('one that was not on the board changes nothing on it, and nothing is read for it', fakeAsync(() => {
+      open([ticket()]);
+      events.saved(ticket({ id: 40, code: 'SOP-00040', archivedAt: ARCHIVED }));
+      render();
+
+      expect(cards()).toEqual(['SOP-00007']);
+      http.expectNone((request) => request.url === '/api/tickets');
+    }));
+
+    // The read may have been taken before the case was archived: shown, it would put the card back.
+    it('a case archived while the columns are being read stays out, and the columns are read again', fakeAsync(() => {
+      open([ticket(), OF_ANA]);
+      events.outdated(null);
+      const stale = read();
+
+      events.saved(ticket({ archivedAt: ARCHIVED }));
+      render();
+      expect(cards()).toEqual(['SOP-00008']);
+      const fresh = read();
+
+      answer(stale, [ticket(), OF_ANA]);
+      settle();
+      expect(cards()).toEqual(['SOP-00008']);
+
+      answer(fresh, [OF_ANA]);
+      settle();
+      expect(cards()).toEqual(['SOP-00008']);
+    }));
+
+    it('a case brought back from the archive is on the board again once its columns are read', fakeAsync(() => {
+      open([OF_ANA]);
+      events.saved(ticket());
+      render();
+
+      answer(read(), [ticket(), OF_ANA]);
+      settle();
+      expect(cards()).toEqual(['SOP-00007', 'SOP-00008']);
     }));
   });
 

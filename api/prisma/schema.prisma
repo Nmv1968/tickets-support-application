@@ -29,20 +29,15 @@ model User {
   passwordHash String?
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
-  /// The responsible this user is, when they also attend cases: the cases they register are theirs
-  /// unless another responsible is chosen, and "Solo míos" shows them these.
-  assigneeId   Int?
-  assignee     Assignee? @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
 
-  created Ticket[]        @relation("TicketCreator")
-  notes   TicketNote[]
-  history TicketHistory[]
-
-  @@index([assigneeId])
+  created     Ticket[]         @relation("TicketCreator")
+  notes       TicketNote[]
+  history     TicketHistory[]
+  preferences UserPreference[]
 }
 
-/// People a case can be assigned to ("Responsable"). Managed from the UI. They need not be users
-/// of the app: a name is all a responsible has.
+/// People a case can be assigned to ("Responsable"). Managed from the UI. They are not users of
+/// the app: a name is all a responsible has.
 model Assignee {
   id        Int      @id @default(autoincrement())
   name      String
@@ -51,7 +46,42 @@ model Assignee {
   createdAt DateTime @default(now())
 
   tickets Ticket[]
-  users   User[]
+}
+
+/// Client companies that report cases. Managed from the UI.
+model Company {
+  id        Int      @id @default(autoincrement())
+  name      String
+  /// False keeps its cases and takes it out of the lists for new ones.
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  tickets Ticket[]
+}
+
+/// "Tipos de soporte": labels a case can carry (a failure of the system, the user did not know
+/// how...). Managed from the UI. A case has zero or more.
+model SupportType {
+  id        Int      @id @default(autoincrement())
+  name      String
+  /// "#rrggbb", lowercase.
+  color     String   @db.VarChar(7)
+  /// False keeps it on the cases that carry it and stops offering it for new ones.
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  tickets TicketSupportType[]
+}
+
+/// One support type of one case.
+model TicketSupportType {
+  ticketId      Int
+  supportTypeId Int
+  ticket        Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  supportType   SupportType @relation(fields: [supportTypeId], references: [id], onDelete: Restrict)
+
+  @@id([ticketId, supportTypeId])
+  @@index([supportTypeId])
 }
 
 /// Catalog of the supported software's modules. Managed from the UI.
@@ -77,16 +107,15 @@ model Ticket {
   /// Time of day the client reported the problem, "HH:mm" as their clock showed it. Optional: many
   /// cases only have a day. Kept apart from `date`, which stays a calendar day with no time zone.
   time             String?       @db.VarChar(5)
-  company          String
+  companyId        Int
+  company          Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
   description      String
-  /// Company and description in lowercase without accents. The search box matches against this.
-  /// No default on purpose: a write that forgets it must not compile. See `ticketSearchKey`.
+  /// Name of the company and description in lowercase without accents. The search box matches
+  /// against this. No default on purpose: a write that forgets it must not compile. See `ticketSearchKey`.
   searchText       String
   status           TicketStatus  @default(PENDING)
   assigneeId       Int?
   assignee         Assignee?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
-  /// True when the client is responsible for the case ("Responsable: Cliente").
-  assignedToClient Boolean       @default(false)
   priority         Priority?
   estimatedMinutes Int?
   spentMinutes     Int           @default(0)
@@ -108,16 +137,20 @@ model Ticket {
   lastActivityAt   DateTime      @default(now())
   /// Last write of the row, whatever it was. Bookkeeping only: nothing reads it.
   updatedAt        DateTime      @updatedAt
+  /// Moment the case was archived. Null = not archived: the lists show it.
+  archivedAt       DateTime?
 
-  notes       TicketNote[]
-  attachments Attachment[]
-  history     TicketHistory[]
+  notes        TicketNote[]
+  attachments  Attachment[]
+  history      TicketHistory[]
+  supportTypes TicketSupportType[]
 
   @@index([status])
   @@index([date])
-  @@index([company])
+  @@index([companyId])
   @@index([assigneeId])
   @@index([promisedDate])
+  @@index([archivedAt])
 }
 
 /// "Observación" entries. One ticket has many, each with date and author.
@@ -167,6 +200,19 @@ model Setting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+/// Small settings of the web that belong to one user (which columns of the case list to show...),
+/// one row per user and key. Never shared between users: what is app-wide lives in `Setting`.
+model UserPreference {
+  userId    Int
+  key       String
+  /// The value, as JSON.
+  value     String
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
 }
 
 /// One row per AI provider. The API key is stored encrypted with APP_SECRET.

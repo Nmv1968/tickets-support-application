@@ -11,7 +11,7 @@
 > *Self-hosted help desk and support ticket tracker for small teams. The interface and this documentation are in Spanish.*
 
 Soporte reemplaza la hoja de cálculo donde muchos equipos anotan sus casos. Cada caso tiene fecha,
-empresa, descripción, estado, responsable y observaciones, y se edita en una tabla igual que en la
+empresa, descripción, estado, responsable y observaciones, y todos se ven en una tabla, como en la
 hoja. Encima de eso agrega lo que la hoja no da: tablero, tiempos y SLA, avisos de casos olvidados,
 adjuntos, historial de cambios, métricas y, si quieres, un asistente de IA que registra casos desde una
 captura de pantalla y redacta la respuesta para el cliente.
@@ -40,6 +40,7 @@ Se instala en tu propia máquina o servidor con un comando. Tus datos no salen d
 - [Inteligencia artificial](#inteligencia-artificial)
 - [Asistentes de IA: MCP y skills](#asistentes-de-ia-mcp-y-skills)
 - [Importar una hoja de cálculo](#importar-una-hoja-de-cálculo)
+- [Exportar casos y reportes](#exportar-casos-y-reportes)
 - [Cómo funciona un caso](#cómo-funciona-un-caso)
 - [Arquitectura](#arquitectura)
 - [Seguridad](#seguridad)
@@ -48,20 +49,30 @@ Se instala en tu propia máquina o servidor con un comando. Tus datos no salen d
 
 ## Características
 
-- **Casos en una tabla editable.** Alta rápida en la primera fila; estado y responsable se cambian en
-  la celda. Búsqueda sin distinguir tildes ni mayúsculas, filtros y paginación.
-- **Detalle del caso.** Prioridad, módulo, tiempo estimado y real con cronómetro, fecha límite por
-  SLA, promesa de entrega, observaciones con fecha y autor, adjuntos (arrastrar o pegar con Ctrl+V) e
-  historial de cada cambio. Todo se guarda solo, sin botón "Guardar".
+- **Casos en una tabla.** Búsqueda sin distinguir tildes ni mayúsculas, paginación y filtros por
+  estado, responsable, empresa, módulo, prioridad, tipo de soporte, fechas y más. **Nuevo caso**
+  abre un formulario sobre la tabla para registrar varios seguidos, cada uno con su estado,
+  responsable, prioridad, módulo y tipos de soporte.
+- **Columnas a tu medida.** Cada persona elige qué columnas ve en la tabla. La elección se guarda
+  con su usuario: no cambia la vista de nadie más y la sigue a cualquier navegador.
+- **Detalle del caso.** Prioridad, módulo, tipos de soporte, tiempo estimado y real con cronómetro,
+  fecha límite por SLA, promesa de entrega, observaciones con fecha y autor, adjuntos (arrastrar o
+  pegar con Ctrl+V) e historial de cada cambio. Los cambios se guardan juntos con **Actualizar**.
+- **Catálogos propios.** Empresas, responsables, módulos y tipos de soporte (etiquetas de color para
+  clasificar los casos) se administran desde la aplicación.
+- **Archivar.** Un caso archivado sale de la lista, del tablero y de los avisos sin perderse, y se
+  puede desarchivar.
 - **Tablero Kanban.** Una columna por estado; arrastrar una tarjeta cambia el estado.
 - **Avisos.** La campana lista los casos olvidados (abiertos y sin movimiento durante el tiempo que
   configures), los vencidos por SLA y las promesas de entrega que vencen hoy o están por vencer.
-- **Dashboard.** Casos por mes, responsable, empresa, módulo y prioridad; tiempo de resolución y
-  cumplimiento de SLA.
+- **Dashboard.** Casos por mes, responsable, empresa, módulo, prioridad y tipo de soporte; tiempo de
+  resolución y cumplimiento de SLA. El reporte se descarga en Excel, con una hoja de datos lista
+  para tablas dinámicas o Power BI, y en PDF.
 - **Actualización en vivo.** Lo que registra otra persona, otra pestaña o un asistente aparece al
   instante, sin recargar.
 - **Importar y exportar.** Importa tu hoja actual (.xlsx o .csv) con vista previa, o descarga una
-  plantilla de Excel lista para llenar. Exporta a Excel o PDF con los filtros activos.
+  plantilla de Excel que ya trae las empresas, responsables, módulos y tipos de soporte de tu
+  sistema como listas. Exporta a Excel o PDF con los filtros activos.
 - **IA opcional, con tu propia API key.** Anthropic (Claude), OpenAI, Google Gemini o cualquier
   servidor compatible con la API de OpenAI (OpenRouter, Groq, Ollama local…). Crea el borrador de un
   caso desde una foto, una captura o un texto pegado, y redacta el mensaje para el cliente al resolver.
@@ -140,11 +151,33 @@ Desktop when you sign in" para que la aplicación vuelva sola después de reinic
 ### Actualizar
 
 ```bash
+# 1. La versión instalada, por si hay que volver a ella: anótala
+git rev-parse --short HEAD
+
+# 2. Un respaldo de este momento, y una copia suya con otro nombre
+docker compose run --rm backup sh -c 'backup.sh once && cp /backups/soporte-$(date +%F).dump /backups/antes-de-actualizar-$(date +%F).dump'
+
+# 3. Actualizar
 git pull
 docker compose up -d --build
 ```
 
-Las migraciones de la base de datos se aplican solas al arrancar el API.
+Los comandos se escriben igual en bash y en PowerShell; el del paso 2, con sus comillas simples.
+
+Las migraciones de la base de datos se aplican solas al arrancar el API. Algunas reorganizan los
+datos: la que trajo el catálogo de empresas, por ejemplo, convierte la empresa escrita en cada caso
+en una entrada del catálogo y une en una sola las que solo se distinguían por mayúsculas, tildes o
+espacios. Por eso los dos primeros pasos: son lo que permite volver atrás.
+
+El paso 2 hace un respaldo (ver [Respaldos](#respaldos)) y lo copia, dentro del contenedor, a
+`antes-de-actualizar-AAAA-MM-DD.dump`, con la fecha de hoy, en la misma carpeta de respaldos. La
+copia hace falta porque el respaldo del día, `soporte-AAAA-MM-DD.dump`, se vuelve a escribir cada 6
+horas y cada vez que arranca el servicio de respaldos: después de actualizar ya tendría los datos
+reorganizados. De la base de datos, ese servicio solo escribe y borra archivos `soporte-*.dump`,
+así que la copia queda como está hasta que la borres tú.
+
+Si la actualización no salió como esperabas, se vuelve a ese respaldo con los pasos de
+[Restaurar un respaldo anterior a una actualización](#restaurar-un-respaldo-anterior-a-una-actualización).
 
 ### Acceso desde otras máquinas
 
@@ -263,19 +296,31 @@ Todo va en el archivo `.env` de la raíz, que nunca se sube al repositorio.
 El API revisa estos valores al arrancar. No inicia sin `JWT_SECRET` y `APP_SECRET`, ni, en producción
 (Docker), mientras `JWT_SECRET`, `APP_SECRET`, `ADMIN_PASSWORD` o `MCP_PASSWORD` sigan en `change-me`.
 
-Lo demás se configura desde la aplicación, en **Configuración**: usuarios, responsables, catálogo de
-módulos, horas de SLA por prioridad, recordatorios, proveedor de IA y logo de la empresa.
+Lo demás se configura desde la aplicación, en **Configuración**, que tiene una pestaña para cada
+cosa: Usuarios, Responsables, Empresas, Tipos de soporte, Módulos, SLA (horas por prioridad),
+Recordatorios, IA (el proveedor), Logo y Mi cuenta. Eliminar una empresa, un responsable o un tipo
+de soporte pide confirmación antes de borrarlo.
+
+Esa configuración es de todo el equipo. Lo que cada persona elige para su propia vista (las columnas
+de la lista de casos y si tiene los filtros a la vista) no está ahí: se guarda con su usuario, así
+que no cambia lo que ven los demás.
 
 ### Personalizar
 
-- **Logo.** En **Configuración > Empresa** sube el logo de tu empresa (PNG, JPG, WebP o SVG). Se
+- **Logo.** En **Configuración > Logo** sube el logo de tu empresa (PNG, JPG, WebP o SVG). Se
   guarda reducido y se usa en el menú, en la pantalla de ingreso y como icono de la pestaña del
   navegador. Va en la base de datos, así que entra en los respaldos.
+- **Empresas.** En **Configuración > Empresas** está el catálogo de tus clientes: cada caso es de
+  una de ellas. También se puede crear una empresa en el momento de registrar un caso, desde su
+  mismo selector.
 - **Responsables.** En **Configuración > Responsables** agrega a quienes atienden los casos. Basta el
-  nombre: no necesitan ser usuarios del sistema. Si un usuario también atiende casos, dile cuál
-  responsable es en **Configuración > Usuarios**.
+  nombre.
+- **Tipos de soporte.** En **Configuración > Tipos de soporte** define las etiquetas con las que
+  clasificas los casos ("Falla del sistema", "Capacitación"…), cada una con su color.
 - **Módulos.** El catálogo inicial es un ejemplo para un software de gestión. Cámbialo por los
   módulos o áreas de tu producto en **Configuración > Módulos**.
+- **Columnas de la lista de casos.** El botón **Columnas** de la lista deja marcar cuáles ver y
+  volver a las iniciales con **Restablecer**. Es una preferencia de cada usuario, no del equipo.
 - **Guía de estilo de los mensajes a clientes.** La IA redacta siguiendo
   `api/assets/estilo-respuestas.md`. Para usar la guía de tu equipo sin tocar la del proyecto, crea
   junto a ella `api/assets/estilo-respuestas.local.md`: si existe, se usa esa. Git la ignora. Con
@@ -325,6 +370,49 @@ docker compose run --rm --no-deps -u root api chown -R node:node /data/uploads
 docker compose start api
 ```
 
+Estos pasos son para un respaldo hecho con la versión de la aplicación que está instalada. Si
+actualizaste después de ese respaldo, sigue los de la sección siguiente.
+
+En Windows, ejecuta los comandos de restauración en PowerShell. Git Bash convierte las rutas que
+empiezan con `/` (`/backups/...`, `/data/uploads`) en rutas de Windows, y el contenedor no las
+encuentra.
+
+### Restaurar un respaldo anterior a una actualización
+
+Un respaldo guarda la base de datos con las tablas de la versión que lo escribió. Si una
+actualización posterior las cambió, los pasos de arriba no sirven para ese respaldo:
+`pg_restore --clean` solo quita lo que el respaldo conoce, tropieza con las tablas nuevas y deja la
+base de datos a medio restaurar. Para volver a como estaba todo antes de actualizar hay que regresar
+también al código de esa versión, y restaurar sobre una base de datos vacía. En Windows, también
+estos comandos van en PowerShell y no en Git Bash, por lo que dice el párrafo anterior:
+
+```bash
+# 1. Detener el API, y los respaldos para que no guarden la base de datos a medio restaurar
+docker compose stop api backup
+
+# 2. Volver al código de antes de actualizar (cambia a1b2c3d por la versión que anotaste)
+git checkout a1b2c3d
+
+# 3. Vaciar la base de datos y restaurar el respaldo en ella (cambia la fecha por la de tu copia)
+docker compose run --rm backup psql -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+docker compose run --rm backup pg_restore --dbname=support --no-owner /backups/antes-de-actualizar-2026-01-31.dump
+
+# 4. Adjuntos
+docker compose cp ./backups/adjuntos/. api:/data/uploads/
+docker compose run --rm --no-deps -u root api chown -R node:node /data/uploads
+
+# 5. Construir esa versión y encender todo
+docker compose up -d --build
+```
+
+- Si no anotaste la versión, `git reflog` muestra en qué versión estaba el código antes del
+  `git pull`.
+- `git checkout` con una versión deja el código fuera de su rama, y Git lo avisa: es lo esperado.
+  Para actualizar de nuevo más adelante, vuelve antes a la rama con `git checkout main`.
+- Lo mismo sirve con un `soporte-AAAA-MM-DD.dump` de un día anterior a la actualización.
+- Para recuperar los datos de un respaldo viejo sin dejar la versión nueva, omite el paso 2: al
+  arrancar, el API aplica otra vez las migraciones a lo restaurado.
+
 ## Inteligencia artificial
 
 La IA es opcional y usa tu propia cuenta con el proveedor. En **Configuración > IA**:
@@ -340,6 +428,7 @@ Qué hace:
 
 - **Nuevo con IA.** Una foto, una captura o un texto pegado se convierte en un borrador de caso
   (empresa, descripción, módulo, prioridad, tiempo estimado). Una persona lo revisa antes de guardar.
+  La empresa que la IA lee se busca en tu catálogo; si no está, el borrador ofrece crearla.
 - **Respuesta para el cliente.** Al resolver un caso, redacta el mensaje para quien pidió el soporte
   a partir del caso y sus observaciones. Se puede editar, volver a generar y copiar con un botón.
 
@@ -363,7 +452,8 @@ cliente y registra el caso; le dices "el caso SOP-00042 ya está" y lo cierra y 
 para el cliente. Para eso el proyecto trae dos piezas:
 
 - **`mcp/`: el servidor [MCP](https://modelcontextprotocol.io).** Le da al asistente las herramientas
-  para buscar, registrar, actualizar y cerrar casos. Usa el mismo API que la web.
+  para buscar, registrar, actualizar, archivar y cerrar casos, y para agregar empresas,
+  responsables, módulos y tipos de soporte a los catálogos. Usa el mismo API que la web.
 - **`skills/`: la skill `soporte-casos`.** Le enseña al asistente cuándo usar esas herramientas. Es
   opcional pero recomendable.
 
@@ -371,9 +461,16 @@ Cómo se comporta el asistente:
 
 - Entra solo, con el usuario asistente (`MCP_USERNAME` y `MCP_PASSWORD` de `.env`). El API crea ese
   usuario al arrancar. Todo lo que hace queda en el historial de cada caso con ese nombre.
-- No tiene herramienta para eliminar casos.
-- Si le nombras un responsable o un módulo que no existe, no lo crea ni elige otro por su cuenta: te
-  pregunta si lo agrega, si usa uno de los existentes o si deja el caso sin ese dato.
+- No tiene herramienta para eliminar casos. Sí puede archivar uno, o desarchivarlo, cuando se lo
+  pides. Sus búsquedas dejan fuera los casos archivados, salvo que le pidas verlos, y encuentran
+  también los casos de una empresa, un responsable o un tipo de soporte inactivo.
+- Si le nombras una empresa, un responsable, un módulo o un tipo de soporte que no existe, no lo
+  crea ni elige otro por su cuenta: te pregunta si lo agrega (`crear_empresa`, `crear_responsable`,
+  `crear_modulo`, `crear_tipo_soporte`), si usa uno de los existentes o si deja el caso sin ese
+  dato. Con una empresa te muestra además las que tienen un nombre parecido, para no registrar dos
+  veces al mismo cliente.
+- Los tipos de soporte de un caso los decides tú: el asistente puede proponerlos, y solo usa los del
+  catálogo.
 - Antes de actuar lee las reglas del equipo con la herramienta `leer_guia`: `mcp/GUIA.md` (cómo
   registrar y cerrar un caso) y la guía de estilo de los mensajes a clientes. Editar esos archivos
   cambia el comportamiento de todos los asistentes, sin tocar código.
@@ -550,34 +647,82 @@ casos de soporte.
 ## Importar una hoja de cálculo
 
 **Casos > Importar** acepta `.xlsx` o `.csv` con una fila de encabezados. Reconoce las columnas
-Fecha, Hora, Empresa, Descripción, Estado, Responsable y Observación; solo Empresa y Descripción son
-obligatorias.
+Fecha, Hora, Empresa, Descripción, Estado, Prioridad, Módulo, Responsable, Tipo de soporte y
+Observación; solo Empresa y Descripción son obligatorias.
 
 Para armar la hoja desde cero, el mismo diálogo tiene **Descargar plantilla**: un Excel con esas
-columnas listas para llenar, que evita los errores de formato más comunes:
+columnas listas para llenar y con los valores de tu sistema, que evita los errores más comunes:
 
 - La columna Fecha es de tipo fecha, así que el día y el mes no se confunden.
 - La columna Hora es de tipo hora y es opcional. Al importar una hoja propia también se acepta
   escrita como texto ("14:35", "2:35 p. m.") o dentro de la celda de la fecha.
-- Estado se elige de una lista (Pendiente, Resuelto, Sin resolver).
-- Responsable ofrece los responsables activos y "Cliente"; también admite un nombre nuevo.
+- Empresa, Estado, Prioridad, Módulo, Responsable y Tipo de soporte se eligen de listas
+  desplegables con lo que está registrado y activo en el sistema al descargar la plantilla. La
+  celda no acepta un valor que no esté en su lista.
+- La hoja "Valores del sistema" muestra esas listas completas: empresas, estados, prioridades,
+  módulos, responsables y tipos de soporte. Escribir en ella no registra nada: lo que falte se
+  registra en **Configuración**, y después se descarga la plantilla otra vez.
+- Para el caso con más de un tipo de soporte hay una segunda columna, "Otro tipo de soporte". En
+  una hoja propia también se pueden escribir varios en la misma celda, separados por coma o punto y
+  coma.
 - Cada encabezado tiene una nota con lo que va en la columna, y la hoja "Instrucciones" resume las
   reglas.
 
 Cómo se importa:
 
-- Primero muestra una vista previa: cuántos casos entran, cuántos ya existen y las primeras filas.
+- Primero muestra una vista previa: cuántos casos entran, cuántos ya existen, cuántas filas se
+  rechazan y por qué, y las primeras filas.
 - Un caso con la misma fecha, empresa y descripción que uno existente se omite, así que importar dos
   veces el mismo archivo no duplica.
-- Los responsables que no existen se agregan a la lista de **Configuración > Responsables**. No se
-  crean usuarios: un responsable es solo un nombre.
-- "Cliente" como responsable marca el caso como a cargo del cliente.
+- La empresa, el responsable, los tipos de soporte, el módulo y la prioridad de cada fila se buscan
+  en el sistema por su nombre, sin distinguir mayúsculas ni tildes, también entre los inactivos. Un
+  módulo se escribe con su nombre completo ("Ventas > Facturas") o solo con el suyo ("Facturas") si
+  ningún otro se llama igual.
+- El estado tiene que ser uno de los tres del sistema (Pendiente, Resuelto o Sin resolver), sin
+  distinguir mayúsculas ni tildes. Una celda de Estado vacía deja el caso en Pendiente.
+- Una fila que nombra algo que no existe se rechaza: no se importa. La vista previa dice qué fila
+  de la hoja es y la razón ("La empresa «Acme» no existe", "El estado «Cerrado» no existe"), y
+  lista los valores que no encontró: empresas, responsables, tipos de soporte, módulos,
+  prioridades y estados. Las demás filas se importan con normalidad.
+- La casilla **Crear las empresas, responsables y tipos de soporte que no existen** los agrega a
+  sus catálogos y deja entrar esas filas; al marcarla, la vista previa se calcula de nuevo. Un tipo
+  de soporte creado así queda en gris hasta que le pongas color en **Configuración**. Los módulos,
+  las prioridades y los estados nunca se crean desde una hoja.
+- Al terminar, un aviso dice cuántos casos se importaron y, si las hubo, cuántas filas se
+  rechazaron y cuántas empresas, responsables y tipos de soporte se crearon.
+- No se crean usuarios: un responsable es solo un nombre. Una celda de Responsable vacía, o con
+  "Sin asignar", deja el caso sin responsable.
+- La fecha de registro de un caso importado es el momento de la importación. Si la fila trae
+  prioridad, la fecha límite de su SLA se cuenta desde ahí.
 - Si las fechas están escritas como texto, elige el orden (mes/día/año o día/mes/año) antes de
   importar.
 
-Las exportaciones tienen un límite: el PDF admite hasta 5.000 casos y el Excel hasta 20.000. Con más,
-la exportación no se genera y avisa que hay que acotar los filtros; nunca entrega un archivo
-incompleto.
+## Exportar casos y reportes
+
+**Casos > Exportar** descarga en Excel o en PDF los casos que cumplen los filtros activos. Los
+archivados solo van si el filtro los incluye, y el PDF dice en su encabezado qué filtros tenía.
+El Excel dice de cada caso si está archivado en su última columna, `Archivado` (`Sí` o `No`), y en
+el PDF un caso archivado lleva `(archivado)` bajo su código. El Excel usa los nombres de columna
+que entiende la importación, así que la hoja se puede volver a importar: los casos que ya existen
+se omiten. La importación no lee la columna `Archivado`: un caso que entra por una hoja nunca entra
+archivado.
+
+El **Dashboard** descarga su propio reporte con los botones **Excel** y **PDF**. Cubre el periodo
+que está en pantalla, con los casos archivados o sin ellos según la casilla **Incluir archivados**:
+
+- **Excel** (`reporte-soporte-AAAA-MM-DD.xlsx`), para analizar:
+  - `Resumen`: el periodo, cuándo se generó, y los totales e indicadores de la pantalla.
+  - `Por mes`, `Por responsable`, `Por empresa` (todas, no solo las primeras), `Por módulo`,
+    `Por prioridad` y `Por tipo de soporte`.
+  - `Datos`: una fila por caso (empresa, estado, responsable, prioridad, módulo, tipos de soporte,
+    tiempos y fechas), como tabla de Excel con fechas y números de verdad. Es la hoja que se carga
+    en una tabla dinámica o en Power BI.
+- **PDF** (`reporte-soporte-AAAA-MM-DD.pdf`), para leer o imprimir: los indicadores y cada desglose
+  con sus barras. De las empresas muestra las 15 con más casos y dice cuántas más hay.
+
+Las exportaciones tienen un límite: el PDF de casos admite hasta 5.000, y el Excel de casos y el del
+reporte, hasta 20.000. Con más, el archivo no se genera y avisa que hay que acotar los filtros o el
+periodo; nunca entrega un archivo incompleto.
 
 ## Cómo funciona un caso
 
@@ -588,13 +733,31 @@ incompleto.
 - **Hora del caso.** Opcional: la hora en que el cliente lo reportó, por ejemplo la de su mensaje. Un
   caso sin hora queda solo con su fecha. Se escribe al registrar el caso o en su detalle, y la IA la
   toma de la captura cuando se ve.
+- **Empresa.** El cliente que reporta el caso. Sale de un catálogo (**Configuración > Empresas**),
+  así cada cliente tiene un solo nombre en todos sus casos; cambiarle el nombre lo cambia en todos.
+  Al registrar un caso se puede crear la empresa ahí mismo. Una empresa inactiva conserva sus casos
+  y deja de ofrecerse para los nuevos; solo se puede eliminar la que no tiene casos.
 - **Estados.** Sin resolver, Pendiente y Resuelto. Un caso nuevo empieza en Pendiente.
-- **Responsable.** Quien atiende el caso: una persona de la lista de responsables, "Cliente" o nadie.
-  La lista es un catálogo de nombres aparte de los usuarios, porque quien atiende un caso no siempre
-  usa el sistema. Un usuario puede estar enlazado a un responsable (**Configuración > Usuarios**):
-  los casos que registra quedan a su nombre si no elige otro, y "Míos" en Avisos le muestra los
-  suyos. Un responsable inactivo conserva sus casos y deja de ofrecerse para los nuevos; solo se
-  puede eliminar a quien no tiene casos.
+- **Responsable.** Quien atiende el caso: una persona de la lista de responsables, o nadie. La lista
+  es un catálogo de nombres que se administra en **Configuración > Responsables**. Un caso nuevo
+  queda sin responsable hasta que alguien elige uno. Un responsable inactivo conserva sus casos y
+  deja de ofrecerse para los nuevos; solo se puede eliminar a quien no tiene casos.
+- **Tipos de soporte.** Etiquetas con nombre y color que dicen qué clase de soporte fue el caso:
+  una falla del sistema, una capacitación, un error del usuario… Cada equipo define las suyas en
+  **Configuración > Tipos de soporte**, y un caso puede llevar varias o ninguna. Sirven para filtrar
+  la lista y tienen su gráfico en el dashboard. Un tipo inactivo sigue en los casos que lo llevan y
+  deja de ofrecerse; solo se puede eliminar el que no está en ningún caso.
+- **Guardar.** Los campos de un caso se editan en su formulario y se guardan juntos con
+  **Actualizar**; si sales con cambios sin guardar, la aplicación pregunta antes de descartarlos.
+  Lo que no es un campo actúa al momento, con su propio botón: agregar una observación, adjuntar,
+  el cronómetro, archivar y eliminar. Una observación escrita y todavía sin agregar cuenta como
+  cambio sin guardar: **Actualizar** también la agrega, y **Descartar cambios** la borra. La lista
+  de casos es de solo lectura.
+- **Archivado.** Archivar un caso lo guarda: deja de aparecer en la lista, en el tablero y en los
+  avisos, pero se conserva completo y se puede desarchivar. La lista lo muestra con el filtro
+  **Archivados**, y el dashboard lo cuenta salvo que desmarques **Incluir archivados**. Archivar no
+  cuenta como movimiento del caso. Eliminar, en cambio, borra el caso con sus observaciones y
+  adjuntos, y pide confirmación.
 - **Fecha límite.** Hora de registro más las horas del SLA de la prioridad, en horas corridas. Sin
   prioridad no hay fecha límite. Un caso abierto cuya fecha límite pasó está *vencido*.
 - **Promesa de entrega.** Fecha opcional en que se le prometió al cliente tener el caso resuelto.
@@ -603,7 +766,9 @@ incompleto.
 - **Olvidado.** Caso abierto sin movimiento desde hace más del tiempo configurado (2 días por
   defecto; 0 lo apaga). Movimiento es una observación, un adjunto, el cronómetro, la respuesta para
   el cliente o cualquier cambio. En un caso importado, el último movimiento es su fecha del caso.
-- **Usuarios.** Todos tienen el mismo acceso; no hay roles.
+- **Usuarios.** Todos tienen el mismo acceso; no hay roles. Un usuario es quien entra al sistema, no
+  un responsable: registrar un caso no lo deja a su nombre. Cada usuario guarda sus propias
+  preferencias de vista, como las columnas de la lista de casos.
 
 ## Arquitectura
 
@@ -622,7 +787,7 @@ flowchart LR
 
 | Parte | Tecnología |
 | --- | --- |
-| `web/` | Angular 20 (componentes standalone, signals), Tailwind CSS 4, Angular CDK, Chart.js |
+| `web/` | Angular 20 (componentes standalone, signals), Tailwind CSS 4, Angular CDK, ng-select, Chart.js |
 | `api/` | NestJS 11, Prisma 6, PostgreSQL |
 | `mcp/`, `skills/` | Servidor MCP en Node.js sobre el API HTTP, y skill para asistentes |
 | Despliegue | Docker Compose: `db` (PostgreSQL 17), `api`, `web` (nginx), `backup` |
@@ -633,10 +798,15 @@ api/
   assets/                  guía de estilo de los mensajes a clientes
   src/auth/                login con usuario y contraseña (JWT)
   src/tickets/             casos, observaciones, adjuntos, cronómetro
+  src/companies/           catálogo de empresas
+  src/assignees/           catálogo de responsables
+  src/support-types/       catálogo de tipos de soporte
+  src/catalog/             módulos y SLA
   src/ai/                  proveedores de IA, borrador de casos y respuestas
   src/transfer/            importación, plantilla y exportación (Excel, PDF)
-  src/dashboard/           métricas
-  src/catalog/             módulos y SLA
+  src/dashboard/           métricas y su reporte (Excel, PDF)
+  src/users/               usuarios
+  src/preferences/         preferencias de cada usuario (las columnas de la lista de casos…)
   src/settings/            recordatorios
   src/branding/            logo de la empresa
   src/events/              aviso en vivo de cada cambio (Server-Sent Events)

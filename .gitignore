@@ -11,3 +11,5 @@ backups/
 api/assets/*.local.md
 # Local set-up of AI coding tools (the skill for assistants is published in skills/).
 .claude/
+# Editor settings of whoever works on the project. web/.vscode is the one the project ships.
+/.vscode/

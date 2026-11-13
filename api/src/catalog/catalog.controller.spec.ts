@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import type { PrismaService } from '../prisma.service';
@@ -17,6 +18,48 @@ describe('module input', () => {
     expect(await errors({ parentId: 1 })).toEqual([]);
     expect(await errors({ parentId: 2_147_483_647 })).toEqual([]);
     expect(await errors({ parentId: null })).toEqual([]);
+  });
+});
+
+describe('module name', () => {
+  /** The controller over a fake database that records what is written to the modules. */
+  const setup = () => {
+    const db = { systemModule: { create: jest.fn().mockResolvedValue({ id: 9 }), update: jest.fn().mockResolvedValue({}) } };
+    return { db, controller: new CatalogController(db as unknown as PrismaService) };
+  };
+  const refusal = (name: string): string => `"${name}" no puede ser el nombre de un módulo: en los reportes ya significa que el caso no tiene ninguno`;
+
+  // The reports of the dashboard put the cases without a module in a row called "Sin módulo". A
+  // module with that name would give them two rows with the same label and different counts.
+  it.each(['Sin módulo', 'SIN MODULO', ' sin   módulo '])('cannot be "%s", new or renamed: that is how the reports name the cases without a module', async (name) => {
+    const { db, controller } = setup();
+
+    const created = await controller.createModule({ name }).catch((error: unknown) => error);
+    const renamed = await controller.updateModule(3, { name }).catch((error: unknown) => error);
+
+    for (const refused of [created, renamed]) {
+      expect(refused).toBeInstanceOf(BadRequestException);
+      expect(refused).toHaveProperty('message', refusal(name.trim()));
+    }
+    expect(db.systemModule.create).not.toHaveBeenCalled();
+    expect(db.systemModule.update).not.toHaveBeenCalled();
+  });
+
+  it('can be any other, also one that only starts like it, and is stored without the spaces around it', async () => {
+    const { db, controller } = setup();
+
+    expect(await controller.createModule({ name: '  Sin módulo asignado ' })).toEqual({ id: 9 });
+    await controller.updateModule(3, { name: ' Ventas ' });
+
+    expect(db.systemModule.create).toHaveBeenCalledWith({ data: { name: 'Sin módulo asignado', parentId: null } });
+    expect(db.systemModule.update).toHaveBeenCalledWith({ where: { id: 3 }, data: { name: 'Ventas', parentId: undefined, active: undefined } });
+  });
+
+  it('is required for a new module', async () => {
+    const { db, controller } = setup();
+
+    await expect(controller.createModule({ name: '   ' })).rejects.toThrow('El nombre es obligatorio');
+    expect(db.systemModule.create).not.toHaveBeenCalled();
   });
 });
 

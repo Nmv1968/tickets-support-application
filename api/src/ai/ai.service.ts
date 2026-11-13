@@ -52,6 +52,7 @@ export interface TicketDraft {
   date: string | null;
   /** Time of day it was reported, `HH:mm`, when the evidence shows it. */
   time: string | null;
+  /** The company as the evidence names it. Text, not a company of the catalog: the screen that shows the draft looks for it there. */
   company: string | null;
   description: string;
   moduleId: number | null;
@@ -216,6 +217,7 @@ export class AiService {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
       include: {
+        company: { select: { name: true } },
         module: { select: { name: true } },
         notes: { orderBy: { createdAt: 'asc' }, select: { text: true, createdAt: true } },
       },
@@ -226,7 +228,7 @@ export class AiService {
 
     const caseText = [
       `Código: ${ticketCode(ticket.id)}`,
-      `Empresa: ${ticket.company}`,
+      `Empresa: ${ticket.company.name}`,
       `Fecha en que el cliente lo reportó: ${formatDateEs(ticket.date)}${ticket.time ? ` a las ${ticket.time}` : ''}`,
       `Estado: ${STATUS_LABEL[ticket.status]}`,
       ticket.module ? `Módulo: ${ticket.module.name}` : null,

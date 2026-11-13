@@ -1,74 +1,93 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import type { TestRequest } from '@angular/common/http/testing';
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import type { Assignee, ReminderList, Ticket, User } from './api';
+import type { ReminderList, Ticket } from './api';
 import { Auth } from './auth';
-import { Catalogs } from './catalogs';
 import { Reminders } from './reminders';
+import { TicketEvents } from './ticket-events';
 
-// "Míos" in the bell. A case belongs to a responsible of the catalog, not to a user: the cases of
-// the logged-in user are the ones of the responsible that user is.
-describe('Reminders, narrowed to the cases of the logged-in user', () => {
+// The bell. It used to have a "Míos" switch that kept only the cases of the logged-in user,
+// while a user could be linked to a responsible. Users are not responsibles any more, so
+// everyone sees the same reminders.
+describe('Reminders', () => {
   let http: HttpTestingController;
   let reminders: Reminders;
-  let catalogs: Catalogs;
 
-  const me: User = { id: 7, username: 'ana', name: 'Ana', active: true, canLogin: true, assigneeId: 2 };
-  const people: Assignee[] = [
-    { id: 2, name: 'Ana', active: true, tickets: 1 },
-    // Same number as the user's id: a case of this responsible is not the user's.
-    { id: 7, name: 'Luis', active: true, tickets: 1 },
-  ];
-  const stale = (id: number, assigneeId: number | null): Ticket => ({ id, code: `SOP-${id}`, assigneeId, assignedToClient: false }) as Ticket;
-  const list: ReminderList = { staleHours: 48, promiseSoonDays: 0, promises: [], overdue: [], stale: [stale(1, 2), stale(2, 7), stale(3, null)] } as ReminderList;
+  const ticket = (id: number, assigneeId: number | null): Ticket => ({ id, code: `SOP-${id}`, assigneeId }) as Ticket;
+  const list = (groups: Partial<ReminderList>): ReminderList => ({ staleHours: 48, promiseSoonDays: 0, promises: [], stale: [], overdue: [], ...groups });
 
   beforeEach(() => {
-    localStorage.removeItem('st.reminders.mine');
     TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
     http = TestBed.inject(HttpTestingController);
     TestBed.inject(Auth).user.set({ id: 7, username: 'ana', name: 'Ana' });
-    catalogs = TestBed.inject(Catalogs);
     reminders = TestBed.inject(Reminders);
   });
 
-  afterEach(() => {
-    http.verify();
-    localStorage.removeItem('st.reminders.mine');
-  });
+  afterEach(() => http.verify());
 
-  function load(users: User[]): void {
-    catalogs.users.set(users);
-    catalogs.assignees.set(people);
+  const read = (): TestRequest => http.expectOne({ method: 'GET', url: '/api/tickets/reminders' });
+
+  function load(groups: Partial<ReminderList>): void {
     void reminders.refresh();
-    http.expectOne({ method: 'GET', url: '/api/tickets/reminders' }).flush(list);
+    read().flush(list(groups));
     tick();
   }
 
-  const shown = (): number[] => reminders.stale().map((ticket) => ticket.id);
+  // Number 7 is both the logged-in user and a responsible: the two have nothing to do with each other.
+  it('shows every case that needs attention, whoever its responsible is and whoever is logged in', fakeAsync(() => {
+    load({ stale: [ticket(1, 2), ticket(2, 7), ticket(3, null)] });
 
-  it('shows every case until "Míos" is chosen', fakeAsync(() => {
-    load([me]);
-
-    expect(reminders.canShowMine()).toBeTrue();
-    expect(shown()).toEqual([1, 2, 3]);
+    expect(reminders.stale().map((item) => item.id)).toEqual([1, 2, 3]);
     expect(reminders.count()).toBe(3);
   }));
 
-  it('with "Míos", keeps the cases of the responsible the user is', fakeAsync(() => {
-    load([me]);
-    reminders.setOnlyMine(true);
+  it('counts once a case that needs attention for more than one reason', fakeAsync(() => {
+    load({ promises: [ticket(1, 2)], stale: [ticket(1, 2), ticket(2, null)], overdue: [ticket(2, null), ticket(3, null)] });
 
-    expect(shown()).toEqual([1]);
-    expect(reminders.count()).toBe(1);
+    expect(reminders.promises().length).toBe(1);
+    expect(reminders.stale().length).toBe(2);
+    expect(reminders.overdue().length).toBe(2);
+    expect(reminders.count()).toBe(3);
   }));
 
-  // Nothing to narrow to: an empty bell would read as "nothing needs attention".
-  it('shows every case to a user who is not a responsible, whatever was chosen before', fakeAsync(() => {
-    load([{ ...me, assigneeId: null }]);
-    reminders.setOnlyMine(true);
+  it('keeps the last list when it cannot be read again', fakeAsync(() => {
+    load({ stale: [ticket(1, 2)] });
 
-    expect(reminders.canShowMine()).toBeFalse();
-    expect(shown()).toEqual([1, 2, 3]);
+    void reminders.refresh();
+    read().error(new ProgressEvent('error'));
+    tick();
+
+    expect(reminders.stale().map((item) => item.id)).toEqual([1]);
+  }));
+
+  it('asks for nothing once the session is over', fakeAsync(() => {
+    TestBed.inject(Auth).user.set(null);
+    void reminders.refresh();
+    tick();
+
+    http.expectNone('/api/tickets/reminders');
+  }));
+
+  // Any change to a case can add or remove a reminder. Several in a row are one read.
+  it('is read again shortly after cases change, once for several changes', fakeAsync(() => {
+    reminders.start();
+    read().flush(list({}));
+    tick();
+
+    const events = TestBed.inject(TicketEvents);
+    events.outdated(1);
+    tick(500);
+    events.removed(2);
+    tick(799);
+    http.expectNone('/api/tickets/reminders');
+
+    tick(1);
+    read().flush(list({ overdue: [ticket(3, null)] }));
+    tick();
+    expect(reminders.count()).toBe(1);
+    // Its own timers are stopped here: the test owns the clock.
+    reminders.stop();
   }));
 });

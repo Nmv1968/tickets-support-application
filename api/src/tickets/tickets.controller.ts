@@ -28,11 +28,6 @@ export class TicketsController {
     return this.tickets.reminders();
   }
 
-  @Get('companies')
-  companies(@Query('q') q?: string): Promise<string[]> {
-    return this.tickets.companies(q);
-  }
-
   @Get(':id')
   get(@Param('id', IdPipe) id: number): Promise<TicketDetailDto> {
     return this.tickets.get(id);

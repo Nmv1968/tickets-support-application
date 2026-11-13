@@ -22,7 +22,7 @@ type ConfigData = Partial<ConfigRow>;
 
 interface StoredCase {
   id: number;
-  company: string;
+  company: { name: string };
   date: Date;
   status: 'UNRESOLVED' | 'PENDING' | 'RESOLVED';
   description: string;
@@ -627,7 +627,7 @@ describe('drafting with the active provider', () => {
   describe('message for the client', () => {
     const resolvedCase: StoredCase = {
       id: 7,
-      company: 'ACME',
+      company: { name: 'ACME' },
       // A case date is a calendar day, stored at UTC midnight.
       date: new Date('2026-11-09T00:00:00.000Z'),
       status: 'RESOLVED',
@@ -651,6 +651,17 @@ describe('drafting with the active provider', () => {
       const text = userText(sent[0]);
       expect(text).toContain('Fecha en que el cliente lo reportó: 09/11/2026');
       expect(text).toContain('- 10/11/2026: Se revisó la impresora\n- 10/11/2026: Se reinstaló el controlador');
+    });
+
+    // A case points at a company of the catalog: what the model reads is its name.
+    it('tells the model which company the case is of, by its name', async () => {
+      const { prisma, service } = setup(active);
+      prisma.cases = [{ ...resolvedCase, company: { name: 'Corporación Ñandú' } }];
+      answer = () => chatAnswer('Buen día. El caso quedó resuelto.');
+
+      await service.reply(7);
+
+      expect(userText(sent[0])).toContain('Empresa: Corporación Ñandú\n');
     });
 
     it('saves the message through the tickets service, without the quotes a model may add', async () => {

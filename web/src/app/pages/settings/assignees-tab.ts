@@ -1,13 +1,14 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import type { Assignee } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
+import { Confirm } from '../../core/confirm';
 import { Toast } from '../../core/toast';
 
 /**
- * The people a case can be assigned to. A list of names: whoever attends cases goes here, whether
- * or not they are a user of the app.
+ * The people a case can be assigned to. A list of names of its own: whoever attends cases goes
+ * here, and being a user of the app has nothing to do with it.
  */
 @Component({
   selector: 'app-assignees-tab',
@@ -33,9 +34,6 @@ import { Toast } from '../../core/toast';
               [attr.aria-label]="'Nombre del responsable ' + person.name"
               (change)="rename(person, $event)"
             />
-            @if (usernames().get(person.id); as username) {
-              <span class="badge bg-elevated text-muted" title="Usuario del sistema que es este responsable"><i class="mdi mdi-account-outline" aria-hidden="true"></i> {{ username }}</span>
-            }
             <!-- Kept together: on a narrow screen the whole group goes under the name, to the right. -->
             <div class="ml-auto flex items-center gap-2">
               <span class="text-xs text-muted">{{ person.tickets }} {{ person.tickets === 1 ? 'caso' : 'casos' }}</span>
@@ -60,8 +58,7 @@ import { Toast } from '../../core/toast';
         }
       </div>
       <p class="text-xs text-muted">
-        Los responsables no necesitan ser usuarios del sistema: basta el nombre. Un responsable inactivo ya no aparece al registrar o reasignar casos, pero conserva los que
-        tiene. Solo se puede eliminar a quien no tiene casos. «Cliente» ya es una opción de cada caso; no hace falta agregarlo.
+        Un responsable inactivo ya no aparece al registrar o reasignar casos, pero conserva los que tiene. Solo se puede eliminar a quien no tiene casos.
       </p>
     </div>
   `,
@@ -69,21 +66,13 @@ import { Toast } from '../../core/toast';
 export class AssigneesTab {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
+  private readonly confirm = inject(Confirm);
+  private readonly destroyRef = inject(DestroyRef);
   protected readonly catalogs = inject(Catalogs);
 
   protected readonly name = signal('');
   /** A write is on its way: a second click must not send it twice. */
   protected readonly busy = signal(false);
-  /** Usernames of the users linked to each responsible, by responsible id. */
-  protected readonly usernames = computed(() => {
-    const byAssignee = new Map<number, string>();
-    for (const user of this.catalogs.users()) {
-      if (user.assigneeId === null) continue;
-      const others = byAssignee.get(user.assigneeId);
-      byAssignee.set(user.assigneeId, others ? `${others}, ${user.username}` : user.username);
-    }
-    return byAssignee;
-  });
 
   constructor() {
     // The number of cases of each responsible moves with every assignment: read it again on arrival.
@@ -125,7 +114,9 @@ export class AssigneesTab {
     void this.run(() => this.api.updateAssignee(person.id, { active: !person.active }), person.active ? 'Responsable desactivado' : 'Responsable activado');
   }
 
-  protected remove(person: Assignee): void {
-    void this.run(() => this.api.deleteAssignee(person.id), 'Responsable eliminado');
+  /** Asked first: it cannot be undone, and its button is next to the one that only deactivates. */
+  protected async remove(person: Assignee): Promise<void> {
+    if (!(await this.confirm.ask({ title: `¿Eliminar al responsable «${person.name}»?`, confirmLabel: 'Eliminar', danger: true }, this.destroyRef))) return;
+    await this.run(() => this.api.deleteAssignee(person.id), 'Responsable eliminado');
   }
 }

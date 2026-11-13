@@ -27,7 +27,11 @@ const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 export class TransferController {
   constructor(private readonly transfer: TransferService) {}
 
-  /** `dryRun=1` only reports what would be imported. */
+  /**
+   * `dryRun=1` only reports what would be imported. `createMissing=1` adds the companies,
+   * responsibles and support types of the sheet that do not exist; without it, the rows that name
+   * them are rejected.
+   */
   @Post('import')
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_IMPORT_BYTES } }))
@@ -36,12 +40,14 @@ export class TransferController {
     @CurrentUser() user: AuthUser,
     @Query('dryRun') dryRun?: string,
     @Query('dateOrder') dateOrder?: string,
+    @Query('createMissing') createMissing?: string,
   ): Promise<ImportResult> {
     if (!file) throw new BadRequestException('No se recibió ningún archivo');
-    return this.transfer.import(file, { dryRun: dryRun === '1', dateOrder: dateOrder === 'dmy' ? 'dmy' : 'mdy' }, user);
+    const options = { dryRun: dryRun === '1', dateOrder: dateOrder === 'dmy' ? ('dmy' as const) : ('mdy' as const), createMissing: createMissing === '1' };
+    return this.transfer.import(file, options, user);
   }
 
-  /** Empty spreadsheet with the columns the import reads, for people to fill in and import. */
+  /** Spreadsheet with the columns the import reads and what the system has to choose from, for people to fill in and import. */
   @Get('import/template')
   async template(@Res({ passthrough: true }) res: Response): Promise<StreamableFile> {
     const file = await this.transfer.template();

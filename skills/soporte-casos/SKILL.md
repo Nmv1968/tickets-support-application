@@ -7,7 +7,8 @@ description: Registrar, consultar, dar seguimiento y cerrar casos de soporte té
 
 El sistema de casos se maneja con las herramientas del servidor MCP `soporte`
 (`leer_guia`, `listar_catalogos`, `buscar_casos`, `ver_caso`, `crear_caso`, `actualizar_caso`,
-`agregar_observacion`, `adjuntar_archivos`, `cerrar_caso`, `crear_responsable`, `crear_modulo`).
+`agregar_observacion`, `adjuntar_archivos`, `cerrar_caso`, `crear_empresa`, `crear_responsable`,
+`crear_modulo`, `crear_tipo_soporte`).
 
 Las reglas del equipo no están en este archivo: viven junto al servidor para que cualquier
 asistente las reciba igual. Por eso el primer paso siempre es el mismo:
@@ -23,9 +24,13 @@ Recordatorios que la guía desarrolla:
 - Cerrar un caso: identifica el caso, redacta la respuesta para el cliente con la guía de
   estilo, llama a `cerrar_caso` y devuelve el mensaje completo en un bloque listo para copiar.
 - Empresa y solución no se suponen: si faltan, pregunta.
-- Si la persona nombra un responsable o un módulo que no existe, no lo crees ni elijas otro por
-  tu cuenta: pregúntale si lo agregas (`crear_responsable`, `crear_modulo`), si usas uno de los
-  existentes o si el caso queda sin ese dato.
+- Si la persona nombra una empresa, un responsable, un módulo o un tipo de soporte que no
+  existe, no lo crees ni elijas otro por tu cuenta: pregúntale si lo agregas (`crear_empresa`,
+  `crear_responsable`, `crear_modulo`, `crear_tipo_soporte`), si usas uno de los existentes o si
+  el caso queda sin ese dato. La empresa es el único dato que no puede faltar.
+- Los tipos de soporte de un caso los decide la persona, entre los del catálogo.
+- Archivar guarda un caso sin eliminarlo (`actualizar_caso` con `archivar`), solo cuando la
+  persona lo pide. `buscar_casos` deja fuera los archivados salvo que se los pidas.
 
 Si las herramientas de `soporte` no están disponibles o responden que no pueden conectar, el
 sistema está apagado: dilo y no intentes otra vía. Se enciende con los comandos del `README.md`

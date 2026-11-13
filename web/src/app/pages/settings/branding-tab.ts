@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { Api } from '../../core/api';
 import { AppLogo } from '../../core/app-logo';
 import { Branding } from '../../core/branding';
+import { Confirm } from '../../core/confirm';
 import { Toast } from '../../core/toast';
 import { errorMessage, toSmallPng } from '../../core/ui';
 
@@ -53,6 +54,7 @@ const LOGO_SIDE = 256;
 export class BrandingTab {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
+  private readonly confirm = inject(Confirm);
   protected readonly branding = inject(Branding);
 
   protected readonly side = LOGO_SIDE;
@@ -78,7 +80,7 @@ export class BrandingTab {
   }
 
   protected async remove(): Promise<void> {
-    if (!confirm('¿Quitar el logo y volver al icono por defecto?')) return;
+    if (!(await this.confirm.ask({ title: '¿Quitar el logo y volver al icono por defecto?', confirmLabel: 'Quitar', danger: true }))) return;
     this.busy.set(true);
     this.error.set('');
     try {

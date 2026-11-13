@@ -4,6 +4,7 @@ import { AppLogo } from '../core/app-logo';
 import { Auth } from '../core/auth';
 import { Branding } from '../core/branding';
 import { Catalogs } from '../core/catalogs';
+import { ConfirmDialog } from '../core/confirm';
 import { Live } from '../core/live';
 import { Reminders } from '../core/reminders';
 import { RemindersPanel } from './reminders-panel';
@@ -12,7 +13,7 @@ import { Toast } from '../core/toast';
 
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, RemindersPanel, AppLogo],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, RemindersPanel, AppLogo, ConfirmDialog],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex h-dvh">
@@ -99,6 +100,8 @@ import { Toast } from '../core/toast';
     @if (remindersOpen()) {
       <app-reminders-panel (closed)="remindersOpen.set(false)" />
     }
+    <!-- After everything else: the question it asks goes over the panel or the dialog that asked. -->
+    <app-confirm />
   `,
 })
 export class Shell {

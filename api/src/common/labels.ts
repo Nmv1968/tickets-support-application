@@ -17,6 +17,14 @@ export const PRIORITIES: Priority[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 export const STATUSES: TicketStatus[] = ['UNRESOLVED', 'PENDING', 'RESOLVED'];
 
 /**
+ * How the dashboard and its reports name the cases that have no support type, and the ones that
+ * have no module. No entry of those catalogs can be called so: its row would be told apart from
+ * the row of the cases without one by nothing.
+ */
+export const NO_SUPPORT_TYPE = 'Sin tipo';
+export const NO_MODULE = 'Sin módulo';
+
+/**
  * Lowercase, no accents, single spaces. Stored next to searchable text and applied
  * to the query, so "corporacion" finds "CORPORACIÓN" whatever the database locale is.
  */

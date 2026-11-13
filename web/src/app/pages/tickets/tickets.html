@@ -3,9 +3,15 @@
   <div class="flex flex-wrap items-center gap-2">
     <h1 class="mr-auto basis-full text-lg font-semibold sm:basis-auto">Casos de soporte</h1>
 
-    <button type="button" class="btn btn-primary mr-auto sm:mr-0" (click)="openAi([])" title="Crear un caso desde una foto, captura o texto">
+    <button type="button" class="btn btn-primary" aria-controls="new-ticket" [attr.aria-expanded]="newOpen()" (click)="newOpen.set(!newOpen())">
+      <i class="mdi mdi-plus text-base" aria-hidden="true"></i>
+      Nuevo caso
+    </button>
+    <button type="button" class="btn btn-soft mr-auto sm:mr-0" (click)="openAi([])" title="Crear un caso desde una foto, captura o texto">
       <i class="mdi mdi-creation-outline text-base" aria-hidden="true"></i>
-      Nuevo con IA
+      <!-- Shorter on a phone, where the four buttons share one line. -->
+      <span class="sm:hidden">Con IA</span>
+      <span class="hidden sm:inline">Nuevo con IA</span>
     </button>
     <!-- On phones these two show only their icon, so each carries its name apart from the text. -->
     <button type="button" class="btn btn-soft" (click)="importOpen.set(true)" aria-label="Importar">
@@ -34,246 +40,200 @@
     </div>
   </div>
 
-  <!-- Filters -->
-  <div class="card flex flex-wrap items-center gap-2 p-2">
-    <div class="relative min-w-52 flex-1">
-      <i class="mdi mdi-magnify pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-base text-muted" aria-hidden="true"></i>
-      <input
-        class="input pl-8"
-        type="search"
-        placeholder="Buscar empresa, descripción, observación o código"
-        aria-label="Buscar casos"
-        [ngModel]="searchText()"
-        (ngModelChange)="onSearch($event)"
-      />
-    </div>
-
-    <div class="flex rounded-control bg-elevated p-0.5" role="group" aria-label="Filtrar por estado">
-      <button type="button" class="segment" [attr.aria-pressed]="status() === ''" (click)="status.set('')">
-        Todos
-      </button>
-      @for (s of statuses; track s) {
-        <button type="button" class="segment" [attr.aria-pressed]="status() === s" (click)="status.set(s)">
-          {{ statusLabel[s] }}
-        </button>
-      }
-    </div>
-
-    <button type="button" class="btn btn-soft px-2.5 py-1.5 text-xs md:hidden" [attr.aria-expanded]="moreFilters()" (click)="moreFilters.set(!moreFilters())">
-      <i class="mdi mdi-filter-variant" aria-hidden="true"></i>
-      Más filtros
-    </button>
-
-    <!-- On phones these stay folded so the list keeps the screen. -->
-    <div [class]="moreFilters() ? 'contents' : 'hidden md:contents'">
-      <select class="input w-auto" aria-label="Filtrar por responsable" [(ngModel)]="assignee">
-        <option value="">Responsable: todos</option>
-        @for (person of catalogs.assignees(); track person.id) {
-          <option [value]="person.id">{{ person.name }}</option>
+  <!-- Search, filters and columns -->
+  <div class="card p-2">
+    <div class="flex items-center gap-2">
+      <div class="relative min-w-0 flex-1">
+        <i class="mdi mdi-magnify pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-base text-muted" aria-hidden="true"></i>
+        <input
+          class="input pl-8"
+          type="search"
+          placeholder="Buscar empresa, descripción, observación o código"
+          aria-label="Buscar casos"
+          [ngModel]="searchText()"
+          (ngModelChange)="onSearch($event)"
+        />
+      </div>
+      <!-- On a phone it shows its icon and its count, so it carries its name apart from the text. -->
+      @let count = filterCount();
+      <button
+        type="button"
+        class="btn btn-soft"
+        aria-controls="ticket-filters"
+        [attr.aria-expanded]="filtersOpen()"
+        [attr.aria-label]="count ? 'Filtros: ' + count + (count === 1 ? ' activo' : ' activos') : 'Filtros'"
+        [title]="filtersOpen() ? 'Ocultar los filtros' : 'Mostrar los filtros'"
+        (click)="toggleFilters()"
+      >
+        <i class="mdi mdi-filter-variant text-base" aria-hidden="true"></i>
+        <span class="hidden sm:inline">Filtros</span>
+        @if (count) {
+          <span class="badge bg-primary px-1.5 text-white">{{ count }}</span>
         }
-        <option value="client">Cliente</option>
-        <option value="none">Sin asignar</option>
-      </select>
-
-      <input class="input w-auto" type="date" aria-label="Fecha del caso desde" title="Fecha del caso desde" [(ngModel)]="from" />
-      <input class="input w-auto" type="date" aria-label="Fecha del caso hasta" title="Fecha del caso hasta" [(ngModel)]="to" />
-
-      <label class="flex cursor-pointer items-center gap-1.5 px-1 text-xs text-muted">
-        <input type="checkbox" class="accent-danger" [(ngModel)]="overdue" />
-        Vencidos
-      </label>
-
-      <select class="input w-auto" aria-label="Filtrar por promesa de entrega" title="Promesa de entrega al cliente" [(ngModel)]="promise">
-        <option value="">Promesa: todas</option>
-        <option value="any">Con promesa de entrega</option>
-        <option value="due">Por atender (vencidas, hoy y próximas)</option>
-        <option value="overdue">Promesa vencida</option>
-        <option value="today">Promesa para hoy</option>
-        <option value="soon">Promesa próxima</option>
-      </select>
-
-      <label class="flex cursor-pointer items-center gap-1.5 px-1 text-xs text-muted" title="Abiertos y sin movimiento desde hace más del tiempo configurado en Recordatorios">
-        <input type="checkbox" class="accent-warning" [(ngModel)]="stale" />
-        Olvidados
-      </label>
-    </div>
-
-    @if (hasFilters()) {
-      <button type="button" class="btn btn-ghost px-2 py-1.5 text-xs" (click)="clearFilters()">
-        <i class="mdi mdi-filter-off-outline" aria-hidden="true"></i>
-        Limpiar
       </button>
+      <app-ticket-columns [visible]="visibleColumns()" (visibleChange)="chooseColumns($event)" />
+    </div>
+    @if (filtersOpen()) {
+      <app-ticket-filters class="mt-2 border-t border-line pt-2" [(filters)]="panelFilters" [canClear]="hasFilters()" (cleared)="clearFilters()" />
     }
   </div>
 
-  <datalist id="company-options">
-    @for (company of companyOptions(); track company) {
-      <option [value]="company"></option>
-    }
-  </datalist>
+  @if (newOpen()) {
+    <app-new-ticket (registered)="onRegistered()" (closed)="newOpen.set(false)" />
+  }
 
-  <!-- Desktop: editable table -->
-  <div class="card hidden min-h-0 flex-1 overflow-auto md:block">
-    <!-- Fixed layout: Descripción and Observación share the space the other columns leave. -->
-    <table class="w-full min-w-[1200px] table-fixed border-collapse text-left">
+  <!--
+    Desktop: the table. It never gets shorter than a few rows (min-h-64, the cards below too):
+    with the filters and the form of a new case open on a low screen, the page scrolls instead.
+  -->
+  <div class="card hidden min-h-64 flex-1 overflow-auto md:block">
+    <!--
+      Fixed layout: Descripción and Observación share the space the other columns leave. The cells
+      are padded 8 px a side, and the widths of the columns count on it (see COLUMNS).
+    -->
+    <table class="w-full table-fixed border-collapse text-left" [style.min-width.px]="tableWidth()">
       <colgroup>
-        <col class="w-[88px]" />
-        <col class="w-[136px]" />
-        <col class="w-[100px]" />
-        <col class="w-[168px]" />
-        <col />
-        <col class="w-[128px]" />
-        <col class="w-[152px]" />
-        <col />
+        @for (column of columns(); track column.id) {
+          <col [style.width.px]="column.width" />
+        }
       </colgroup>
       <thead class="sticky top-0 z-10 bg-primary text-xs text-white">
         <tr>
-          <th class="px-3 py-2.5 font-semibold" [attr.aria-sort]="sortDir() === 'asc' ? 'ascending' : 'descending'">
-            <button type="button" class="inline-flex items-center gap-0.5 font-semibold" (click)="toggleSort()" [title]="sortDir() === 'asc' ? 'Orden: número de caso de menor a mayor. Clic para invertir' : 'Orden: número de caso de mayor a menor. Clic para invertir'">
-              Código
-              <i class="mdi text-sm leading-none" [class]="sortDir() === 'asc' ? 'mdi-arrow-up' : 'mdi-arrow-down'" aria-hidden="true"></i>
-            </button>
-          </th>
-          <th class="px-3 py-2.5 font-semibold" title="Día en que el cliente reportó el problema">Fecha del caso</th>
-          <th class="px-3 py-2.5 font-semibold" title="Día en que se registró el ticket en este sistema. Automática">Registro</th>
-          <th class="px-3 py-2.5 font-semibold">Empresa</th>
-          <th class="px-3 py-2.5 font-semibold">Descripción</th>
-          <th class="px-3 py-2.5 font-semibold">Estado</th>
-          <th class="px-3 py-2.5 font-semibold">Responsable</th>
-          <th class="px-3 py-2.5 font-semibold">Observación</th>
+          @for (column of columns(); track column.id) {
+            @if (column.id === 'code') {
+              <th class="px-2 py-2.5 font-semibold" [attr.aria-sort]="sortDir() === 'asc' ? 'ascending' : 'descending'">
+                <button type="button" class="inline-flex items-center gap-0.5 font-semibold" (click)="toggleSort()" [title]="sortDir() === 'asc' ? 'Orden: número de caso de menor a mayor. Clic para invertir' : 'Orden: número de caso de mayor a menor. Clic para invertir'">
+                  Código
+                  <i class="mdi text-sm leading-none" [class]="sortDir() === 'asc' ? 'mdi-arrow-up' : 'mdi-arrow-down'" aria-hidden="true"></i>
+                </button>
+              </th>
+            } @else {
+              <th class="px-2 py-2.5 font-semibold" [attr.title]="column.hint ?? null">{{ column.label }}</th>
+            }
+          }
         </tr>
       </thead>
       <tbody>
-        <!-- Quick add: type and press Enter, like a new spreadsheet row -->
-        <tr class="border-b border-line bg-primary/5 align-top" (keydown.enter)="add()">
-          <td class="px-3 py-2 text-xs text-muted">
-            <span class="inline-flex items-center gap-1 pt-2"><i class="mdi mdi-plus" aria-hidden="true"></i>Nuevo</span>
-          </td>
-          <td class="px-1.5 py-1.5">
-            <input class="input px-2 py-1.5" type="date" aria-label="Fecha del caso nuevo: día en que el cliente lo reportó" title="Día en que el cliente reportó el problema" [max]="today" [(ngModel)]="newDate" />
-            <input class="input mt-1 px-2 py-1.5" type="time" aria-label="Hora del caso nuevo (opcional)" title="Hora en que el cliente lo reportó (opcional)" [(ngModel)]="newTime" />
-          </td>
-          <td class="px-3 py-2 text-xs text-muted" title="La fecha de registro la pone el sistema al guardar"><span class="inline-block pt-2">Hoy</span></td>
-          <td class="px-1.5 py-1.5">
-            <input class="input px-2 py-1.5" list="company-options" placeholder="Empresa" aria-label="Empresa del caso nuevo" [ngModel]="newCompany()" (ngModelChange)="onCompanyInput($event)" />
-          </td>
-          <td class="px-1.5 py-1.5">
-            <input class="input px-2 py-1.5" placeholder="Descripción del caso (Enter para guardar)" aria-label="Descripción del caso nuevo" [(ngModel)]="newDescription" />
-          </td>
-          <td class="px-1.5 py-1.5">
-            <select class="input px-2 py-1.5" aria-label="Estado del caso nuevo" [(ngModel)]="newStatus">
-              @for (s of statuses; track s) {
-                <option [value]="s">{{ statusLabel[s] }}</option>
-              }
-            </select>
-          </td>
-          <td class="px-1.5 py-1.5">
-            <select class="input px-2 py-1.5" aria-label="Responsable del caso nuevo" [(ngModel)]="newAssignee">
-              <option value="">Sin asignar</option>
-              @for (person of catalogs.activeAssignees(); track person.id) {
-                <option [value]="person.id">{{ person.name }}</option>
-              }
-              <option value="client">Cliente</option>
-            </select>
-          </td>
-          <td class="px-1.5 py-1.5">
-            <div class="flex gap-1.5">
-              <input class="input px-2 py-1.5" placeholder="Observación (opcional)" aria-label="Observación del caso nuevo" [(ngModel)]="newNote" />
-              <button type="button" class="btn btn-primary px-2.5 py-1.5" [disabled]="adding()" (click)="add()" aria-label="Agregar caso">
-                <i class="mdi mdi-plus text-base" aria-hidden="true"></i>
-              </button>
-            </div>
-          </td>
-        </tr>
-
         @for (t of items(); track t.id) {
-          <tr class="border-b border-line align-top hover:bg-elevated/60">
-            <td class="px-3 py-2">
-              <button type="button" class="font-mono text-xs text-primary hover:underline" (click)="openId.set(t.id)">{{ t.code }}</button>
-              <!-- Without the promise icon: this row writes the promise out under the description. -->
-              <app-ticket-flags class="mt-0.5" [ticket]="t" [showPromise]="false" />
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap">
-              {{ formatDay(t.date) }}
-              @if (t.time) {
-                <div class="text-xs text-muted" title="Hora del caso">{{ t.time }}</div>
-              }
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap text-muted" [title]="'Registrado el ' + formatDateTime(t.createdAt)">{{ formatMomentDay(t.createdAt) }}</td>
-            <td class="px-3 py-2 font-medium">
-              <button type="button" class="text-left hover:underline" (click)="openId.set(t.id)">{{ t.company }}</button>
-            </td>
-            <td class="px-3 py-2">
-              <button type="button" class="line-clamp-3 text-left whitespace-pre-line" (click)="openId.set(t.id)">{{ t.description }}</button>
-              @if (t.moduleName) {
-                <div class="mt-0.5 text-2xs text-muted">{{ t.moduleName }}</div>
-              }
-              @if (t.promisedDate) {
-                <div class="mt-0.5 flex items-center gap-1 text-2xs" [class]="t.promiseState ? promiseClass[t.promiseState] : 'text-muted'">
-                  <i class="mdi mdi-calendar-clock-outline" aria-hidden="true"></i>
-                  Entrega prometida: {{ formatDay(t.promisedDate) }}{{ t.promiseState ? ' · ' + promiseText(t.promisedDate) : '' }}
-                </div>
-              }
-            </td>
-            <td class="px-2 py-1.5">
-              <select
-                class="badge cursor-pointer appearance-none border-0 py-1 outline-none focus:ring-2 focus:ring-primary/40"
-                [class]="'st-' + t.status"
-                [attr.aria-label]="'Estado de ' + t.code"
-                [ngModel]="t.status"
-                (ngModelChange)="patch(t, { status: $event })"
-              >
-                @for (s of statuses; track s) {
-                  <option [value]="s">{{ statusLabel[s] }}</option>
-                }
-              </select>
-            </td>
-            <td class="px-1.5 py-1">
-              <select class="cell-control" [attr.aria-label]="'Responsable de ' + t.code" [ngModel]="assigneeValue(t)" (ngModelChange)="patchAssignee(t, $event)">
-                <option value="">Sin asignar</option>
-                @for (person of catalogs.assignees(); track person.id) {
-                  @if (person.active || person.id === t.assigneeId) {
-                    <option [value]="person.id">{{ person.name }}</option>
-                  }
-                }
-                <option value="client">Cliente</option>
-              </select>
-            </td>
-            <td class="px-1.5 py-1">
-              @if (noteRowId() === t.id) {
-                <input
-                  appAutofocus
-                  class="input px-2 py-1"
-                  placeholder="Nueva observación (Enter guarda, Esc cancela)"
-                  [attr.aria-label]="'Nueva observación de ' + t.code"
-                  [(ngModel)]="noteText"
-                  (keydown.enter)="saveNote(t)"
-                  (keydown.escape)="noteRowId.set(null)"
-                  (blur)="saveNote(t)"
-                />
-              } @else {
-                <button type="button" class="cell-control flex items-start gap-1 text-left" (click)="startNote(t)" title="Agregar observación">
-                  @if (t.lastNote) {
-                    <span class="line-clamp-2 flex-1 whitespace-pre-line">{{ t.lastNote }}</span>
-                    @if (t.notesCount > 1) {
-                      <span class="badge bg-elevated text-muted">{{ t.notesCount }}</span>
+          <!-- Read only: the case is changed in its form, which the row opens. -->
+          <tr class="cursor-pointer border-b border-line align-top hover:bg-elevated/60" (click)="openRow(t)">
+            @for (column of columns(); track column.id) {
+              @switch (column.id) {
+                @case ('code') {
+                  <td class="p-2">
+                    <!-- The way into the case for the keyboard. Its press stops here: the row would not open with a text selected somewhere. -->
+                    <button type="button" class="font-mono text-xs text-primary hover:underline" (click)="$event.stopPropagation(); openId.set(t.id)">{{ t.code }}</button>
+                    <app-ticket-flags class="mt-0.5" [ticket]="t" [showPromise]="!promiseWritten()" />
+                    @if (t.archivedAt) {
+                      <span class="badge mt-1 bg-elevated text-muted" [title]="'Archivado el ' + formatDateTime(t.archivedAt)">Archivado</span>
                     }
-                  } @else {
-                    <span class="text-muted/60">Agregar…</span>
-                  }
-                </button>
+                  </td>
+                }
+                @case ('date') {
+                  <td class="p-2 whitespace-nowrap">
+                    {{ formatDay(t.date) }}
+                    @if (t.time) {
+                      <div class="text-xs text-muted" title="Hora del caso">{{ t.time }}</div>
+                    }
+                  </td>
+                }
+                @case ('createdAt') {
+                  <td class="p-2 whitespace-nowrap text-muted" [title]="'Registrado el ' + formatDateTime(t.createdAt)">{{ formatMomentDay(t.createdAt) }}</td>
+                }
+                @case ('company') {
+                  <td class="p-2 font-medium">{{ t.company }}</td>
+                }
+                @case ('description') {
+                  <td class="p-2">
+                    <div class="line-clamp-3 whitespace-pre-line">{{ t.description }}</div>
+                    <!-- The module and the promise are written here unless they have their own column on show. -->
+                    @if (t.moduleName && !shown().has('module')) {
+                      <div class="mt-0.5 text-2xs text-muted">{{ t.moduleName }}</div>
+                    }
+                    @if (t.promisedDate && !shown().has('promisedDate')) {
+                      <div class="mt-0.5 flex items-center gap-1 text-2xs" [class]="t.promiseState ? promiseClass[t.promiseState] : 'text-muted'">
+                        <i class="mdi mdi-calendar-clock-outline" aria-hidden="true"></i>
+                        Entrega prometida: {{ formatDay(t.promisedDate) }}{{ t.promiseState ? ' · ' + promiseText(t.promisedDate) : '' }}
+                      </div>
+                    }
+                  </td>
+                }
+                @case ('status') {
+                  <td class="p-2">
+                    <span class="badge" [class]="'st-' + t.status">{{ statusLabel[t.status] }}</span>
+                  </td>
+                }
+                @case ('assignee') {
+                  <td class="p-2">
+                    @if (t.assigneeName) {
+                      {{ t.assigneeName }}
+                    } @else {
+                      <span class="text-muted">Sin asignar</span>
+                    }
+                  </td>
+                }
+                @case ('priority') {
+                  <td class="p-2 whitespace-nowrap">
+                    @if (t.priority) {
+                      <!-- The colour is in the flag: as the colour of the text, some of them are too faint to read. -->
+                      <i class="mdi mdi-flag" [class]="priorityClass[t.priority]" aria-hidden="true"></i>
+                      {{ priorityLabel[t.priority] }}
+                    }
+                  </td>
+                }
+                @case ('supportTypes') {
+                  <td class="p-2">
+                    <div class="flex flex-wrap gap-1">
+                      @for (type of t.supportTypes; track type.id) {
+                        <app-type-chip [type]="type" />
+                      }
+                    </div>
+                  </td>
+                }
+                @case ('promisedDate') {
+                  <td class="p-2">
+                    @if (t.promisedDate) {
+                      {{ formatDay(t.promisedDate) }}
+                      @if (t.promiseState) {
+                        <div class="text-xs" [class]="promiseClass[t.promiseState]">{{ promiseText(t.promisedDate) }}</div>
+                      }
+                    }
+                  </td>
+                }
+                @case ('dueAt') {
+                  <td class="p-2" [class.text-danger]="t.overdue" [attr.title]="t.overdue ? 'Vencido' : null">{{ formatDateTime(t.dueAt) }}</td>
+                }
+                @case ('lastNote') {
+                  <td class="p-2">
+                    @if (t.lastNote) {
+                      <div class="flex items-start gap-1">
+                        <span class="line-clamp-2 flex-1 whitespace-pre-line">{{ t.lastNote }}</span>
+                        @if (t.notesCount > 1) {
+                          <span class="badge bg-elevated text-muted" [title]="t.notesCount + ' observaciones'">{{ t.notesCount }}</span>
+                        }
+                      </div>
+                    }
+                  </td>
+                }
+                @case ('lastActivityAt') {
+                  <td class="p-2" [title]="timeAgo(t.lastActivityAt)">{{ formatDateTime(t.lastActivityAt) }}</td>
+                }
+                @default {
+                  <td class="p-2">{{ text(column.id, t) }}</td>
+                }
               }
-            </td>
+            }
           </tr>
         } @empty {
           <tr>
-            <td colspan="8" class="px-3 py-12 text-center text-muted">
+            <td [attr.colspan]="columns().length" class="px-3 py-12 text-center text-muted">
               @if (loading()) {
                 Cargando…
               } @else if (hasFilters()) {
                 Ningún caso coincide con los filtros.
+                <button type="button" class="font-medium text-primary underline underline-offset-2" (click)="clearFilters()">Limpiar filtros</button>
               } @else {
-                Todavía no hay casos. Escribe en la primera fila, pega una captura (Ctrl+V) o importa tu hoja de Excel.
+                Todavía no hay casos. Usa «Nuevo caso», pega una captura (Ctrl+V) o importa tu hoja de Excel.
               }
             </td>
           </tr>
@@ -282,28 +242,45 @@
     </table>
   </div>
 
-  <!-- Mobile: quick add and card list -->
-  <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-auto md:hidden">
-    <form class="card space-y-2 p-2.5" (ngSubmit)="add()">
-      <input class="input" name="company" list="company-options" placeholder="Empresa" aria-label="Empresa" [ngModel]="newCompany()" (ngModelChange)="onCompanyInput($event)" />
-      <div class="flex gap-2">
-        <input class="input" name="description" placeholder="Descripción del caso" aria-label="Descripción" [(ngModel)]="newDescription" />
-        <button type="submit" class="btn btn-primary" [disabled]="adding()" aria-label="Agregar caso"><i class="mdi mdi-plus text-base" aria-hidden="true"></i></button>
-      </div>
-    </form>
-
+  <!-- Mobile: a card per case, with what the person chose to see in "Columnas". -->
+  <div class="flex min-h-64 flex-1 flex-col gap-2 overflow-auto md:hidden">
     @for (t of items(); track t.id) {
       <button type="button" class="card p-3 text-left" (click)="openId.set(t.id)">
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <span class="font-mono text-xs text-primary">{{ t.code }}</span>
-          <span class="text-xs text-muted" title="Fecha del caso">{{ formatCaseDate(t) }}</span>
+          @if (shown().has('date')) {
+            <span class="text-xs text-muted" title="Fecha del caso">{{ formatCaseDate(t) }}</span>
+          }
           <app-ticket-flags [ticket]="t" />
-          <span class="badge ml-auto" [class]="'st-' + t.status">{{ statusLabel[t.status] }}</span>
+          <span class="ml-auto flex items-center gap-1">
+            @if (t.archivedAt) {
+              <span class="badge bg-elevated text-muted">Archivado</span>
+            }
+            @if (shown().has('status')) {
+              <span class="badge" [class]="'st-' + t.status">{{ statusLabel[t.status] }}</span>
+            }
+          </span>
         </div>
-        <div class="mt-1 font-medium">{{ t.company }}</div>
-        <div class="line-clamp-2 text-muted">{{ t.description }}</div>
-        @if (t.assigneeName) {
+        @if (shown().has('company')) {
+          <div class="mt-1 font-medium">{{ t.company }}</div>
+        }
+        @if (shown().has('description')) {
+          <div class="line-clamp-2 text-muted">{{ t.description }}</div>
+        }
+        @if (shown().has('supportTypes') && t.supportTypes.length) {
+          <div class="mt-1 flex flex-wrap gap-1">
+            @for (type of t.supportTypes; track type.id) {
+              <app-type-chip [type]="type" />
+            }
+          </div>
+        }
+        @if (shown().has('assignee') && t.assigneeName) {
           <div class="mt-1 text-xs text-muted"><i class="mdi mdi-account-outline" aria-hidden="true"></i> {{ t.assigneeName }}</div>
+        }
+        @for (column of cardLines(); track column.id) {
+          @if (text(column.id, t); as value) {
+            <div class="mt-1 line-clamp-2 text-xs"><span class="text-muted">{{ column.label }}:</span> {{ value }}</div>
+          }
         }
       </button>
     } @empty {
@@ -333,7 +310,8 @@
 </div>
 
 @if (openId(); as id) {
-  <app-ticket-panel [ticketId]="id" [autoReply]="replyOnOpen()" (closed)="closePanel()" />
+  <!-- Given another case with unsaved changes, the panel may stay on the one it has: it says which through ticketIdChange. -->
+  <app-ticket-panel [ticketId]="id" (ticketIdChange)="openId.set($event)" (closed)="closePanel()" />
 }
 @if (aiOpen()) {
   <app-ai-draft [initialImages]="aiImages()" (closed)="aiOpen.set(false)" (created)="onCreated()" />

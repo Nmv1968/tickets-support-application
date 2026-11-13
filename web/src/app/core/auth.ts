@@ -1,6 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import type { HttpInterceptorFn } from '@angular/common/http';
-import { Injectable, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, InjectionToken, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import type { CanActivateFn } from '@angular/router';
 import { catchError, throwError } from 'rxjs';
@@ -20,12 +20,32 @@ function readStoredUser(): AuthUser | null {
   }
 }
 
+/**
+ * Loads the tab again. Asked of the injector so that a spec can put something else in its place:
+ * the real one would load again the page the tests run in.
+ */
+export const RELOAD_TAB = new InjectionToken<() => void>('RELOAD_TAB', { providedIn: 'root', factory: () => () => location.reload() });
+
 @Injectable({ providedIn: 'root' })
 export class Auth {
   private readonly api = inject(Api);
   private readonly router = inject(Router);
+  private readonly reloadTab = inject(RELOAD_TAB);
 
   readonly user = signal<AuthUser | null>(readStoredUser());
+
+  constructor() {
+    // The session is kept where every tab of this browser reads it, and each request takes the
+    // token from there. When another tab logs out, or logs in as someone else, this one would go
+    // on showing its user while it reads and writes as the other. It starts again instead, as
+    // whoever the browser is now. The browser tells of what a tab stores only to the other tabs,
+    // and whatever it was: what counts is whose session is there after it.
+    const onStorage = (): void => {
+      if (readStoredUser()?.id !== this.user()?.id) this.reloadTab();
+    };
+    window.addEventListener('storage', onStorage);
+    inject(DestroyRef).onDestroy(() => window.removeEventListener('storage', onStorage));
+  }
 
   get token(): string | null {
     return localStorage.getItem(TOKEN_KEY);

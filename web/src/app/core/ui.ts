@@ -26,6 +26,19 @@ export const PRIORITY_CLASS: Record<Priority, string> = {
   CRITICAL: 'text-danger',
 };
 
+/**
+ * A name as it is compared: lowercase, without accents, with single spaces. "ACME  Perú" and
+ * "acme peru" are the same name. The server compares the names of its catalogs the same way.
+ */
+export function nameKey(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Local calendar day as `YYYY-MM-DD`. */
 export function todayIso(): string {
   const now = new Date();

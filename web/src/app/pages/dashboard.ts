@@ -8,9 +8,12 @@ import { ChartView } from '../core/chart-view';
 import { Theme } from '../core/theme';
 import { TicketEvents } from '../core/ticket-events';
 import { Toast } from '../core/toast';
-import { PRIORITY_LABEL, formatMinutes, todayIso } from '../core/ui';
+import { PRIORITY_LABEL, downloadBlob, formatMinutes, todayIso } from '../core/ui';
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/** Rows a horizontal chart fits in the height the charts have. With more, "Casos por tipo de soporte" grows. */
+const ROWS_THAT_FIT = 12;
 
 /** "2023-07" → "jul 23" */
 function monthLabel(month: string): string {
@@ -46,6 +49,21 @@ function horizontalBars(labels: string[], datasets: ChartConfiguration<'bar'>['d
         </div>
         <input class="input w-auto" type="date" aria-label="Desde" title="Desde" [ngModel]="from()" (ngModelChange)="setRange($event, to())" />
         <input class="input w-auto" type="date" aria-label="Hasta" title="Hasta" [ngModel]="to()" (ngModelChange)="setRange(from(), $event)" />
+        <label class="flex cursor-pointer items-center gap-1.5 py-1 text-xs" title="Cuenta también los casos archivados. Sin marcar, solo los que siguen en las listas">
+          <input type="checkbox" class="accent-primary" [(ngModel)]="includeArchived" />
+          Incluir archivados
+        </label>
+        <!-- The report of what is on screen: the same period, with the archived cases or without them. -->
+        <div class="flex gap-2" role="group" aria-label="Descargar el reporte">
+          <button type="button" class="btn btn-soft" [disabled]="exporting() !== null" (click)="export('xlsx')" title="Reporte en Excel, con una hoja de datos para tablas dinámicas o Power BI">
+            <i class="mdi text-base" [class]="exporting() === 'xlsx' ? 'mdi-loading mdi-spin' : 'mdi-file-excel-outline text-success'" aria-hidden="true"></i>
+            {{ exporting() === 'xlsx' ? 'Generando…' : 'Excel' }}
+          </button>
+          <button type="button" class="btn btn-soft" [disabled]="exporting() !== null" (click)="export('pdf')" title="Reporte en PDF, para leer o imprimir">
+            <i class="mdi text-base" [class]="exporting() === 'pdf' ? 'mdi-loading mdi-spin' : 'mdi-file-pdf-box text-danger'" aria-hidden="true"></i>
+            {{ exporting() === 'pdf' ? 'Generando…' : 'PDF' }}
+          </button>
+        </div>
       </div>
 
       @if (data(); as d) {
@@ -92,6 +110,13 @@ function horizontalBars(labels: string[], datasets: ChartConfiguration<'bar'>['d
                 <app-chart class="h-64" [config]="priorityChart()" label="Casos por prioridad" />
               </section>
             }
+            @if (hasSupportTypes()) {
+              <section class="card p-4">
+                <h2 class="mb-2 font-semibold">Casos por tipo de soporte</h2>
+                <app-chart [style.height.rem]="supportTypeHeight()" [config]="supportTypeChart()" label="Casos por tipo de soporte" />
+                <p class="mt-2 text-2xs text-muted">Un caso con varios tipos cuenta en cada uno.</p>
+              </section>
+            }
           </div>
         }
       } @else {
@@ -109,7 +134,14 @@ export class DashboardPage {
   protected readonly from = signal('');
   protected readonly to = signal('');
   protected readonly preset = signal<'all' | 'year' | 'month' | ''>('all');
+  /** Archived cases count: the numbers are about the work done. Unchecked, only the cases still in the lists. */
+  protected readonly includeArchived = signal(true);
+  /** What the screen is about: the cases of the period, with the archived ones or without them. Its report covers the same. */
+  private readonly selection = computed(() => ({ from: this.from(), to: this.to(), includeArchived: this.includeArchived() }));
   protected readonly data = signal<Dashboard | null>(null);
+  /** The file of the report being generated. Both buttons wait for it. */
+  protected readonly exporting = signal<'xlsx' | 'pdf' | null>(null);
+  private loadSequence = 0;
 
   protected readonly kpis = computed(() => {
     const d = this.data();
@@ -198,16 +230,40 @@ export class DashboardPage {
     };
   });
 
+  /** The cases without a type come as one more row, with no colour: alone, they say nothing. */
+  protected readonly hasSupportTypes = computed(() => (this.data()?.bySupportType ?? []).some((type) => type.color !== null));
+
+  /**
+   * Bars and not slices: a case with two types counts in both, so the rows do not add up to the
+   * total. Each bar is in the colour the team gave its type, whatever it is: the thin outline
+   * keeps in view the bar of a type in the colour of the card it is drawn on.
+   */
+  protected readonly supportTypeChart = computed<ChartConfiguration>(() => {
+    const rows = this.data()?.bySupportType ?? [];
+    const color = this.theme.palette();
+    return horizontalBars(
+      rows.map((r) => r.name),
+      [{ label: 'Casos', data: rows.map((r) => r.total), backgroundColor: rows.map((r) => r.color ?? color.neutral), borderColor: color.muted, borderWidth: 1, borderSkipped: false, borderRadius: 4 }],
+      false,
+    );
+  });
+
+  /**
+   * Height of that chart, in rem: the one of the others, and more with more types than fit in
+   * it. Every type is drawn, and a chart that is too low leaves the names of some rows out.
+   */
+  protected readonly supportTypeHeight = computed(() => 16 + Math.max(0, (this.data()?.bySupportType.length ?? 0) - ROWS_THAT_FIT) * 1.25);
+
   constructor() {
-    // Reloads when the period changes and when cases change, here or elsewhere (see TicketEvents).
+    // Reloads when the period or the choice about archived cases changes, and when cases change,
+    // here or elsewhere (see TicketEvents).
     effect(() => {
-      const from = this.from();
-      const to = this.to();
-      untracked(() => void this.load(from, to));
+      const selection = this.selection();
+      untracked(() => void this.load(selection));
     });
     inject(TicketEvents)
       .events.pipe(takeUntilDestroyed())
-      .subscribe(() => void this.load(this.from(), this.to()));
+      .subscribe(() => void this.load());
   }
 
   protected applyPreset(preset: 'all' | 'year' | 'month'): void {
@@ -223,11 +279,30 @@ export class DashboardPage {
     this.to.set(to);
   }
 
-  private async load(from: string, to: string): Promise<void> {
+  private async load({ from, to, includeArchived } = this.selection()): Promise<void> {
+    // Only the answer to the latest request is shown: an older one, for another period or with
+    // the archived cases the person has just left out, can arrive after it.
+    const sequence = ++this.loadSequence;
     try {
-      this.data.set(await this.api.dashboard(from, to));
+      const data = await this.api.dashboard(from, to, includeArchived);
+      if (sequence === this.loadSequence) this.data.set(data);
     } catch (error) {
       this.toast.error(error);
+    }
+  }
+
+  /** Downloads the report of what is on screen: the same period, and the same choice about archived cases. */
+  protected async export(format: 'xlsx' | 'pdf'): Promise<void> {
+    // Also a second press that arrives before the buttons are drawn disabled.
+    if (this.exporting()) return;
+    const { from, to, includeArchived } = this.selection();
+    this.exporting.set(format);
+    try {
+      downloadBlob(await this.api.dashboardExport(format, from, to, includeArchived), `reporte-soporte-${todayIso()}.${format}`);
+    } catch (error) {
+      this.toast.error(error);
+    } finally {
+      this.exporting.set(null);
     }
   }
 }

@@ -1,126 +1,257 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
-import type { Assignee, User } from './api';
-import { Auth } from './auth';
-import { Catalogs, assigneeInput, assigneeValue } from './catalogs';
+import { answerCatalogs } from '../testing/catalogs';
+import type { CatalogsAnswer } from '../testing/catalogs';
+import type { AiProviderConfig, Assignee, Company, SupportType, SystemModule } from './api';
+import { Catalogs, companyCreator, findByName } from './catalogs';
+import { Toast } from './toast';
+import { errorMessage } from './ui';
 
-describe('responsible select helpers', () => {
-  describe('assigneeValue', () => {
-    it('is the id of the responsible for a person', () => {
-      expect(assigneeValue({ assigneeId: 5, assignedToClient: false })).toBe('5');
-    });
-
-    it('is "client" when the client is responsible', () => {
-      expect(assigneeValue({ assigneeId: null, assignedToClient: true })).toBe('client');
-    });
-
-    it('is empty when nobody is responsible', () => {
-      expect(assigneeValue({ assigneeId: null, assignedToClient: false })).toBe('');
-    });
-
-    // The select can show only one option, so a leftover id must not hide the client.
-    it('prefers the client over the id of a responsible', () => {
-      expect(assigneeValue({ assigneeId: 5, assignedToClient: true })).toBe('client');
-    });
-  });
-
-  describe('assigneeInput', () => {
-    it('reads the id of a responsible as a number', () => {
-      expect(assigneeInput('5')).toEqual({ assigneeId: 5, assignedToClient: false });
-    });
-
-    it('reads "client" as the client, without a person', () => {
-      expect(assigneeInput('client')).toEqual({ assigneeId: null, assignedToClient: true });
-    });
-
-    it('reads the empty option as nobody', () => {
-      expect(assigneeInput('')).toEqual({ assigneeId: null, assignedToClient: false });
-    });
-  });
-
-  describe('round trip', () => {
-    it('gives back every state a case can be in', () => {
-      const states = [
-        { assigneeId: 12, assignedToClient: false },
-        { assigneeId: null, assignedToClient: true },
-        { assigneeId: null, assignedToClient: false },
-      ];
-      for (const state of states) expect(assigneeInput(assigneeValue(state))).toEqual(state);
-    });
-
-    it('gives back every option of the select', () => {
-      for (const value of ['12', 'client', '']) expect(assigneeValue(assigneeInput(value))).toBe(value);
-    });
-  });
-});
-
-// A case is assigned to a responsible of the catalog, and a responsible need not be a user. What
-// the logged-in user "is" comes from the link of their user: nothing is guessed from the names.
-describe('Catalogs, the responsible the logged-in user is', () => {
+// Every screen offers the same users, responsibles, companies, support types and modules. They
+// are read together, once, and again whenever one of them changes.
+describe('Catalogs', () => {
   let http: HttpTestingController;
   let catalogs: Catalogs;
 
-  const user = (id: number, assigneeId: number | null): User => ({ id, username: `u${id}`, name: 'Ana', active: true, canLogin: true, assigneeId });
   const person = (id: number, name: string, active = true): Assignee => ({ id, name, active, tickets: 0 });
+  const company = (id: number, name: string, active = true): Company => ({ id, name, active, tickets: 0 });
+  const type = (id: number, name: string, active = true): SupportType => ({ id, name, color: '#64748b', active, tickets: 0 });
+  const module = (id: number, name: string, active = true): SystemModule => ({ id, name, parentId: null, active, fullName: name });
+  const provider = (active: boolean, model: string | null): AiProviderConfig => ({
+    id: 'compatible',
+    label: 'Compatible con OpenAI',
+    needsBaseUrl: true,
+    keyOptional: true,
+    hasKey: true,
+    keyHint: '…a1b2',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model,
+    active,
+  });
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
-    TestBed.inject(Auth).user.set({ id: 1, username: 'u1', name: 'Ana' });
     catalogs = TestBed.inject(Catalogs);
   });
 
+  // Also catches a read nobody expected: any request left unanswered fails the test.
   afterEach(() => http.verify());
 
-  function load(users: User[], people: Assignee[]): void {
+  function load(answer: CatalogsAnswer): void {
     void catalogs.reload();
-    http.expectOne({ method: 'GET', url: '/api/users' }).flush(users);
-    http.expectOne({ method: 'GET', url: '/api/assignees' }).flush(people);
-    http.expectOne({ method: 'GET', url: '/api/modules' }).flush([]);
-    http.expectOne({ method: 'GET', url: '/api/ai/config' }).flush([]);
+    answerCatalogs(http, answer);
     tick();
   }
 
-  it('is nobody until the catalogs arrive', () => {
-    expect(catalogs.ownAssigneeId()).toBeNull();
-    expect(catalogs.ownAssignee()).toBe('');
+  it('has nothing to offer until the catalogs arrive', () => {
+    expect(catalogs.companies()).toEqual([]);
+    expect(catalogs.activeCompanies()).toEqual([]);
+    expect(catalogs.supportTypes()).toEqual([]);
+    expect(catalogs.activeSupportTypes()).toEqual([]);
+    expect(catalogs.modules()).toEqual([]);
+    expect(catalogs.activeModules()).toEqual([]);
+    expect(catalogs.aiReady()).toBeFalse();
   });
 
-  it('is the one their user is linked to, which a new case starts with', fakeAsync(() => {
-    load([user(1, 4), user(2, 5)], [person(4, 'Ana'), person(5, 'Luis')]);
+  it('reads the companies and the support types with the rest', fakeAsync(() => {
+    load({
+      users: [{ id: 1, username: 'ana', name: 'Ana Torres', active: true, canLogin: true }],
+      assignees: [person(4, 'Ana')],
+      companies: [company(1, 'Acme')],
+      supportTypes: [type(2, 'Falla del sistema')],
+      modules: [module(3, 'Ventas')],
+    });
 
-    expect(catalogs.ownAssigneeId()).toBe(4);
-    expect(catalogs.ownAssignee()).toBe('4');
+    expect(catalogs.users().map((item) => item.username)).toEqual(['ana']);
+    expect(catalogs.assignees().map((item) => item.name)).toEqual(['Ana']);
+    expect(catalogs.companies().map((item) => item.name)).toEqual(['Acme']);
+    expect(catalogs.supportTypes().map((item) => item.name)).toEqual(['Falla del sistema']);
+    expect(catalogs.modules().map((item) => item.fullName)).toEqual(['Ventas']);
   }));
 
-  // Another responsible with the same name, or with the same number as the user, is not them.
-  it('is nobody for a user who attends no cases', fakeAsync(() => {
-    load([user(1, null), user(2, 5)], [person(1, 'Ana'), person(5, 'Luis')]);
-
-    expect(catalogs.ownAssigneeId()).toBeNull();
-    expect(catalogs.ownAssignee()).toBe('');
-  }));
-
-  it('once deactivated is still theirs, but a new case does not start with it', fakeAsync(() => {
-    load([user(1, 4)], [person(4, 'Ana', false), person(5, 'Luis')]);
-
-    expect(catalogs.ownAssigneeId()).toBe(4);
-    expect(catalogs.ownAssignee()).toBe('');
-  }));
-
-  it('is nobody when the one linked is no longer in the catalog', fakeAsync(() => {
-    load([user(1, 4)], [person(5, 'Luis')]);
-
-    expect(catalogs.ownAssigneeId()).toBeNull();
-    expect(catalogs.ownAssignee()).toBe('');
-  }));
-
-  it('offers the active responsibles for a new case, and keeps everyone for the filters', fakeAsync(() => {
-    load([user(1, 4)], [person(4, 'Ana'), person(5, 'Luis', false)]);
+  // A deactivated entry keeps its cases, so the filters and those cases still need it.
+  it('offers the active ones for a new case, and keeps every one for the filters', fakeAsync(() => {
+    load({
+      assignees: [person(4, 'Ana'), person(5, 'Luis', false)],
+      companies: [company(1, 'Acme'), company(2, 'Bodega Sur', false)],
+      supportTypes: [type(1, 'Capacitación'), type(2, 'Falla del sistema', false)],
+      modules: [module(1, 'Ventas'), module(2, 'Bodega vieja', false)],
+    });
 
     expect(catalogs.activeAssignees().map((item) => item.name)).toEqual(['Ana']);
     expect(catalogs.assignees().map((item) => item.name)).toEqual(['Ana', 'Luis']);
+    expect(catalogs.activeCompanies().map((item) => item.name)).toEqual(['Acme']);
+    expect(catalogs.companies().map((item) => item.name)).toEqual(['Acme', 'Bodega Sur']);
+    expect(catalogs.activeSupportTypes().map((item) => item.name)).toEqual(['Capacitación']);
+    expect(catalogs.supportTypes().map((item) => item.name)).toEqual(['Capacitación', 'Falla del sistema']);
+    expect(catalogs.activeModules().map((item) => item.fullName)).toEqual(['Ventas']);
+    expect(catalogs.modules().map((item) => item.fullName)).toEqual(['Ventas', 'Bodega vieja']);
   }));
+
+  // Left alone, the server lists only the active modules: the deactivated ones have to be asked for.
+  it('asks for every module, the deactivated ones too', fakeAsync(() => {
+    void catalogs.reload();
+
+    const read = http.expectOne((request) => request.url === '/api/modules');
+    expect(read.request.params.get('all')).toBe('1');
+    read.flush([]);
+    for (const url of ['users', 'assignees', 'companies', 'support-types', 'ai/config']) http.expectOne(`/api/${url}`).flush([]);
+    tick();
+  }));
+
+  it('is read once by the screens that only need it to be there, and again by the ones that change it', fakeAsync(() => {
+    void catalogs.ensure();
+    answerCatalogs(http, { companies: [company(1, 'Acme')] });
+    tick();
+
+    // Already there: nothing is asked for.
+    void catalogs.ensure();
+    tick();
+    http.expectNone('/api/companies');
+
+    load({ companies: [company(1, 'Acme'), company(2, 'Bodega Sur')] });
+    expect(catalogs.companies().length).toBe(2);
+  }));
+
+  // "Crear empresa «X»" in a select: the company has to be among its options the moment it is chosen.
+  describe('a company created from a select', () => {
+    it('joins the list at once, in its place, without the catalogs being read again', fakeAsync(() => {
+      load({ companies: [company(1, 'Acme'), company(3, 'Ferretería El Tornillo'), company(2, 'Bodega vieja', false)] });
+
+      let created: Company | undefined;
+      void catalogs.createCompany('Bodega Sur').then((result) => (created = result));
+      const save = http.expectOne({ method: 'POST', url: '/api/companies' });
+      expect(save.request.body).toEqual({ name: 'Bodega Sur' });
+      save.flush(company(9, 'Bodega Sur'));
+      tick();
+
+      expect(created).toEqual(company(9, 'Bodega Sur'));
+      // The active ones first, each group by name, as the server lists them.
+      expect(catalogs.companies().map((item) => item.name)).toEqual(['Acme', 'Bodega Sur', 'Ferretería El Tornillo', 'Bodega vieja']);
+      expect(catalogs.activeCompanies().map((item) => item.name)).toEqual(['Acme', 'Bodega Sur', 'Ferretería El Tornillo']);
+    }));
+
+    it('that the server refuses leaves the list as it was, and the refusal to whoever asked', fakeAsync(() => {
+      load({ companies: [company(1, 'Acme')] });
+
+      let refusal: unknown;
+      catalogs.createCompany('acme').catch((error: unknown) => (refusal = error));
+      http.expectOne({ method: 'POST', url: '/api/companies' }).flush({ message: 'Ya existe una empresa con ese nombre' }, { status: 409, statusText: 'Conflict' });
+      tick();
+
+      expect(errorMessage(refusal)).toBe('Ya existe una empresa con ese nombre');
+      expect(catalogs.companies().map((item) => item.name)).toEqual(['Acme']);
+    }));
+
+    // What every select of companies is given for its "Crear empresa «X»".
+    describe('with "Crear empresa «X»"', () => {
+      const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
+
+      it('is created with the name typed, without the spaces around it, and the person is told', fakeAsync(() => {
+        const create = TestBed.runInInjectionContext(companyCreator);
+
+        let created: Company | undefined;
+        void create('  Bodega Sur ').then((result) => (created = result));
+        const save = http.expectOne({ method: 'POST', url: '/api/companies' });
+        expect(save.request.body).toEqual({ name: 'Bodega Sur' });
+        save.flush(company(9, 'Bodega Sur'));
+        tick();
+
+        // Given back to the select, which chooses it, and already among what it offers.
+        expect(created).toEqual(company(9, 'Bodega Sur'));
+        expect(catalogs.activeCompanies().map((item) => item.name)).toEqual(['Bodega Sur']);
+        expect(toasts()).toEqual(['Empresa «Bodega Sur» creada']);
+      }));
+
+      // The select says nothing when its promise fails: the reason has to be said here.
+      it('that the server refuses says why, and the select gets the refusal, so it chooses nothing', fakeAsync(() => {
+        const create = TestBed.runInInjectionContext(companyCreator);
+
+        let refusal: unknown;
+        create('acme').catch((error: unknown) => (refusal = error));
+        http.expectOne({ method: 'POST', url: '/api/companies' }).flush({ message: 'Ya existe una empresa con ese nombre' }, { status: 409, statusText: 'Conflict' });
+        tick();
+
+        expect(toasts()).toEqual(['Ya existe una empresa con ese nombre']);
+        expect(errorMessage(refusal)).toBe('Ya existe una empresa con ese nombre');
+      }));
+
+      // A double click on the option, or Enter twice: the select asks again while the first is on its way.
+      it('asked for again before the server answers, is sent once, said once and given to both', fakeAsync(() => {
+        const create = TestBed.runInInjectionContext(companyCreator);
+
+        const created: Company[] = [];
+        void create('Bodega Sur').then((result) => created.push(result));
+        // The same name for the server, however it is written.
+        void create(' bodega  sur').then((result) => created.push(result));
+        // Exactly one POST: `expectOne` fails on two.
+        http.expectOne({ method: 'POST', url: '/api/companies' }).flush(company(9, 'Bodega Sur'));
+        tick();
+
+        expect(created).toEqual([company(9, 'Bodega Sur'), company(9, 'Bodega Sur')]);
+        expect(toasts()).toEqual(['Empresa «Bodega Sur» creada']);
+      }));
+
+      it('asked for again before the server refuses it, says why once and refuses both', fakeAsync(() => {
+        const create = TestBed.runInInjectionContext(companyCreator);
+
+        const refusals: string[] = [];
+        create('acme').catch((error: unknown) => refusals.push(errorMessage(error)));
+        create('acme').catch((error: unknown) => refusals.push(errorMessage(error)));
+        http.expectOne({ method: 'POST', url: '/api/companies' }).flush({ message: 'Ya existe una empresa con ese nombre' }, { status: 409, statusText: 'Conflict' });
+        tick();
+
+        expect(refusals).toEqual(['Ya existe una empresa con ese nombre', 'Ya existe una empresa con ese nombre']);
+        expect(toasts()).toEqual(['Ya existe una empresa con ese nombre']);
+      }));
+
+      it('can be asked for again once the server has answered, and for another name meanwhile', fakeAsync(() => {
+        const create = TestBed.runInInjectionContext(companyCreator);
+
+        create('Bodega Sur').catch(() => undefined);
+        void create('Zeta');
+        const [first, other] = http.match({ method: 'POST', url: '/api/companies' });
+        expect([first.request.body, other.request.body]).toEqual([{ name: 'Bodega Sur' }, { name: 'Zeta' }]);
+        first.flush({ message: 'No hay conexión con el servidor' }, { status: 503, statusText: 'Service Unavailable' });
+        other.flush(company(8, 'Zeta'));
+        tick();
+
+        void create('Bodega Sur');
+        http.expectOne({ method: 'POST', url: '/api/companies' }).flush(company(9, 'Bodega Sur'));
+        tick();
+        expect(catalogs.activeCompanies().map((item) => item.name)).toEqual(['Bodega Sur', 'Zeta']);
+      }));
+    });
+  });
+
+  it('says the AI is ready only with an active provider that has a model', fakeAsync(() => {
+    load({ ai: [provider(true, null), provider(false, 'un-modelo')] });
+    expect(catalogs.aiReady()).toBeFalse();
+
+    load({ ai: [provider(true, 'un-modelo')] });
+    expect(catalogs.aiReady()).toBeTrue();
+  }));
+});
+
+// A name written by a person, or read by the AI, says which entry of a catalog is meant.
+describe('findByName', () => {
+  const companies = [
+    { id: 1, name: 'Acme' },
+    { id: 2, name: 'Corporación  Ñandú' },
+  ];
+
+  it('finds the entry whatever the capitals, the accents and the spaces of the name', () => {
+    expect(findByName(companies, 'acme')?.id).toBe(1);
+    expect(findByName(companies, '  ACME ')?.id).toBe(1);
+    expect(findByName(companies, 'corporacion nandu')?.id).toBe(2);
+  });
+
+  // "Acme" is not "Acme del Sur": part of a name is another name.
+  it('finds nothing for a name that is only part of one, or for no name at all', () => {
+    expect(findByName(companies, 'Acm')).toBeUndefined();
+    expect(findByName(companies, 'Acme del Sur')).toBeUndefined();
+    expect(findByName(companies, '   ')).toBeUndefined();
+  });
 });

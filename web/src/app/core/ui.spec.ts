@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { errorMessage, formatCaseDate, formatDay, formatHours, formatMinutes, formatMomentDay, imagesFrom, pastedImages, promiseText, timeAgo, todayIso } from './ui';
+import { errorMessage, formatCaseDate, formatDay, formatHours, formatMinutes, formatMomentDay, imagesFrom, nameKey, pastedImages, promiseText, timeAgo, todayIso } from './ui';
 
 /**
  * Sets "now" from local date parts, so every expectation holds in any time zone. The cases
@@ -342,5 +342,23 @@ describe('formatCaseDate', () => {
     expect(formatCaseDate({ date: '2026-11-10', time: '14:35' })).toBe('10/11/2026 14:35');
     expect(formatCaseDate({ date: '2026-11-10', time: null })).toBe('10/11/2026');
     expect(formatCaseDate({ date: '2026-11-10' })).toBe('10/11/2026');
+  });
+});
+
+// How two names are told to be the same one: a company written by hand, or read by the AI,
+// against the ones of the catalog.
+describe('nameKey', () => {
+  it('ignores capitals, accents and the spaces around and between the words', () => {
+    expect(nameKey('  CORPORACIÓN   Ñandú ')).toBe('corporacion nandu');
+    expect(nameKey('Ferretería El Tornillo')).toBe(nameKey('ferreteria el tornillo'));
+  });
+
+  it('keeps apart the names that differ in anything else', () => {
+    expect(nameKey('Acme S.A.')).not.toBe(nameKey('Acme SA'));
+    expect(nameKey('Acme 2')).not.toBe(nameKey('Acme'));
+  });
+
+  it('is empty for a name of spaces alone', () => {
+    expect(nameKey(' \t ')).toBe('');
   });
 });

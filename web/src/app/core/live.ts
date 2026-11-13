@@ -60,7 +60,7 @@ export class Live {
   private readonly toast = inject(Toast);
   private readonly ticketEvents = inject(TicketEvents);
 
-  /** Users, modules or AI setup changed. */
+  /** A catalog changed: users, responsibles, companies, support types, modules or the AI setup. */
   readonly catalogs = signal(0);
   /** App settings (reminders) changed. */
   readonly settings = signal(0);

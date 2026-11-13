@@ -15,11 +15,9 @@ describe('user edit', () => {
     const db = {
       user: {
         findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 6, username: 'luis', name: 'Luis', active: true, passwordHash: 'x', assigneeId: 2 }),
-        update: jest.fn().mockResolvedValue({ id: 5, username: 'ana', name: 'Ana', active: true, passwordHash: null, assigneeId: 2 }),
+        create: jest.fn().mockResolvedValue({ id: 6, username: 'luis', name: 'Luis', active: true, passwordHash: 'x' }),
+        update: jest.fn().mockResolvedValue({ id: 5, username: 'ana', name: 'Ana', active: true, passwordHash: null }),
       },
-      // The catalog holds the responsible 2 and no other.
-      assignee: { findUnique: jest.fn(({ where }: { where: { id: number } }) => Promise.resolve(where.id === 2 ? { id: 2 } : null)) },
     };
     return { db, controller: new UsersController(db as unknown as PrismaService) };
   };
@@ -43,45 +41,39 @@ describe('user edit', () => {
     expect(db.user.update).toHaveBeenLastCalledWith({ where: { id: 5 }, data: { active: true } });
   });
 
-  // Attending cases is apart from being a user: the link says which responsible a user is.
-  it('links a user to the responsible they are, and says so in its answer', async () => {
-    const { db, controller } = setup();
+  // A user is somebody who logs in. Who attends the cases is the catalog of responsibles, apart from this one.
+  it('answers with the user alone: nothing says which responsible they are', async () => {
+    const { controller } = setup();
 
-    expect(await controller.update(5, { assigneeId: 2 }, me)).toMatchObject({ id: 5, assigneeId: 2 });
-
-    expect(db.user.update).toHaveBeenLastCalledWith({ where: { id: 5 }, data: { assigneeId: 2 } });
+    expect(await controller.update(5, { name: 'Ana' }, me)).toEqual({ id: 5, username: 'ana', name: 'Ana', active: true, canLogin: false });
+    expect(await controller.create({ username: 'luis', name: 'Luis', password: 'secreto1' })).toEqual({
+      id: 6,
+      username: 'luis',
+      name: 'Luis',
+      active: true,
+      canLogin: true,
+    });
   });
 
-  it('unlinks with null, and leaves the link alone when it is not sent', async () => {
+  it('creates a user with the username in lowercase and the name without the spaces around it', async () => {
     const { db, controller } = setup();
 
-    await controller.update(5, { assigneeId: null }, me);
-    expect((db.user.update.mock.calls[0] as [{ data: { assigneeId?: unknown } }])[0].data.assigneeId).toBeNull();
+    await controller.create({ username: 'Luis', name: ' Luis ', password: 'secreto1' });
 
-    await controller.update(5, { name: 'Ana María' }, me);
-    expect((db.user.update.mock.calls[1] as [{ data: { assigneeId?: unknown } }])[0].data.assigneeId).toBeUndefined();
-    expect(db.assignee.findUnique).not.toHaveBeenCalled();
+    expect(db.user.findUnique).toHaveBeenCalledWith({ where: { username: 'luis' } });
+    expect(db.user.create.mock.calls).toMatchObject([[{ data: { username: 'luis', name: 'Luis' } }]]);
+    // Only these three columns are written: the password goes in hashed, never as it was typed.
+    const [{ data }] = db.user.create.mock.calls[0] as [{ data: Record<string, string> }];
+    expect(Object.keys(data).sort()).toEqual(['name', 'passwordHash', 'username']);
+    expect(data.passwordHash).not.toContain('secreto1');
   });
 
-  it('refuses a link to a responsible that does not exist, on edit and on create', async () => {
+  it('refuses a username that is already taken', async () => {
     const { db, controller } = setup();
+    db.user.findUnique.mockResolvedValue({ id: 5, username: 'ana' });
 
-    await expect(controller.update(5, { assigneeId: 9 }, me)).rejects.toThrow('El responsable no existe');
-    await expect(controller.create({ username: 'luis', name: 'Luis', password: 'secreto1', assigneeId: 9 })).rejects.toThrow('El responsable no existe');
-    expect(db.user.update).not.toHaveBeenCalled();
+    await expect(controller.create({ username: 'ANA', name: 'Ana', password: 'secreto1' })).rejects.toThrow('Ya existe un usuario con ese nombre de usuario');
     expect(db.user.create).not.toHaveBeenCalled();
-  });
-
-  it('creates a user linked to a responsible, or to none', async () => {
-    const { db, controller } = setup();
-
-    await controller.create({ username: 'Luis', name: ' Luis ', password: 'secreto1', assigneeId: 2 });
-    await controller.create({ username: 'luis2', name: 'Luis', password: 'secreto1' });
-
-    expect(db.user.create.mock.calls).toMatchObject([
-      [{ data: { username: 'luis', name: 'Luis', assigneeId: 2 } }],
-      [{ data: { username: 'luis2', name: 'Luis', assigneeId: null } }],
-    ]);
   });
 
   it('does not let a person deactivate their own user', async () => {

@@ -13,12 +13,13 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
     code: 'SOP-00007',
     date: '2026-11-01',
     time: null,
+    companyId: 1,
     company: 'Acme',
     description: 'No imprime',
     status: 'PENDING',
     assigneeId: null,
-    assignedToClient: false,
     assigneeName: null,
+    supportTypes: [],
     priority: null,
     estimatedMinutes: null,
     spentMinutes: 0,
@@ -35,6 +36,8 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
     aiGenerated: false,
     customerReply: null,
     createdAt: '2026-11-01T10:00:00.000Z',
+    createdById: null,
+    archivedAt: null,
     lastNote: null,
     notesCount: 0,
     attachmentsCount: 0,
@@ -72,12 +75,12 @@ describe('Api, announcing changes to cases', () => {
 
   it('announces a new case as created, once the server has stored it', async () => {
     const stored = ticket();
-    const write = api.createTicket({ company: 'Acme', description: 'No imprime' });
+    const write = api.createTicket({ companyId: 1, description: 'No imprime' });
     expect(seen).toEqual([]);
 
     http.expectOne({ method: 'POST', url: '/api/tickets' }).flush(stored);
     expect(await write).toEqual(stored);
-    expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: true }]);
+    expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: true, archiving: false }]);
   });
 
   const writes: { name: string; method: string; url: string; run: () => Promise<TicketDetail> }[] = [
@@ -102,18 +105,31 @@ describe('Api, announcing changes to cases', () => {
 
       http.expectOne({ method, url }).flush(stored);
       expect(await write).toEqual(stored);
-      expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: false }]);
+      expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: false, archiving: false }]);
+    });
+  }
+
+  // An archived case leaves the lists, and one brought back joins them again: the lists are told
+  // by the save, since a case that was put away has no row left to tell it by.
+  for (const archived of [true, false]) {
+    it(`announces a save that ${archived ? 'archives a case' : 'brings a case back from the archive'} as such`, async () => {
+      const stored = ticket({ archivedAt: archived ? '2026-11-08T09:00:00.000Z' : null });
+      const write = api.updateTicket(7, { archived });
+
+      http.expectOne({ method: 'PATCH', url: '/api/tickets/7' }).flush(stored);
+      await write;
+      expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: false, archiving: true }]);
     });
   }
 
   // A panel that closes before its save is answered drops the promise; the screens still follow.
   it('announces a write that nobody waits for', async () => {
     const stored = ticket();
-    void api.updateTicket(7, { company: 'Acme' });
+    void api.updateTicket(7, { companyId: 1 });
 
     http.expectOne({ method: 'PATCH', url: '/api/tickets/7' }).flush(stored);
     await settle();
-    expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: false }]);
+    expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: false, archiving: false }]);
   });
 
   it('announces two writes answered in the same turn as two events, in order', async () => {
@@ -124,8 +140,8 @@ describe('Api, announcing changes to cases', () => {
     http.expectOne({ method: 'PATCH', url: '/api/tickets/8' }).flush(ticket({ id: 8 }));
     await Promise.all([first, second]);
     expect(seen).toEqual([
-      { kind: 'saved', ticket: ticket({ id: 7 }), created: false },
-      { kind: 'saved', ticket: ticket({ id: 8 }), created: false },
+      { kind: 'saved', ticket: ticket({ id: 7 }), created: false, archiving: false },
+      { kind: 'saved', ticket: ticket({ id: 8 }), created: false, archiving: false },
     ]);
   });
 
@@ -139,12 +155,12 @@ describe('Api, announcing changes to cases', () => {
   });
 
   it('announces nothing when the server rejects the write', async () => {
-    const creation = api.createTicket({ company: '' });
+    const creation = api.createTicket({ description: 'No imprime' });
     http.expectOne({ method: 'POST', url: '/api/tickets' }).flush({ message: 'La empresa es obligatoria' }, REJECTED);
     await expectAsync(creation).toBeRejected();
 
-    const update = api.updateTicket(7, { company: '' });
-    http.expectOne({ method: 'PATCH', url: '/api/tickets/7' }).flush({ message: 'La empresa es obligatoria' }, REJECTED);
+    const update = api.updateTicket(7, { companyId: 99 });
+    http.expectOne({ method: 'PATCH', url: '/api/tickets/7' }).flush({ message: 'La empresa no existe' }, REJECTED);
     await expectAsync(update).toBeRejected();
 
     const removal = api.deleteTicket(7);
@@ -166,7 +182,7 @@ describe('Api, announcing changes to cases', () => {
 
     http.expectOne({ method: 'GET', url: '/api/tickets/7' }).flush(stored);
     expect(await write).toEqual(stored);
-    expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: false }]);
+    expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: false, archiving: false }]);
   });
 
   it('announces nothing when the attachment could not be deleted', async () => {
@@ -257,6 +273,195 @@ describe('Api, the import template', () => {
     request.flush(file);
 
     expect(await download).toBe(file);
+    http.verify();
+  });
+});
+
+// Small settings of the web that each person chooses for themselves (the columns of the list).
+// The server keeps them for whoever is logged in: no user travels in the request.
+describe('Api, the preferences of the logged-in user', () => {
+  let api: Api;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    api = TestBed.inject(Api);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  it('reads what was saved under a key', async () => {
+    const read = api.preference<{ visible: string[] }>('tickets.columns');
+    http.expectOne({ method: 'GET', url: '/api/preferences/tickets.columns' }).flush({ value: { visible: ['code', 'company'] } });
+
+    expect(await read).toEqual({ visible: ['code', 'company'] });
+  });
+
+  it('reads nothing for a key that was never saved', async () => {
+    const read = api.preference<boolean>('tickets.filters-open');
+    http.expectOne({ method: 'GET', url: '/api/preferences/tickets.filters-open' }).flush({ value: null });
+
+    expect(await read).toBeNull();
+  });
+
+  // `false` is a value like any other: it is what "closed" is saved as.
+  it('saves any value under its key, a false one too', async () => {
+    const save = api.savePreference('tickets.filters-open', false);
+    const request = http.expectOne({ method: 'PUT', url: '/api/preferences/tickets.filters-open' });
+    expect(request.request.body).toEqual({ value: false });
+    request.flush(null);
+
+    await save;
+  });
+});
+
+describe('Api, the catalogs of companies and support types', () => {
+  let api: Api;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    api = TestBed.inject(Api);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  it('adds, changes and deletes a company', async () => {
+    const acme = { id: 4, name: 'Acme', active: true, tickets: 0 };
+
+    const added = api.createCompany('Acme');
+    const post = http.expectOne({ method: 'POST', url: '/api/companies' });
+    expect(post.request.body).toEqual({ name: 'Acme' });
+    post.flush(acme);
+    expect(await added).toEqual(acme);
+
+    const changed = api.updateCompany(4, { active: false });
+    const patch = http.expectOne({ method: 'PATCH', url: '/api/companies/4' });
+    expect(patch.request.body).toEqual({ active: false });
+    patch.flush({ ...acme, active: false });
+    expect((await changed).active).toBeFalse();
+
+    const removed = api.deleteCompany(4);
+    http.expectOne({ method: 'DELETE', url: '/api/companies/4' }).flush(null);
+    await removed;
+  });
+
+  it('adds, changes and deletes a support type', async () => {
+    const failure = { id: 2, name: 'Falla del sistema', color: '#b91c1c', active: true, tickets: 0 };
+
+    const added = api.createSupportType({ name: 'Falla del sistema', color: '#b91c1c' });
+    const post = http.expectOne({ method: 'POST', url: '/api/support-types' });
+    expect(post.request.body).toEqual({ name: 'Falla del sistema', color: '#b91c1c' });
+    post.flush(failure);
+    expect(await added).toEqual(failure);
+
+    const changed = api.updateSupportType(2, { color: '#0c7beb' });
+    const patch = http.expectOne({ method: 'PATCH', url: '/api/support-types/2' });
+    expect(patch.request.body).toEqual({ color: '#0c7beb' });
+    patch.flush({ ...failure, color: '#0c7beb' });
+    expect((await changed).color).toBe('#0c7beb');
+
+    const removed = api.deleteSupportType(2);
+    http.expectOne({ method: 'DELETE', url: '/api/support-types/2' }).flush(null);
+    await removed;
+  });
+});
+
+describe('Api, the filters of the list of cases', () => {
+  it('sends the ones that have a value, ids as they come from a select, and leaves the empty ones out', async () => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    const http = TestBed.inject(HttpTestingController);
+
+    const list = TestBed.inject(Api).tickets({ companyId: 4, assignee: 'none', supportType: 2, createdBy: 7, archived: 'only', moduleId: null, priority: '', status: 'PENDING' });
+    const request = http.expectOne((r) => r.url === '/api/tickets');
+    const sent = Object.fromEntries(request.request.params.keys().map((key) => [key, request.request.params.get(key)]));
+    expect(sent).toEqual({ companyId: '4', assignee: 'none', supportType: '2', createdBy: '7', archived: 'only', status: 'PENDING' });
+    request.flush({ items: [], total: 0, page: 1, pageSize: 50 });
+
+    await list;
+    http.verify();
+  });
+});
+
+// The dashboard counts archived cases unless told not to, on screen and in the files it exports.
+describe('Api, the dashboard and its report', () => {
+  let api: Api;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    api = TestBed.inject(Api);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  it('asks for the period with the archived cases, or without them', () => {
+    void api.dashboard('2026-01-01', '2026-11-12');
+    const withArchived = http.expectOne((r) => r.url === '/api/dashboard');
+    expect(withArchived.request.params.get('from')).toBe('2026-01-01');
+    expect(withArchived.request.params.get('to')).toBe('2026-11-12');
+    expect(withArchived.request.params.has('archived')).toBeFalse();
+    withArchived.flush({});
+
+    void api.dashboard(undefined, undefined, false);
+    const without = http.expectOne((r) => r.url === '/api/dashboard');
+    expect(without.request.params.keys()).toEqual(['archived']);
+    expect(without.request.params.get('archived')).toBe('exclude');
+    without.flush({});
+  });
+
+  for (const format of ['xlsx', 'pdf'] as const) {
+    it(`downloads the report as ${format}, for the same period and cases as the screen`, async () => {
+      const file = new Blob(['report']);
+      const download = api.dashboardExport(format, '2026-01-01', '', false);
+
+      const request = http.expectOne((r) => r.url === `/api/dashboard/export/${format}`);
+      expect(request.request.responseType).toBe('blob');
+      expect(request.request.params.get('from')).toBe('2026-01-01');
+      // No end of the period: not sent.
+      expect(request.request.params.has('to')).toBeFalse();
+      expect(request.request.params.get('archived')).toBe('exclude');
+      request.flush(file);
+
+      expect(await download).toBe(file);
+    });
+  }
+
+  it('carries the reason when the server refuses a report', async () => {
+    const refused = api.dashboardExport('xlsx').then(
+      () => fail('the report should have been refused'),
+      (error: unknown) => error,
+    );
+    http
+      .expectOne((r) => r.url === '/api/dashboard/export/xlsx')
+      .flush(new Blob([JSON.stringify({ message: 'Son demasiados casos para un Excel' })], { type: 'application/json' }), { status: 400, statusText: 'Bad Request' });
+
+    expect(errorMessage(await refused)).toBe('Son demasiados casos para un Excel');
+  });
+});
+
+describe('Api, an import that may add what the catalogs lack', () => {
+  it('asks for it only when told to', async () => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    const api = TestBed.inject(Api);
+    const http = TestBed.inject(HttpTestingController);
+    const file = new File(['x'], 'casos.xlsx');
+
+    const strict = api.importFile(file, true, 'dmy');
+    const first = http.expectOne((r) => r.url === '/api/import');
+    expect(first.request.params.has('createMissing')).toBeFalse();
+    first.flush({ dryRun: true, createMissing: false });
+    await strict;
+
+    const creating = api.importFile(file, true, 'dmy', true);
+    const second = http.expectOne((r) => r.url === '/api/import');
+    expect(second.request.params.get('createMissing')).toBe('1');
+    expect(second.request.params.get('dryRun')).toBe('1');
+    second.flush({ dryRun: true, createMissing: true });
+    expect((await creating).createMissing).toBeTrue();
     http.verify();
   });
 });

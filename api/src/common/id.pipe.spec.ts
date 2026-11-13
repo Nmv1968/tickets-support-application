@@ -2,7 +2,10 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { ArgumentMetadata } from '@nestjs/common';
 import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
+import { AssigneesController } from '../assignees/assignees.controller';
 import { CatalogController } from '../catalog/catalog.controller';
+import { CompaniesController } from '../companies/companies.controller';
+import { SupportTypesController } from '../support-types/support-types.controller';
 import { AttachmentsController } from '../tickets/attachments.controller';
 import { TicketsController } from '../tickets/tickets.controller';
 import { UsersController } from '../users/users.controller';
@@ -50,7 +53,8 @@ describe('routes that take the id of a record from the URL', () => {
 
   // With Nest's own ParseIntPipe an id beyond what the database holds reached it and came back as a 500.
   it('read it through IdPipe', () => {
-    const pipes = [TicketsController, AttachmentsController, UsersController, CatalogController].map(paramPipes);
+    const controllers = [TicketsController, AttachmentsController, UsersController, AssigneesController, CompaniesController, SupportTypesController, CatalogController];
+    const pipes = controllers.map(paramPipes);
 
     expect(Object.assign({}, ...pipes)).toEqual({
       'TicketsController.get(id)': [IdPipe],
@@ -65,6 +69,12 @@ describe('routes that take the id of a record from the URL', () => {
       'AttachmentsController.download(id)': [IdPipe],
       'AttachmentsController.remove(id)': [IdPipe],
       'UsersController.update(id)': [IdPipe],
+      'AssigneesController.update(id)': [IdPipe],
+      'AssigneesController.remove(id)': [IdPipe],
+      'CompaniesController.update(id)': [IdPipe],
+      'CompaniesController.remove(id)': [IdPipe],
+      'SupportTypesController.update(id)': [IdPipe],
+      'SupportTypesController.remove(id)': [IdPipe],
       'CatalogController.updateModule(id)': [IdPipe],
     });
   });

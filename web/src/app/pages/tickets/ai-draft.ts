@@ -1,10 +1,13 @@
 import { A11yModule } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, input, linkedSignal, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { NgSelectComponent } from '@ng-select/ng-select';
 import { Api } from '../../core/api';
 import type { Priority, TicketDetail, TicketStatus } from '../../core/api';
-import { Catalogs, assigneeInput } from '../../core/catalogs';
+import { Catalogs, companyCreator, findByName } from '../../core/catalogs';
+import { SELECT } from '../../core/select';
 import { Toast } from '../../core/toast';
+import { TypeChip } from '../../core/type-chip';
 import { PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, errorMessage, imagesFrom, pastedImages, shrinkImage, todayIso } from '../../core/ui';
 
 interface Picked {
@@ -21,7 +24,7 @@ const MAX_IMAGES = 4;
  */
 @Component({
   selector: 'app-ai-draft',
-  imports: [FormsModule, A11yModule],
+  imports: [FormsModule, A11yModule, ...SELECT, TypeChip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'closed.emit()', '(document:paste)': 'onPaste($event)' },
   template: `
@@ -95,7 +98,8 @@ const MAX_IMAGES = 4;
               </p>
             }
             <div class="grid grid-cols-2 gap-3">
-              <div>
+              <!-- A row of its own on a phone: in half of one, the time leaves no room for the date. -->
+              <div class="col-span-2 sm:col-span-1">
                 <label class="label" for="ai-date" title="Día en que el cliente reportó el problema">Fecha del caso</label>
                 <div class="flex gap-2">
                   <input id="ai-date" class="input min-w-0 flex-1" type="date" [max]="today" [(ngModel)]="date" />
@@ -103,58 +107,118 @@ const MAX_IMAGES = 4;
                 </div>
                 <p class="mt-1 text-2xs text-muted">Día en que lo reportó el cliente. La fecha de registro será hoy, automática.</p>
               </div>
-              <div>
+              <!-- Every list of options hangs from the body: inside the dialog it would be cut where the dialog scrolls. -->
+              <div class="col-span-2 sm:col-span-1">
                 <label class="label" for="ai-status">Estado</label>
-                <select id="ai-status" class="input" [(ngModel)]="status">
-                  @for (s of statuses; track s) {
-                    <option [value]="s">{{ statusLabel[s] }}</option>
-                  }
-                </select>
+                <ng-select
+                  labelForId="ai-status"
+                  bindValue="id"
+                  bindLabel="label"
+                  appendTo="body"
+                  [items]="statusOptions"
+                  [clearable]="false"
+                  [searchable]="false"
+                  [(ngModel)]="status"
+                />
               </div>
               <div class="col-span-2">
-                <label class="label" for="ai-company">Empresa <span class="text-danger">*</span></label>
-                <input id="ai-company" class="input" list="ai-company-options" [(ngModel)]="company" />
-                <datalist id="ai-company-options">
-                  @for (option of companyOptions(); track option) {
-                    <option [value]="option"></option>
-                  }
-                </datalist>
+                <label class="label" for="ai-company">Empresa <span class="text-danger" aria-hidden="true">*</span></label>
+                <ng-select
+                  #company
+                  labelForId="ai-company"
+                  bindValue="id"
+                  bindLabel="name"
+                  placeholder="Elige o escribe una empresa"
+                  appendTo="body"
+                  [items]="catalogs.activeCompanies()"
+                  [addTag]="createCompany"
+                  [inputAttrs]="{ maxlength: '200', 'aria-required': 'true' }"
+                  [(ngModel)]="companyId"
+                >
+                  <ng-template ng-tag-tmp let-search="searchTerm">Crear empresa «{{ search }}»</ng-template>
+                </ng-select>
+                @if (unmatchedCompany(); as read) {
+                  <!-- The company the AI read is in no option of the select: said here, with the way to add it. -->
+                  <p id="ai-company-read" class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" role="status">
+                    @if (read.inactive) {
+                      <span>La IA leyó «{{ read.name }}», que está desactivada. Elige otra empresa, o actívala en Configuración &gt; Empresas.</span>
+                    } @else {
+                      <span>La IA leyó «{{ read.name }}», que no está registrada.</span>
+                      <button type="button" class="btn btn-soft px-2 py-1 text-xs whitespace-normal" [disabled]="creatingCompany()" (click)="createReadCompany(read.name)">
+                        <i class="mdi" [class]="creatingCompany() ? 'mdi-loading mdi-spin' : 'mdi-plus'" aria-hidden="true"></i>
+                        Crear empresa «{{ read.name }}»
+                      </button>
+                    }
+                  </p>
+                }
               </div>
               <div class="col-span-2">
-                <label class="label" for="ai-description">Descripción <span class="text-danger">*</span></label>
-                <textarea id="ai-description" class="input min-h-20 resize-y" [(ngModel)]="description"></textarea>
+                <label class="label" for="ai-description">Descripción <span class="text-danger" aria-hidden="true">*</span></label>
+                <textarea id="ai-description" class="input min-h-20 resize-y" maxlength="5000" required [(ngModel)]="description"></textarea>
               </div>
               <div>
                 <label class="label" for="ai-assignee">Responsable</label>
-                <select id="ai-assignee" class="input" [(ngModel)]="assignee">
-                  <option value="">Sin asignar</option>
-                  @for (person of catalogs.activeAssignees(); track person.id) {
-                    <option [value]="person.id">{{ person.name }}</option>
-                  }
-                  <option value="client">Cliente</option>
-                </select>
+                <!-- Empty unless someone is chosen: registering a case makes nobody its responsible. -->
+                <ng-select
+                  labelForId="ai-assignee"
+                  bindValue="id"
+                  bindLabel="name"
+                  placeholder="Sin asignar"
+                  appendTo="body"
+                  [items]="catalogs.activeAssignees()"
+                  [(ngModel)]="assigneeId"
+                />
               </div>
               <div>
                 <label class="label" for="ai-priority">Prioridad</label>
-                <select id="ai-priority" class="input" [(ngModel)]="priority">
-                  <option value="">Sin prioridad</option>
-                  @for (p of priorities; track p) {
-                    <option [value]="p">{{ priorityLabel[p] }}</option>
-                  }
-                </select>
+                <ng-select
+                  labelForId="ai-priority"
+                  bindValue="id"
+                  bindLabel="label"
+                  placeholder="Sin prioridad"
+                  appendTo="body"
+                  [items]="priorityOptions"
+                  [searchable]="false"
+                  [(ngModel)]="priority"
+                />
               </div>
               <div>
                 <label class="label" for="ai-module">Módulo</label>
-                <select id="ai-module" class="input" [(ngModel)]="moduleId">
-                  <option value="">Sin módulo</option>
-                  @for (module of catalogs.modules(); track module.id) {
-                    <option [value]="module.id">{{ module.fullName }}</option>
-                  }
-                </select>
+                <ng-select
+                  labelForId="ai-module"
+                  bindValue="id"
+                  bindLabel="fullName"
+                  placeholder="Sin módulo"
+                  appendTo="body"
+                  [items]="catalogs.activeModules()"
+                  [(ngModel)]="moduleId"
+                />
               </div>
               <div>
                 <label class="label" for="ai-estimated">Tiempo estimado (minutos)</label>
                 <input id="ai-estimated" class="input" type="number" min="0" step="5" [(ngModel)]="estimated" />
+              </div>
+              <div class="col-span-2">
+                <label class="label" for="ai-types">Tipos de soporte</label>
+                <!-- The list stays open after each choice: a case often takes more than one. -->
+                <ng-select
+                  labelForId="ai-types"
+                  bindValue="id"
+                  bindLabel="name"
+                  placeholder="Sin tipo de soporte"
+                  appendTo="body"
+                  [items]="catalogs.activeSupportTypes()"
+                  [multiple]="true"
+                  [closeOnSelect]="false"
+                  [(ngModel)]="supportTypeIds"
+                >
+                  <ng-template ng-label-tmp let-item="item" let-clear="clear">
+                    <app-type-chip [type]="item" removable (removed)="clear(item)" />
+                  </ng-template>
+                  <ng-template ng-option-tmp let-item="item">
+                    <app-type-chip [type]="item" />
+                  </ng-template>
+                </ng-select>
               </div>
               <div class="col-span-2 rounded-control border border-line px-3 py-2.5">
                 <div class="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2">
@@ -172,7 +236,7 @@ const MAX_IMAGES = 4;
               </div>
               <div class="col-span-2">
                 <label class="label" for="ai-note">Observación</label>
-                <textarea id="ai-note" class="input min-h-16 resize-y" [(ngModel)]="note"></textarea>
+                <textarea id="ai-note" class="input min-h-16 resize-y" maxlength="5000" [(ngModel)]="note"></textarea>
               </div>
             </div>
             @if (images().length) {
@@ -193,7 +257,7 @@ const MAX_IMAGES = 4;
             </button>
           } @else {
             <button type="button" class="btn btn-ghost mr-auto" [disabled]="busy()" (click)="step.set('input')">Volver</button>
-            <button type="button" class="btn btn-primary" [disabled]="busy() || !company().trim() || !description().trim() || (promiseOn() && !promisedDate())" (click)="save()">
+            <button type="button" class="btn btn-primary" [disabled]="busy() || companyId() === null || !description().trim() || (promiseOn() && !promisedDate())" (click)="save()">
               {{ busy() ? 'Guardando…' : 'Guardar caso' }}
             </button>
           }
@@ -216,10 +280,8 @@ export class AiDraftDialog {
   protected readonly today = todayIso();
   /** Reading the clipboard from a button only exists on HTTPS or localhost. */
   protected readonly canReadClipboard = typeof navigator.clipboard?.read === 'function';
-  protected readonly statuses = STATUSES;
-  protected readonly statusLabel = STATUS_LABEL;
-  protected readonly priorities = PRIORITIES;
-  protected readonly priorityLabel = PRIORITY_LABEL;
+  protected readonly statusOptions = STATUSES.map((id) => ({ id, label: STATUS_LABEL[id] }));
+  protected readonly priorityOptions = PRIORITIES.map((id) => ({ id, label: PRIORITY_LABEL[id] }));
 
   protected readonly step = signal<'input' | 'review'>('input');
   protected readonly images = signal<Picked[]>([]);
@@ -229,31 +291,48 @@ export class AiDraftDialog {
   protected readonly error = signal('');
   protected readonly usedAi = signal(false);
   protected readonly aiModel = signal('');
-  protected readonly companyOptions = signal<string[]>([]);
 
   // Draft fields
   protected readonly date = signal(todayIso());
   /** Time of the case. Empty: the case has only its date. */
   protected readonly time = signal('');
   protected readonly status = signal<TicketStatus>('PENDING');
-  protected readonly company = signal('');
+  /** A company of the catalog. Null until one is chosen: the case cannot be saved without it. */
+  protected readonly companyId = signal<number | null>(null);
   protected readonly description = signal('');
-  /** Starts as the responsible the logged-in user is. */
-  protected readonly assignee = linkedSignal(() => this.catalogs.ownAssignee());
-  protected readonly priority = signal<Priority | ''>('');
-  protected readonly moduleId = signal('');
+  /** Null: the new case has no responsible. Nobody is one by registering it. */
+  protected readonly assigneeId = signal<number | null>(null);
+  protected readonly priority = signal<Priority | null>(null);
+  protected readonly moduleId = signal<number | null>(null);
+  protected readonly supportTypeIds = signal<number[]>([]);
   protected readonly estimated = signal<number | null>(null);
   protected readonly promiseOn = signal(false);
   protected readonly promisedDate = signal('');
   protected readonly note = signal('');
 
+  /**
+   * The company as the AI read it in the evidence: a text, not a company of the catalog. One the
+   * catalog offers under that name is chosen in the select (see analyze). Otherwise the name is
+   * kept here, to tell the person and offer to add it.
+   */
+  private readonly readCompany = signal('');
+  /**
+   * The company the AI read, while no company is chosen and the select does not offer that one:
+   * it is not in the catalog, or it is and was deactivated (a new case does not take those).
+   */
+  protected readonly unmatchedCompany = computed(() => {
+    const name = this.readCompany();
+    if (!name || this.companyId() !== null || findByName(this.catalogs.activeCompanies(), name)) return null;
+    return { name, inactive: !!findByName(this.catalogs.companies(), name) };
+  });
+  /** "Crear empresa «X»" in the company select. */
+  protected readonly createCompany = companyCreator();
+  protected readonly creatingCompany = signal(false);
+  private readonly companySelect = viewChild<NgSelectComponent>('company');
+
   constructor() {
     // Inputs are set before the first change detection; read them once the component exists.
     queueMicrotask(() => this.addImages(this.initialImages()));
-    this.api
-      .companies('')
-      .then((companies) => this.companyOptions.set(companies))
-      .catch(() => undefined);
     inject(DestroyRef).onDestroy(() => this.images().forEach((image) => URL.revokeObjectURL(image.url)));
   }
 
@@ -323,10 +402,14 @@ export class AiDraftDialog {
       // The reported day only when the evidence shows one; otherwise it stays on today.
       if (draft.date) this.date.set(draft.date);
       this.time.set(draft.time ?? '');
-      this.company.set(draft.company ?? '');
+      // The AI gives the company as the text it read. The case is of the company of the catalog
+      // with that name, however it is written; with none, the person chooses (see unmatchedCompany).
+      const company = draft.company?.trim() ?? '';
+      this.readCompany.set(company);
+      this.companyId.set(findByName(this.catalogs.activeCompanies(), company)?.id ?? null);
       this.description.set(draft.description);
-      this.priority.set(draft.priority ?? '');
-      this.moduleId.set(draft.moduleId ? String(draft.moduleId) : '');
+      this.priority.set(draft.priority);
+      this.moduleId.set(draft.moduleId);
       this.estimated.set(draft.estimatedMinutes);
       this.note.set(draft.note ?? '');
       this.aiModel.set(draft.model);
@@ -347,7 +430,30 @@ export class AiDraftDialog {
     this.step.set('review');
   }
 
+  /**
+   * The button under the company select: adds the company the AI read to the catalog, as it read
+   * it, and chooses it for the case. The same as typing that name in the select and taking its
+   * "Crear empresa «X»".
+   */
+  protected async createReadCompany(name: string): Promise<void> {
+    if (this.creatingCompany()) return;
+    this.creatingCompany.set(true);
+    try {
+      this.companyId.set((await this.createCompany(name)).id);
+      // The button goes away with what it said, and the focus it had with it.
+      this.companySelect()?.focus();
+    } catch {
+      // Already said (see companyCreator). The button stays, to try again or to choose another company.
+    } finally {
+      this.creatingCompany.set(false);
+    }
+  }
+
   protected async save(): Promise<void> {
+    const companyId = this.companyId();
+    // Also a press that arrives before the button is drawn disabled.
+    if (companyId === null || this.busy()) return;
+    const types = this.supportTypeIds();
     this.busy.set(true);
     this.error.set('');
     try {
@@ -356,11 +462,12 @@ export class AiDraftDialog {
         date: this.date() || todayIso(),
         time: this.time() || undefined,
         status: this.status(),
-        company: this.company().trim(),
+        companyId,
         description: this.description().trim(),
-        ...assigneeInput(this.assignee()),
-        priority: this.priority() || null,
-        moduleId: this.moduleId() ? Number(this.moduleId()) : null,
+        assigneeId: this.assigneeId(),
+        priority: this.priority(),
+        moduleId: this.moduleId(),
+        supportTypeIds: types.length ? types : undefined,
         estimatedMinutes: Number.isFinite(estimated) && estimated > 0 ? Math.round(estimated) : null,
         note: this.note().trim() || undefined,
         promisedDate: this.promiseOn() && this.promisedDate() ? this.promisedDate() : null,

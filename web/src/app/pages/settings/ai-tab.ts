@@ -3,6 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import type { AiModel, AiProviderConfig } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
+import { Confirm } from '../../core/confirm';
+import { SELECT } from '../../core/select';
 import { Toast } from '../../core/toast';
 import { errorMessage } from '../../core/ui';
 
@@ -13,7 +15,7 @@ import { errorMessage } from '../../core/ui';
  */
 @Component({
   selector: 'app-ai-tab',
-  imports: [FormsModule],
+  imports: [FormsModule, ...SELECT],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="card max-w-2xl space-y-4 p-4">
@@ -80,12 +82,17 @@ import { errorMessage } from '../../core/ui';
               <div class="flex-1">
                 <label class="label" for="ai-model">Modelo</label>
                 @if (models().length) {
-                  <select id="ai-model" class="input" [(ngModel)]="model">
-                    <option value="">Elige un modelo</option>
-                    @for (item of models(); track item.id) {
-                      <option [value]="item.id">{{ item.name }}{{ item.vision === true ? ' · lee imágenes' : item.vision === false ? ' · solo texto' : '' }}</option>
-                    }
-                  </select>
+                  <!-- Null and not '' for "none chosen": the select would show an empty text as a choice. -->
+                  <ng-select
+                    labelForId="ai-model"
+                    placeholder="Elige un modelo"
+                    bindValue="id"
+                    bindLabel="label"
+                    [items]="modelOptions()"
+                    [clearable]="false"
+                    [ngModel]="model() || null"
+                    (ngModelChange)="model.set($event ?? '')"
+                  />
                 } @else {
                   <input id="ai-model" class="input" placeholder="Carga los modelos o escribe el identificador" autocomplete="off" [(ngModel)]="model" />
                 }
@@ -122,6 +129,7 @@ import { errorMessage } from '../../core/ui';
 export class AiTab {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
+  private readonly confirm = inject(Confirm);
   private readonly catalogs = inject(Catalogs);
 
   protected readonly providers = signal<AiProviderConfig[]>([]);
@@ -132,6 +140,10 @@ export class AiTab {
   protected readonly baseUrl = signal('');
   protected readonly model = signal('');
   protected readonly models = signal<AiModel[]>([]);
+  /** The models as the select lists them: each with what is known about whether it reads images. */
+  protected readonly modelOptions = computed(() =>
+    this.models().map((item) => ({ id: item.id, label: item.name + (item.vision === true ? ' · lee imágenes' : item.vision === false ? ' · solo texto' : '') })),
+  );
   /**
    * The form's server URL is not the one the stored key was saved with. The server sends a stored
    * key only to its own URL, so the key has to be typed again. Compared as the server compares:
@@ -225,7 +237,8 @@ export class AiTab {
   }
 
   protected async removeKey(): Promise<void> {
-    if (!confirm('¿Quitar la API key guardada de este proveedor?')) return;
+    // A danger: the key never comes back to the browser, so it would have to be typed again.
+    if (!(await this.confirm.ask({ title: '¿Quitar la API key guardada de este proveedor?', confirmLabel: 'Quitar', danger: true }))) return;
     try {
       await this.api.saveAiConfig(this.selectedId(), { apiKey: '', active: false });
       await this.reload();

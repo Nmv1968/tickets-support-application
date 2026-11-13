@@ -169,8 +169,22 @@
     @apply text-primary;
   }
 
+  /*
+   * Behind a dialog, which it centres. Its one cell is the size of the screen, not of the dialog:
+   * a dialog with `max-h-full` and `w-full` then stops at the screen and scrolls inside, with its
+   * footer in view. Left to size itself, the cell grew with a long or a wide dialog (a table in
+   * it is enough) and took its buttons off the screen.
+   *
+   * A click on it closes the dialog. The selects know it by this class: the click that puts an
+   * open list of options away is not also one on the backdrop (see SelectDefaults).
+   */
   .modal-backdrop {
-    @apply fixed inset-0 z-50 grid place-items-center bg-black/45 p-3;
+    @apply fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center bg-black/45 p-3;
+  }
+
+  /* Behind a side panel (the case, the bell), which a click on it closes. Known to the selects by its class, as the one above. */
+  .panel-backdrop {
+    @apply fixed inset-0 z-40 bg-black/40;
   }
 
   /*
@@ -196,18 +210,12 @@
   }
 
   /*
-   * Under a text field whose save failed: says so, with the buttons to retry or to discard it.
-   * The text is in the ink colour, as in the other notices: the danger colour on this
-   * background does not reach the contrast small text needs. It stays in the tint, in the icon
-   * and in the border of the field.
+   * Under a field of a form that cannot be saved as it stands: says what is wrong with it.
+   * The text is in the ink colour: the danger colour does not reach the contrast small text
+   * needs on the panels. It stays in the icon and in the border of the field.
    */
-  .unsaved-hint {
-    @apply mt-1 flex flex-wrap items-center gap-x-3 rounded-control bg-danger/10 px-3 py-1 text-xs text-ink;
-  }
-
-  /* Its buttons have the colour of the text around them, so the underline is what says they can be pressed. */
-  .unsaved-hint button {
-    @apply py-1 font-medium underline underline-offset-2 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50;
+  .field-error {
+    @apply mt-1 text-xs text-ink;
   }
 
   /* Inline-editable cell controls: look like text until hovered or focused. */
@@ -230,6 +238,175 @@
     background: var(--st-unresolved-bg);
     color: var(--st-unresolved-fg);
   }
+}
+
+/*
+ * ng-select: every dropdown of the app. Themed here once so that it looks like `.input` in both
+ * themes; components add no styles of their own to it.
+ *
+ * Outside the layers on purpose. The structural styles the component brings are in no layer, and
+ * a rule in a layer never wins over one outside them. Those styles are also added to the page
+ * after this file, so a rule here that sets the same property needs the more specific selector.
+ */
+.ng-select .ng-select-container {
+  /* The height of `.input`: a line of text, its padding and its border. */
+  @apply min-h-[2.375rem] items-center rounded-control border border-line bg-surface text-sm text-ink;
+}
+
+.ng-select.ng-select-opened > .ng-select-container {
+  /* The library lifts it above the page (1001), which is above the panels and dialogs of the app. */
+  z-index: auto;
+}
+
+.ng-select.ng-select-focused > .ng-select-container {
+  @apply border-primary ring-2 ring-primary/20;
+}
+
+.ng-select.ng-select-disabled > .ng-select-container {
+  @apply cursor-not-allowed bg-elevated text-muted;
+}
+
+.ng-select .ng-select-container .ng-value-container {
+  @apply items-center px-3;
+}
+
+.ng-select .ng-select-container .ng-value-container .ng-placeholder {
+  @apply text-muted/70;
+}
+
+/* The placeholder is always in the page: it gives way to the value. */
+.ng-select .ng-has-value .ng-placeholder {
+  display: none;
+}
+
+/* The search box of a single select lies over the value, which it replaces while the person types. */
+.ng-select.ng-select-single .ng-select-container .ng-value-container .ng-input {
+  @apply inset-y-0 flex items-center pr-12 pl-3;
+}
+
+.ng-select.ng-select-multiple .ng-select-container .ng-value-container {
+  @apply gap-1 py-1 pr-0 pl-2;
+}
+
+/*
+ * A chosen value of a multiple select, as a chip. The colour is on its two parts and not on the
+ * chip, so a chip drawn by a template (a support type in its own colour) is not put inside another.
+ */
+.ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-value {
+  @apply inline-flex items-center overflow-hidden rounded-full text-xs font-medium;
+}
+
+.ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-value .ng-value-icon {
+  @apply bg-elevated py-0.5 pr-1 pl-2 text-muted hover:bg-line hover:text-danger;
+}
+
+.ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-value .ng-value-label {
+  @apply bg-elevated py-0.5 pr-2 pl-0.5;
+}
+
+.ng-select.ng-select-multiple.ng-select-disabled > .ng-select-container .ng-value-container .ng-value .ng-value-label {
+  @apply pl-2;
+}
+
+.ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-placeholder {
+  @apply pl-1;
+}
+
+.ng-select .ng-select-container .ng-clear-wrapper {
+  @apply flex w-6 items-center justify-center self-stretch text-muted hover:text-danger;
+}
+
+.ng-select .ng-select-container .ng-clear-wrapper:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.ng-select .ng-select-container .ng-arrow-wrapper {
+  @apply flex w-8 items-center justify-center self-stretch pr-1 text-muted;
+}
+
+/* A chevron drawn with two borders: the icon font is not there in every page that shows a select. */
+.ng-select .ng-select-container .ng-arrow-wrapper .ng-arrow {
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-top: -0.2rem;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.ng-select.ng-select-opened > .ng-select-container .ng-arrow-wrapper .ng-arrow {
+  margin-top: 0.2rem;
+  transform: rotate(-135deg);
+}
+
+.ng-select .ng-select-container .ng-spinner-loader {
+  border-color: var(--app-line);
+  border-left-color: var(--color-primary);
+}
+
+/*
+ * The list of options. Also styled when it hangs from the body (`appendTo="body"`), where it is
+ * no longer inside its select. Above the dialogs (50) and below the toasts (100).
+ */
+.ng-dropdown-panel.ng-dropdown-panel {
+  @apply left-0 z-60 overflow-hidden rounded-control border border-line bg-surface text-sm text-ink;
+  box-shadow: 0 12px 28px -12px rgba(16, 24, 44, 0.45);
+}
+
+.ng-dropdown-panel.ng-select-bottom {
+  @apply top-full mt-1;
+}
+
+.ng-dropdown-panel.ng-select-top {
+  @apply bottom-full mb-1;
+}
+
+.ng-dropdown-panel .ng-dropdown-header {
+  @apply border-b border-line px-3 py-1.5;
+}
+
+.ng-dropdown-panel .ng-dropdown-footer {
+  @apply border-t border-line px-3 py-1.5;
+}
+
+.ng-dropdown-panel .ng-dropdown-panel-items {
+  @apply p-1;
+}
+
+.ng-dropdown-panel .ng-dropdown-panel-items .ng-option {
+  @apply rounded-lg px-2.5 py-1.5;
+}
+
+/* The option the keyboard or the pointer is on. */
+.ng-dropdown-panel .ng-dropdown-panel-items .ng-option.ng-option-marked {
+  @apply bg-elevated;
+}
+
+.ng-dropdown-panel .ng-dropdown-panel-items .ng-option.ng-option-selected {
+  @apply bg-primary/10 font-semibold;
+}
+
+.ng-dropdown-panel .ng-dropdown-panel-items .ng-option.ng-option-selected.ng-option-marked {
+  @apply bg-primary/20;
+}
+
+/* "Sin resultados" and the options that cannot be chosen. */
+.ng-dropdown-panel .ng-dropdown-panel-items .ng-option.ng-option-disabled {
+  @apply cursor-default text-muted;
+}
+
+.ng-dropdown-panel .ng-dropdown-panel-items .ng-optgroup {
+  @apply px-2.5 py-1.5 text-xs font-semibold text-muted;
+}
+
+.ng-dropdown-panel .ng-dropdown-panel-items .ng-option.ng-option-child {
+  @apply pl-5;
+}
+
+/* "Crear" before the text typed, in the option that adds a value that does not exist. */
+.ng-dropdown-panel .ng-dropdown-panel-items .ng-option .ng-tag-label {
+  @apply pr-1 text-muted;
 }
 
 /* Angular CDK drag and drop (Kanban board) */

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Priority, Prisma, TicketStatus } from '@prisma/client';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateBy } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateBy } from 'class-validator';
 import { unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { AuthUser } from '../common/auth';
@@ -41,8 +41,13 @@ const MAX_MINUTES = 1_000_000;
 const tooLong = (field: string, max: number): { message: string } => ({ message: `${field} no puede tener más de ${max} caracteres` });
 const minutesRange = (field: string): { message: string } => ({ message: `${field} debe estar entre 0 y ${MAX_MINUTES} minutos` });
 // An id that no record can have. Passed on, the database rejects the number and the answer is a 500.
+const noCompany = { message: 'La empresa no existe' };
 const noPerson = { message: 'El responsable no existe' };
 const noModule = { message: 'El módulo no existe' };
+const noSupportType = { message: 'El tipo de soporte no existe', each: true };
+
+/** Support types one case can carry. */
+export const MAX_SUPPORT_TYPES = 20;
 
 /**
  * Used for both create and update. Create additionally requires company and description.
@@ -54,12 +59,25 @@ export class TicketInput {
   @IsOptional() @IsDateOnly('La fecha del caso no es válida. Debe ser una fecha real con el formato AAAA-MM-DD.') date?: string;
   /** Time of day the client reported it, `HH:mm`. Optional; null removes it. */
   @IsOptional() @IsTimeOnly('La hora del caso no es válida. Usa el formato HH:MM, de 00:00 a 23:59.') time?: string | null;
-  @IsOptional() @IsString() @MaxLength(200, tooLong('La empresa', 200)) company?: string;
+  /** A company of the catalog. */
+  @IsOptional() @IsInt() @Min(1, noCompany) @Max(MAX_ID, noCompany) companyId?: number;
   @IsOptional() @IsString() @MaxLength(5000, tooLong('La descripción', 5000)) description?: string;
   @IsOptional() @IsEnum(TicketStatus) status?: TicketStatus;
   /** Null leaves the case without a responsible person. */
   @IsOptional() @IsInt() @Min(1, noPerson) @Max(MAX_ID, noPerson) assigneeId?: number | null;
-  @IsOptional() @IsBoolean() assignedToClient?: boolean;
+  /**
+   * "Tipos de soporte" of the case, as ids of the catalog. The whole set: on an edit it replaces
+   * the one the case had, and an empty list leaves the case without any. A repeated id counts once.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_SUPPORT_TYPES, { message: `Un caso no puede tener más de ${MAX_SUPPORT_TYPES} tipos de soporte` })
+  @IsInt({ each: true })
+  @Min(1, noSupportType)
+  @Max(MAX_ID, noSupportType)
+  supportTypeIds?: number[];
+  /** True archives the case and false brings it back. */
+  @IsOptional() @IsBoolean() archived?: boolean;
   @IsOptional() @IsEnum(Priority) priority?: Priority | null;
   @IsOptional() @IsInt() @Min(0, minutesRange('El tiempo estimado')) @Max(MAX_MINUTES, minutesRange('El tiempo estimado')) estimatedMinutes?: number | null;
   @IsOptional() @IsInt() @Min(0, minutesRange('El tiempo real')) @Max(MAX_MINUTES, minutesRange('El tiempo real')) spentMinutes?: number;
@@ -81,21 +99,28 @@ export type TicketQuery = Record<string, unknown>;
 
 /** Promised delivery date. `due` is what the bell shows: overdue, today and, when configured, soon. */
 export type PromiseFilter = 'any' | 'overdue' | 'today' | 'soon' | 'due';
+export type ArchivedFilter = 'only' | 'all';
 export type TicketSort = 'date' | 'company' | 'status';
 
 /**
  * Filters, order and page of a list of cases, already validated: the list, the exports and the
  * dashboard all read this, never the query string. Each field is named after its query parameter;
- * an absent field does not filter. Comes from `parseTicketFilters`, or is written by hand in code.
+ * an absent field does not filter, except `archived`. Comes from `parseTicketFilters`, or is
+ * written by hand in code.
  */
 export type TicketFilters = {
   status?: TicketStatus[];
-  /** A person's id, `client` for "Responsable: Cliente" or `none` for cases nobody is responsible for. */
-  assignee?: number | 'client' | 'none';
-  /** Exact company name, whatever the case. */
-  company?: string;
+  /** A person's id, or `none` for cases nobody is responsible for. */
+  assignee?: number | 'none';
+  companyId?: number;
   priority?: Priority;
   moduleId?: number;
+  /** Cases that carry this support type, alone or with others. */
+  supportType?: number;
+  /** Cases registered by this user. */
+  createdBy?: number;
+  /** Absent, only the cases that are not archived. `only` the archived ones, `all` both. */
+  archived?: ArchivedFilter;
   /** Range of the case date, both ends included, as `YYYY-MM-DD`. */
   from?: string;
   to?: string;
@@ -114,6 +139,7 @@ export type TicketFilters = {
 };
 
 const PROMISE_FILTERS: PromiseFilter[] = ['any', 'overdue', 'today', 'soon', 'due'];
+const ARCHIVED_FILTERS: ArchivedFilter[] = ['only', 'all'];
 const SORTS: TicketSort[] = ['date', 'company', 'status'];
 const DIRECTIONS: Prisma.SortOrder[] = ['asc', 'desc'];
 const DEFAULT_PAGE_SIZE = 50;
@@ -158,10 +184,13 @@ export function parseTicketFilters(query: TicketQuery): TicketFilters {
 
   return {
     status: status.length ? status : undefined,
-    assignee: oneOf('assignee', ['client', 'none'] as const) ?? int('assignee'),
-    company: text('company'),
+    assignee: oneOf('assignee', ['none'] as const) ?? int('assignee'),
+    companyId: int('companyId'),
     priority: oneOf('priority', PRIORITIES),
     moduleId: int('moduleId'),
+    supportType: int('supportType'),
+    createdBy: int('createdBy'),
+    archived: oneOf('archived', ARCHIVED_FILTERS),
     from: date('from', 'Desde'),
     to: date('to', 'Hasta'),
     overdue: text('overdue') === '1' || undefined,
@@ -177,8 +206,10 @@ export function parseTicketFilters(query: TicketQuery): TicketFilters {
 }
 
 const baseInclude = {
+  company: { select: { id: true, name: true } },
   assignee: { select: { id: true, name: true } },
   module: { select: { id: true, name: true, parent: { select: { name: true } } } },
+  supportTypes: { select: { supportType: { select: { id: true, name: true, color: true } } } },
 } satisfies Prisma.TicketInclude;
 
 const listInclude = {
@@ -195,7 +226,7 @@ const detailInclude = {
   history: { orderBy: { createdAt: 'desc' }, take: 100, include: { user: { select: { name: true } } } },
 } satisfies Prisma.TicketInclude;
 
-/** A case as stored, with the names of its responsible person and module. */
+/** A case as stored, with its company, its support types and the names of its responsible person and module. */
 export type StoredTicket = Prisma.TicketGetPayload<{ include: typeof baseInclude }>;
 type ListRow = Prisma.TicketGetPayload<{ include: typeof listInclude }>;
 type DetailRow = Prisma.TicketGetPayload<{ include: typeof detailInclude }>;
@@ -209,6 +240,8 @@ export function ticketOrder(filters: TicketFilters): Prisma.TicketOrderByWithRel
   if (!filters.sort) return [{ id: dir }];
   // Within a day, the cases that have a time go by it; the ones without it come after them.
   if (filters.sort === 'date') return [{ date: dir }, { time: { sort: dir, nulls: 'last' } }, { id: 'asc' }];
+  // By the name of the company, which is what the list shows; its id says nothing to a person.
+  if (filters.sort === 'company') return [{ company: { name: dir } }, { id: 'asc' }];
   return [{ [filters.sort]: dir }, { id: 'asc' }];
 }
 
@@ -226,12 +259,18 @@ export function activityStamp(at: Date = new Date()): { lastActivityAt: Date } {
   return { lastActivityAt: at };
 }
 
-function assigneeName(t: { assignedToClient: boolean; assignee: { name: string } | null }): string | null {
-  return t.assignedToClient ? 'Cliente' : (t.assignee?.name ?? null);
-}
-
 function moduleName(module: StoredTicket['module']): string | null {
   return module ? moduleFullName(module) : null;
+}
+
+/** Support types in the order people read them everywhere: by name. */
+function byName<T extends { name: string }>(types: T[]): T[] {
+  return [...types].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+/** The support types of a case as its history names them: "Capacitación, Falla del sistema". Null without any. */
+function supportTypeNames(types: { name: string }[]): string | null {
+  return byName(types).map((type) => type.name).join(', ') || null;
 }
 
 /**
@@ -260,12 +299,13 @@ function baseDto(t: StoredTicket, rules: ReminderRules) {
     code: ticketCode(t.id),
     date: formatDateOnly(t.date),
     time: t.time,
-    company: t.company,
+    companyId: t.companyId,
+    company: t.company.name,
     description: t.description,
     status: t.status,
     assigneeId: t.assigneeId,
-    assignedToClient: t.assignedToClient,
-    assigneeName: assigneeName(t),
+    assigneeName: t.assignee?.name ?? null,
+    supportTypes: byName(t.supportTypes.map((link) => link.supportType)),
     priority: t.priority,
     estimatedMinutes: t.estimatedMinutes,
     spentMinutes: t.spentMinutes,
@@ -281,7 +321,10 @@ function baseDto(t: StoredTicket, rules: ReminderRules) {
     stale: t.status !== 'RESOLVED' && !!staleBefore && t.lastActivityAt < staleBefore,
     aiGenerated: t.aiGenerated,
     customerReply: t.customerReply,
+    createdById: t.createdById,
     createdAt: t.createdAt,
+    /** Null for a case that is not archived. */
+    archivedAt: t.archivedAt,
   };
 }
 
@@ -326,8 +369,12 @@ export type TicketDetailDto = ReturnType<typeof detailDto>;
 /** What an edit needs from outside the case itself. The caller looks it up: see `TicketsService.lookups`. */
 export interface TicketUpdateContext {
   now: Date;
+  /** Name of the company in `dto.companyId`. */
+  companyName: string | null;
   /** Name of the responsible in `dto.assigneeId`. */
   assigneeName: string | null;
+  /** The support types in `dto.supportTypeIds`, each once. Null when the input does not carry them. */
+  supportTypes: { id: number; name: string }[] | null;
   /** Name of the module in `dto.moduleId`, as shown in the history. */
   moduleName: string | null;
   /** Hours the SLA gives to `dto.priority`. Null without a priority or without a policy for it. */
@@ -349,12 +396,15 @@ export interface TicketUpdatePlan {
 /**
  * Decides what an edit by a person writes: the columns that change and the history lines.
  * It reads no database and no clock, so the same case, input and context always give the same plan.
- * Throws a 400 when the input would leave the case without company or description, or dated in the future.
+ * Throws a 400 when the input would leave the case without description, or dated in the future.
  */
 export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context: TicketUpdateContext): TicketUpdatePlan {
   const { now } = context;
-  // An edit by a person is activity on the case, whichever field it touches.
-  const data: Prisma.TicketUncheckedUpdateInput = { ...activityStamp(now) };
+  // An edit by a person is activity on the case, whichever field it touches. The archive switch is
+  // the exception: putting a case away, or bringing it back, is not working on it. Sent alone, it
+  // leaves the last activity where it was.
+  const archiveAlone = dto.archived != null && Object.entries(dto).every(([field, value]) => field === 'archived' || value === undefined);
+  const data: Prisma.TicketUncheckedUpdateInput = archiveAlone ? {} : { ...activityStamp(now) };
   const history: TicketChange[] = [];
   const track = (field: string, oldValue: string | null, newValue: string | null): void => {
     if (oldValue !== newValue) history.push({ field, oldValue, newValue });
@@ -362,6 +412,7 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
 
   // `@IsOptional()` lets a null through. The date, company, description, status and time spent of a
   // case cannot be empty in the database, so for them null means "not sent", as it does on create.
+  // The same goes for its support types, where the empty value is an empty list, and for the archive.
   if (dto.date != null && dto.date !== formatDateOnly(before.date)) {
     assertReportDate(dto.date, now);
     data.date = parseDateOnly(dto.date);
@@ -373,13 +424,12 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
     track('Hora del caso', before.time, dto.time);
   }
 
-  let company = before.company;
+  // The name of the company the case moves to. Null when the input names none, or the one the case has.
+  const newCompany = dto.companyId != null && dto.companyId !== before.companyId ? context.companyName : null;
   let description = before.description;
-  if (dto.company != null) {
-    company = dto.company.trim();
-    if (!company) throw new BadRequestException('La empresa no puede quedar vacía');
-    data.company = company;
-    track('Empresa', before.company, company);
+  if (newCompany !== null) {
+    data.companyId = dto.companyId;
+    track('Empresa', before.company.name, newCompany);
   }
   if (dto.description != null) {
     description = dto.description.trim();
@@ -388,11 +438,13 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
     // The history says that the description changed, not what it said before or after.
     if (description !== before.description) history.push({ field: 'Descripción', oldValue: null, newValue: null });
   }
-  if (dto.company != null || dto.description != null) data.searchText = ticketSearchKey(company, description);
+  if (newCompany !== null || dto.description != null) data.searchText = ticketSearchKey(newCompany ?? before.company.name, description);
 
   if (dto.status != null && dto.status !== before.status) {
     data.status = dto.status;
     data.resolvedAt = dto.status === 'RESOLVED' ? now : null;
+    // Resolving stops a running timer, and its minutes join the time spent. An edit that also says
+    // what the time spent is has the last word, further down.
     if (dto.status === 'RESOLVED' && before.timerStartedAt) {
       data.spentMinutes = before.spentMinutes + elapsedMinutes(before.timerStartedAt, now);
       data.timerStartedAt = null;
@@ -400,15 +452,30 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
     track('Estado', STATUS_LABEL[before.status], STATUS_LABEL[dto.status]);
   }
 
-  if (dto.assigneeId !== undefined || dto.assignedToClient !== undefined) {
-    // Choosing a person clears "Cliente"; choosing "Cliente" clears the person.
-    const toClient = dto.assignedToClient ?? (dto.assigneeId != null ? false : before.assignedToClient);
-    const assigneeId = toClient ? null : dto.assigneeId !== undefined ? dto.assigneeId : before.assigneeId;
-    data.assignedToClient = toClient;
-    data.assigneeId = assigneeId;
-    // Without a person in the input the case keeps the one it had, whose name is already loaded.
-    const personName = dto.assigneeId != null ? context.assigneeName : (before.assignee?.name ?? null);
-    track('Responsable', assigneeName(before), toClient ? 'Cliente' : assigneeId ? personName : null);
+  // The responsible is optional on a case: null is a value, and leaves the case without one.
+  if (dto.assigneeId !== undefined && dto.assigneeId !== before.assigneeId) {
+    data.assigneeId = dto.assigneeId;
+    track('Responsable', before.assignee?.name ?? null, dto.assigneeId ? context.assigneeName : null);
+  }
+
+  if (dto.supportTypeIds != null) {
+    const had = before.supportTypes.map((link) => link.supportType);
+    const wanted = context.supportTypes ?? [];
+    const removed = had.filter((type) => !wanted.some((other) => other.id === type.id)).map((type) => type.id);
+    const added = wanted.filter((type) => !had.some((other) => other.id === type.id)).map((type) => type.id);
+    if (removed.length || added.length) {
+      // Only the difference is written: the types the case keeps are not deleted and created again.
+      data.supportTypes = {
+        deleteMany: removed.length ? { supportTypeId: { in: removed } } : undefined,
+        createMany: added.length ? { data: added.map((supportTypeId) => ({ supportTypeId })) } : undefined,
+      };
+      track('Tipos de soporte', supportTypeNames(had), supportTypeNames(wanted));
+    }
+  }
+
+  if (dto.archived != null && dto.archived !== (before.archivedAt !== null)) {
+    data.archivedAt = dto.archived ? now : null;
+    track('Archivado', dto.archived ? 'No' : 'Sí', dto.archived ? 'Sí' : 'No');
   }
 
   if (dto.priority !== undefined && dto.priority !== before.priority) {
@@ -431,8 +498,9 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
   }
   if (dto.customerReply !== undefined) data.customerReply = cleanReply(dto.customerReply);
   if (dto.estimatedMinutes !== undefined) data.estimatedMinutes = dto.estimatedMinutes;
-  // Resolving with the timer running already decided the time spent, above.
-  if (dto.spentMinutes != null && data.spentMinutes === undefined) data.spentMinutes = dto.spentMinutes;
+  // Also over the minutes of a timer that resolving has just stopped: the form saves all its fields
+  // together, and the number the person typed in it is the one they mean.
+  if (dto.spentMinutes != null) data.spentMinutes = dto.spentMinutes;
   if (dto.moduleId !== undefined && dto.moduleId !== before.moduleId) {
     data.moduleId = dto.moduleId;
     track('Módulo', moduleName(before.module), dto.moduleId ? context.moduleName : null);
@@ -454,6 +522,10 @@ export class TicketsService {
     const none: Prisma.TicketWhereInput = { id: -1 };
     const open: Prisma.TicketWhereInput = { status: { not: 'RESOLVED' } };
 
+    // An archived case is out of every list, export and reminder unless the filter asks for it.
+    if (filters.archived === 'only') and.push({ archivedAt: { not: null } });
+    else if (filters.archived !== 'all') and.push({ archivedAt: null });
+
     if (filters.stale) {
       // With reminders turned off no case is forgotten.
       and.push(rules.staleBefore ? { ...open, lastActivityAt: { lt: rules.staleBefore } } : none);
@@ -474,13 +546,14 @@ export class TicketsService {
 
     if (filters.status?.length) and.push({ status: { in: filters.status } });
 
-    if (filters.assignee === 'client') and.push({ assignedToClient: true });
-    else if (filters.assignee === 'none') and.push({ assigneeId: null, assignedToClient: false });
+    if (filters.assignee === 'none') and.push({ assigneeId: null });
     else if (filters.assignee !== undefined) and.push({ assigneeId: filters.assignee });
 
-    if (filters.company) and.push({ company: { equals: filters.company, mode: 'insensitive' } });
+    if (filters.companyId !== undefined) and.push({ companyId: filters.companyId });
     if (filters.priority) and.push({ priority: filters.priority });
     if (filters.moduleId !== undefined) and.push({ moduleId: filters.moduleId });
+    if (filters.supportType !== undefined) and.push({ supportTypes: { some: { supportTypeId: filters.supportType } } });
+    if (filters.createdBy !== undefined) and.push({ createdById: filters.createdBy });
     if (filters.from) and.push({ date: { gte: parseDateOnly(filters.from) } });
     if (filters.to) and.push({ date: { lte: parseDateOnly(filters.to) } });
     if (filters.overdue) and.push({ dueAt: { lt: new Date() }, status: { not: 'RESOLVED' } });
@@ -519,7 +592,7 @@ export class TicketsService {
   }
 
   /**
-   * What the notification bell shows, all for open cases only:
+   * What the notification bell shows, all for open cases that are not archived:
    * - promises: promised delivery date already passed, due today or, when the team configured
    *   advance notice, coming up within those days (most urgent first);
    * - stale: nobody has touched the case for longer than the configured time (oldest first);
@@ -550,7 +623,7 @@ export class TicketsService {
           })
         : [],
       this.prisma.ticket.findMany({
-        where: { status: { not: 'RESOLVED' }, dueAt: { lt: new Date() } },
+        where: this.buildWhere({ overdue: true }),
         include: listInclude,
         orderBy: { dueAt: 'asc' },
         take: 100,
@@ -572,28 +645,30 @@ export class TicketsService {
   }
 
   async create(dto: TicketInput, user: AuthUser): Promise<TicketDetailDto> {
-    const company = dto.company?.trim();
     const description = dto.description?.trim();
-    if (!company || !description) throw new BadRequestException('Empresa y descripción son obligatorias');
-    const { slaHours } = await this.lookups(dto);
+    if (dto.companyId == null) throw new BadRequestException('La empresa es obligatoria');
+    if (!description) throw new BadRequestException('La descripción es obligatoria');
+    const { companyName, supportTypes, slaHours } = await this.lookups(dto);
+    // `lookups` has already refused a company that is not in the catalog: this only tells the compiler.
+    if (companyName === null) throw new BadRequestException('La empresa no existe');
 
     const now = new Date();
     assertReportDate(dto.date, now);
     const status = dto.status ?? 'PENDING';
-    const toClient = dto.assignedToClient === true;
     const note = dto.note?.trim();
 
     const ticket = await this.prisma.ticket.create({
       data: {
         date: dto.date ? parseDateOnly(dto.date) : todayDateOnly(now),
         time: dto.time ?? null,
-        company,
+        companyId: dto.companyId,
         description,
-        searchText: ticketSearchKey(company, description),
+        searchText: ticketSearchKey(companyName, description),
         status,
-        // Whoever registers the case takes it unless another responsible is chosen.
-        assigneeId: toClient ? null : dto.assigneeId === undefined ? await this.ownAssigneeId(user.id) : dto.assigneeId,
-        assignedToClient: toClient,
+        // Nobody unless one is chosen: registering a case does not make a person responsible for it.
+        assigneeId: dto.assigneeId ?? null,
+        supportTypes: supportTypes?.length ? { create: supportTypes.map((type) => ({ supportTypeId: type.id })) } : undefined,
+        archivedAt: dto.archived ? now : null,
         priority: dto.priority ?? null,
         estimatedMinutes: dto.estimatedMinutes ?? null,
         spentMinutes: dto.spentMinutes ?? 0,
@@ -690,41 +765,31 @@ export class TicketsService {
     return this.get(id);
   }
 
-  /** Company names already used, most frequent first. Feeds the autocomplete. */
-  async companies(q: string | undefined): Promise<string[]> {
-    const text = q?.trim();
-    const rows = await this.prisma.ticket.groupBy({
-      by: ['company'],
-      where: text ? { company: { contains: text, mode: 'insensitive' } } : undefined,
-      _count: { company: true },
-      orderBy: { _count: { company: 'desc' } },
-      take: 12,
-    });
-    return rows.map((r) => r.company);
-  }
-
   /**
-   * Loads what the input points to: its person, its module and the SLA of its priority.
-   * A person or a module that does not exist is a 400.
+   * Loads what the input points to: its company, its person, its module, its support types and
+   * the SLA of its priority. Any of the first four that does not exist is a 400.
    */
   private async lookups(dto: TicketInput): Promise<Omit<TicketUpdateContext, 'now'>> {
-    const [assignee, module, sla] = await Promise.all([
+    // Null for a null too: the list is optional, and null means "not sent".
+    const typeIds = dto.supportTypeIds ? [...new Set(dto.supportTypeIds)] : null;
+    const [company, assignee, module, supportTypes, sla] = await Promise.all([
+      dto.companyId != null ? this.prisma.company.findUnique({ where: { id: dto.companyId }, select: { name: true } }) : null,
       dto.assigneeId != null ? this.prisma.assignee.findUnique({ where: { id: dto.assigneeId }, select: { name: true } }) : null,
       dto.moduleId != null ? this.prisma.systemModule.findUnique({ where: { id: dto.moduleId }, select: baseInclude.module.select }) : null,
+      typeIds?.length ? this.prisma.supportType.findMany({ where: { id: { in: typeIds } }, select: { id: true, name: true } }) : [],
       dto.priority ? this.prisma.slaPolicy.findUnique({ where: { priority: dto.priority } }) : null,
     ]);
+    if (dto.companyId != null && !company) throw new BadRequestException('La empresa no existe');
     if (dto.assigneeId != null && !assignee) throw new BadRequestException('El responsable no existe');
     if (dto.moduleId != null && !module) throw new BadRequestException('El módulo no existe');
-    return { assigneeName: assignee?.name ?? null, moduleName: moduleName(module), slaHours: sla?.hours ?? null };
-  }
-
-  /**
-   * The responsible a user is, for the cases they register without choosing one. Null for a user
-   * who does not attend cases, and for one whose responsible was deactivated.
-   */
-  private async ownAssigneeId(userId: number): Promise<number | null> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { assignee: { select: { id: true, active: true } } } });
-    return user?.assignee?.active ? user.assignee.id : null;
+    if (typeIds && supportTypes.length !== typeIds.length) throw new BadRequestException('El tipo de soporte no existe');
+    return {
+      companyName: company?.name ?? null,
+      assigneeName: assignee?.name ?? null,
+      moduleName: moduleName(module),
+      supportTypes: typeIds ? supportTypes : null,
+      slaHours: sla?.hours ?? null,
+    };
   }
 }
 
@@ -741,7 +806,7 @@ function assertReportDate(date: string | undefined, now: Date): void {
 }
 
 /** Deadline = registration time + hours of the priority's SLA. No SLA hours, no deadline. */
-function slaDueAt(createdAt: Date, slaHours: number | null): Date | null {
+export function slaDueAt(createdAt: Date, slaHours: number | null): Date | null {
   return slaHours === null ? null : new Date(createdAt.getTime() + slaHours * 3_600_000);
 }
 

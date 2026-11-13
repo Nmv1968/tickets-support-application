@@ -2,14 +2,20 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import { Reminders } from '../../core/reminders';
+import { SELECT } from '../../core/select';
 import { Toast } from '../../core/toast';
 
 type Unit = 'hours' | 'days';
 
+const UNITS: { id: Unit; label: string }[] = [
+  { id: 'hours', label: 'horas' },
+  { id: 'days', label: 'días' },
+];
+
 /** What the bell reminds the team about, and when: forgotten cases and delivery promises. */
 @Component({
   selector: 'app-reminders-tab',
-  imports: [FormsModule],
+  imports: [FormsModule, ...SELECT],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="grid max-w-4xl gap-4 lg:grid-cols-2">
@@ -34,10 +40,18 @@ type Unit = 'hours' | 'days';
           </div>
           <div>
             <label class="label" for="reminder-unit">Unidad</label>
-            <select id="reminder-unit" class="input w-28" name="unit" [disabled]="!enabled()" [(ngModel)]="unit">
-              <option value="hours">horas</option>
-              <option value="days">días</option>
-            </select>
+            <ng-select
+              class="w-28"
+              labelForId="reminder-unit"
+              name="unit"
+              bindValue="id"
+              bindLabel="label"
+              [items]="units"
+              [clearable]="false"
+              [searchable]="false"
+              [disabled]="!enabled()"
+              [(ngModel)]="unit"
+            />
           </div>
         </div>
 
@@ -86,6 +100,7 @@ export class RemindersTab {
   private readonly toast = inject(Toast);
   private readonly reminders = inject(Reminders);
 
+  protected readonly units = UNITS;
   protected readonly loading = signal(true);
   // Forgotten cases
   protected readonly enabled = signal(true);

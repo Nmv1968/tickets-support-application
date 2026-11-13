@@ -1,5 +1,6 @@
 import { BadRequestException, StreamableFile } from '@nestjs/common';
 import type { Response } from 'express';
+import type { AuthUser } from '../common/auth';
 import { formatDateOnly, todayDateOnly } from '../common/labels';
 import { TransferController } from './transfer.controller';
 import type { TransferService } from './transfer.service';
@@ -29,6 +30,15 @@ describe('export endpoints', () => {
     await controller[format](query, res as unknown as Response);
 
     expect(exportFile).toHaveBeenCalledWith({ status: ['PENDING', 'RESOLVED'], moduleId: 4, from: '2026-02-01', to: '2026-02-28' });
+  });
+
+  it.each(formats)('%s: takes the filters by company, support type, user and archive, like the list', async (format) => {
+    const exportFile = jest.fn().mockResolvedValue(Buffer.from('file'));
+    const { controller, res } = setup(exportFile);
+
+    await controller[format]({ companyId: '9', supportType: '5', createdBy: '3', archived: 'only', assignee: 'none' }, res as unknown as Response);
+
+    expect(exportFile).toHaveBeenCalledWith({ companyId: 9, supportType: 5, createdBy: 3, archived: 'only', assignee: 'none' });
   });
 
   // Exported without that end of the range, the file would hold cases the person did not ask for.
@@ -62,6 +72,39 @@ describe('export endpoints', () => {
     await expect(controller[format]({}, res as unknown as Response)).rejects.toBe(refusal);
 
     expect(res.set).not.toHaveBeenCalled();
+  });
+});
+
+describe('import endpoint', () => {
+  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin' };
+  const file = { buffer: Buffer.from('Empresa,Descripción'), originalname: 'casos.csv' } as Express.Multer.File;
+  const setup = (): { controller: TransferController; run: jest.Mock } => {
+    const run = jest.fn().mockResolvedValue({ toCreate: 0 });
+    return { controller: new TransferController({ import: run } as unknown as TransferService), run };
+  };
+
+  // Each option is on only with the exact value the web sends. Anything else is the careful choice:
+  // a real import that adds nothing to the catalogs is asked for on purpose.
+  it.each([
+    [{}, { dryRun: false, dateOrder: 'mdy', createMissing: false }],
+    [{ dryRun: '1', dateOrder: 'dmy', createMissing: '1' }, { dryRun: true, dateOrder: 'dmy', createMissing: true }],
+    [{ dryRun: '1' }, { dryRun: true, dateOrder: 'mdy', createMissing: false }],
+    [{ createMissing: '1' }, { dryRun: false, dateOrder: 'mdy', createMissing: true }],
+    [{ dryRun: 'true', dateOrder: 'ymd', createMissing: 'yes' }, { dryRun: false, dateOrder: 'mdy', createMissing: false }],
+  ])('reads the options %j of the query string', async (query: Record<string, string>, options) => {
+    const { controller, run } = setup();
+
+    await controller.import(file, user, query.dryRun, query.dateOrder, query.createMissing);
+
+    expect(run).toHaveBeenCalledWith(file, options, user);
+  });
+
+  it('refuses a request without a file, and imports nothing', () => {
+    const { controller, run } = setup();
+
+    expect(() => controller.import(undefined, user)).toThrow('No se recibió ningún archivo');
+
+    expect(run).not.toHaveBeenCalled();
   });
 });
 

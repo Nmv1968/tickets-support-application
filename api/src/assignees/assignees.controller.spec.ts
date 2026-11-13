@@ -2,7 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import type { PrismaService } from '../prisma.service';
-import { AssigneeInput, AssigneesController } from './assignees.controller';
+import { AssigneeInput, AssigneesController, meansNobody } from './assignees.controller';
 
 interface Row {
   id: number;
@@ -18,14 +18,30 @@ describe('responsibles catalog', () => {
 
   /** The controller over a fake database that holds `rows` and records what is written to it. */
   const setup = (rows: Row[] = [zoe, jose, ana]) => {
+    const table = [...rows];
+    // The lock of the catalog as the database gives it: to one transaction at a time, until it ends.
+    let lockFree: Promise<void> = Promise.resolve();
     const db = {
+      $transaction: jest.fn((work: (tx: unknown) => Promise<unknown>): Promise<unknown> => {
+        let release = (): void => undefined;
+        const $executeRaw = jest.fn(async (): Promise<void> => {
+          const held = lockFree;
+          lockFree = new Promise((resolve) => (release = resolve));
+          await held;
+        });
+        return work({ ...db, $executeRaw }).finally(() => release());
+      }),
       assignee: {
         // The name check reads the others: every row but the one being edited.
-        findMany: jest.fn(({ where }: { where?: { id?: { not: number } } } = {}) => Promise.resolve(rows.filter((row) => row.id !== where?.id?.not))),
-        findUnique: jest.fn(({ where }: { where: { id: number } }) => Promise.resolve(rows.find((row) => row.id === where.id) ?? null)),
-        create: jest.fn(({ data }: { data: { name: string } }) => Promise.resolve({ id: 9, name: data.name, active: true, _count: { tickets: 0 } })),
+        findMany: jest.fn(({ where }: { where?: { id?: { not: number } } } = {}) => Promise.resolve(table.filter((row) => row.id !== where?.id?.not))),
+        findUnique: jest.fn(({ where }: { where: { id: number } }) => Promise.resolve(table.find((row) => row.id === where.id) ?? null)),
+        create: jest.fn(({ data }: { data: { name: string } }) => {
+          const row = { id: 9 + table.length - rows.length, name: data.name, active: true, _count: { tickets: 0 } };
+          table.push(row);
+          return Promise.resolve(row);
+        }),
         update: jest.fn(({ where, data }: { where: { id: number }; data: Partial<Row> }) =>
-          Promise.resolve({ ...rows.find((row) => row.id === where.id), ...JSON.parse(JSON.stringify(data)) }),
+          Promise.resolve({ ...table.find((row) => row.id === where.id), ...JSON.parse(JSON.stringify(data)) }),
         ),
         delete: jest.fn().mockResolvedValue({}),
       },
@@ -39,6 +55,12 @@ describe('responsibles catalog', () => {
       { id: 2, name: 'José Pérez', active: true, tickets: 0 },
       { id: 3, name: 'Zoe', active: false, tickets: 1 },
     ]);
+  });
+
+  // The import asks this of the cells of its sheet, so that it never looks for a person called so, or adds one.
+  it('tells the words that on a case mean nobody, however they are written, from a name', () => {
+    expect(['ninguno', 'NINGUNO', ' Sin  asignar ', 'sin asignar'].map(meansNobody)).toEqual([true, true, true, true]);
+    expect(['Cliente', 'Ana', 'Ninguna', ''].map(meansNobody)).toEqual([false, false, false, false]);
   });
 
   describe('a new responsible', () => {
@@ -57,7 +79,7 @@ describe('responsibles catalog', () => {
     });
 
     // The import and the assistants find a responsible by name, whatever its case or accents.
-    it.each(['Ana', 'ANA', ' ana ', 'jose perez', 'JOSÉ  PÉREZ', 'zoe'])('cannot repeat a name: "%s" is already there', async (name) => {
+    it.each(['Ana', 'ANA', ' ana ', 'jose perez', 'JOSÉ  PÉREZ'])('cannot repeat a name: "%s" is already there', async (name) => {
       const { db, controller } = setup();
 
       const failure = await controller.create({ name }).catch((error: unknown) => error);
@@ -67,12 +89,44 @@ describe('responsibles catalog', () => {
       expect(db.assignee.create).not.toHaveBeenCalled();
     });
 
-    // "Cliente" is already an option of every case, and "ninguno" is how an assistant says nobody.
-    it.each(['Cliente', 'CLIENTE', 'ninguno', 'Sin  asignar'])('cannot be called "%s"', async (name) => {
+    // A deactivated responsible is in none of the lists that offer one. "Ya existe" alone would send the person looking for them in vain.
+    it.each(['Zoe', ' ZOE '])('cannot repeat the name of a deactivated responsible, and says where to activate them ("%s")', async (name) => {
+      const { db, controller } = setup();
+
+      const failure = await controller.create({ name }).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(ConflictException);
+      expect(failure).toHaveProperty('message', 'Ya existe un responsable con ese nombre, pero está inactivo. Actívalo en Configuración > Responsables.');
+      expect(db.assignee.create).not.toHaveBeenCalled();
+    });
+
+    // Each request asks whether the name is free before the other has added it, unless only one
+    // at a time may ask and add.
+    it('is added once when two requests bring the same new name at the same moment', async () => {
+      const { db, controller } = setup();
+
+      const answers = await Promise.allSettled([controller.create({ name: 'Luis Ñáñez' }), controller.create({ name: 'LUIS  NANEZ' })]);
+
+      expect(db.assignee.create).toHaveBeenCalledTimes(1);
+      expect(answers[0]).toEqual({ status: 'fulfilled', value: { id: 9, name: 'Luis Ñáñez', active: true, tickets: 0 } });
+      expect(answers[1]).toMatchObject({ status: 'rejected', reason: { message: 'Ya existe un responsable con ese nombre' } });
+      expect((answers[1] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
+    });
+
+    // Both are how an assistant says that nobody is responsible for a case.
+    it.each(['ninguno', 'NINGUNO', 'Sin  asignar'])('cannot be called "%s"', async (name) => {
       const { db, controller } = setup();
 
       await expect(controller.create({ name })).rejects.toThrow('no puede ser el nombre de un responsable');
       expect(db.assignee.create).not.toHaveBeenCalled();
+    });
+
+    // "Cliente" used to be an option built into every case. Now a team that wants it adds it here.
+    it('can be called "Cliente", a name like any other', async () => {
+      const { db, controller } = setup();
+
+      expect(await controller.create({ name: 'Cliente' })).toEqual({ id: 9, name: 'Cliente', active: true, tickets: 0 });
+      expect(db.assignee.create).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -88,6 +142,15 @@ describe('responsibles catalog', () => {
       const { db, controller } = setup();
 
       await expect(controller.update(2, { name: 'ana' })).rejects.toThrow('Ya existe un responsable con ese nombre');
+      expect(db.assignee.update).not.toHaveBeenCalled();
+    });
+
+    it('cannot take the name of a deactivated responsible either, and says where that one is', async () => {
+      const { db, controller } = setup();
+
+      await expect(controller.update(2, { name: 'zoe' })).rejects.toThrow(
+        'Ya existe un responsable con ese nombre, pero está inactivo. Actívalo en Configuración > Responsables.',
+      );
       expect(db.assignee.update).not.toHaveBeenCalled();
     });
 

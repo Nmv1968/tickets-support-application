@@ -12,7 +12,7 @@ import { Toast } from '../../core/toast';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4">
-      <form class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] lg:items-end" (ngSubmit)="create()">
+      <form class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end" (ngSubmit)="create()">
         <div>
           <label class="label" for="user-name">Nombre</label>
           <input id="user-name" class="input" name="name" placeholder="Ana Torres" [(ngModel)]="name" />
@@ -25,15 +25,6 @@ import { Toast } from '../../core/toast';
           <label class="label" for="user-password">Contraseña (mínimo 6)</label>
           <input id="user-password" class="input" name="password" type="password" autocomplete="new-password" [(ngModel)]="password" />
         </div>
-        <div>
-          <label class="label" for="user-assignee">Responsable (opcional)</label>
-          <select id="user-assignee" class="input" name="assignee" [(ngModel)]="assignee">
-            <option value="">No atiende casos</option>
-            @for (person of catalogs.activeAssignees(); track person.id) {
-              <option [value]="person.id">{{ person.name }}</option>
-            }
-          </select>
-        </div>
         <button type="submit" class="btn btn-primary" [disabled]="!name().trim() || username().trim().length < 3 || password().length < 6">
           <i class="mdi mdi-plus" aria-hidden="true"></i> Agregar
         </button>
@@ -45,7 +36,6 @@ import { Toast } from '../../core/toast';
             <tr>
               <th class="px-3 py-2 font-medium">Nombre</th>
               <th class="px-3 py-2 font-medium">Usuario</th>
-              <th class="px-3 py-2 font-medium">Responsable</th>
               <th class="px-3 py-2 font-medium">Acceso</th>
               <th class="px-3 py-2 text-right font-medium">Acciones</th>
             </tr>
@@ -57,16 +47,6 @@ import { Toast } from '../../core/toast';
                   <input class="cell-control cursor-text font-medium" [value]="user.name" [attr.aria-label]="'Nombre de ' + user.username" (change)="rename(user, $event)" />
                 </td>
                 <td class="px-3 py-2 text-muted">{{ user.username }}</td>
-                <td class="px-1.5 py-1">
-                  <select class="cell-control" [attr.aria-label]="'Responsable que es ' + user.username" [ngModel]="user.assigneeId ?? ''" (ngModelChange)="link(user, $event)">
-                    <option value="">No atiende casos</option>
-                    @for (person of catalogs.assignees(); track person.id) {
-                      @if (person.active || person.id === user.assigneeId) {
-                        <option [value]="person.id">{{ person.name }}</option>
-                      }
-                    }
-                  </select>
-                </td>
                 <td class="px-3 py-2">
                   @if (!user.active) {
                     <span class="badge bg-elevated text-muted">Inactivo</span>
@@ -100,8 +80,7 @@ import { Toast } from '../../core/toast';
         </table>
       </div>
       <p class="text-xs text-muted">
-        Todos los usuarios tienen el mismo acceso. Un usuario inactivo no puede ingresar. «Responsable» dice quién es el usuario en la lista de responsables: los
-        casos que registra quedan a su nombre y «Míos» en los avisos le muestra los suyos. Quienes atienden casos se administran en la pestaña Responsables.
+        Todos los usuarios tienen el mismo acceso. Un usuario inactivo no puede ingresar. Quienes atienden los casos se administran aparte, en la pestaña Responsables.
       </p>
     </div>
   `,
@@ -115,8 +94,6 @@ export class UsersTab {
   protected readonly name = signal('');
   protected readonly username = signal('');
   protected readonly password = signal('');
-  /** Responsible the new user is. Empty: the user does not attend cases. */
-  protected readonly assignee = signal('');
   protected readonly passwordFor = signal<number | null>(null);
   protected readonly newPassword = signal('');
 
@@ -132,28 +109,16 @@ export class UsersTab {
 
   protected async create(): Promise<void> {
     await this.run(async () => {
-      await this.api.createUser({
-        name: this.name().trim(),
-        username: this.username().trim(),
-        password: this.password(),
-        assigneeId: this.assignee() ? Number(this.assignee()) : null,
-      });
+      await this.api.createUser({ name: this.name().trim(), username: this.username().trim(), password: this.password() });
       this.name.set('');
       this.username.set('');
       this.password.set('');
-      this.assignee.set('');
     }, 'Usuario creado');
   }
 
   protected rename(user: User, event: Event): void {
     const name = (event.target as HTMLInputElement).value.trim();
     if (name && name !== user.name) void this.run(() => this.api.updateUser(user.id, { name }), 'Nombre actualizado');
-  }
-
-  /** Says which responsible the user is; the empty option unlinks them. */
-  protected link(user: User, value: string | number): void {
-    const assigneeId = value === '' ? null : Number(value);
-    if (assigneeId !== user.assigneeId) void this.run(() => this.api.updateUser(user.id, { assigneeId }), 'Responsable actualizado');
   }
 
   protected toggle(user: User): void {

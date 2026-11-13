@@ -3,12 +3,13 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import type { SystemModule } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
+import { SELECT } from '../../core/select';
 import { Toast } from '../../core/toast';
 
 /** Catalog of the supported software's modules. It changes as the software grows, so it is edited here. */
 @Component({
   selector: 'app-modules-tab',
-  imports: [FormsModule],
+  imports: [FormsModule, ...SELECT],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4">
@@ -19,12 +20,8 @@ import { Toast } from '../../core/toast';
         </div>
         <div>
           <label class="label" for="module-parent">Dentro de (opcional)</label>
-          <select id="module-parent" class="input" name="parent" [(ngModel)]="parentId">
-            <option value="">Módulo principal</option>
-            @for (module of parents(); track module.id) {
-              <option [value]="module.id">{{ module.name }}</option>
-            }
-          </select>
+          <!-- Left empty, the module is a main one: that is what the placeholder says. -->
+          <ng-select labelForId="module-parent" name="parent" placeholder="Módulo principal" bindValue="id" bindLabel="name" [items]="parents()" [(ngModel)]="parentId" />
         </div>
         <button type="submit" class="btn btn-primary" [disabled]="!name().trim()"><i class="mdi mdi-plus" aria-hidden="true"></i> Agregar</button>
       </form>
@@ -59,7 +56,8 @@ export class ModulesTab {
   protected readonly all = signal<SystemModule[]>([]);
   protected readonly parents = computed(() => this.all().filter((module) => module.parentId === null && module.active));
   protected readonly name = signal('');
-  protected readonly parentId = signal('');
+  /** Null: the module being added is a main one. */
+  protected readonly parentId = signal<number | null>(null);
 
   constructor() {
     void this.load();
@@ -85,7 +83,7 @@ export class ModulesTab {
 
   protected async create(): Promise<void> {
     await this.run(async () => {
-      await this.api.createModule({ name: this.name().trim(), parentId: this.parentId() ? Number(this.parentId()) : null });
+      await this.api.createModule({ name: this.name().trim(), parentId: this.parentId() });
       this.name.set('');
     });
   }

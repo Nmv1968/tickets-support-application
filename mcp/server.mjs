@@ -116,6 +116,10 @@ const PRIORITY_LABEL = Object.fromEntries(Object.entries(PRIORITY).map(([label, 
 const PROMISE_LABEL = { overdue: 'vencida', today: 'vence hoy', soon: 'próxima a vencer', later: 'vigente' };
 /** Filter values of `buscar_casos` → `promise` parameter of the API. */
 const PROMISE_FILTER = { 'con promesa': 'any', 'por atender': 'due', vencida: 'overdue', hoy: 'today', proxima: 'soon' };
+/** Filter values of `buscar_casos` → `archived` parameter of the API. Without it the API leaves the archived cases out. */
+const ARCHIVED_FILTER = { no: undefined, solo: 'only', todos: 'all' };
+/** Colour of a support type created without one: the grey the import gives to the ones it adds. */
+const DEFAULT_TYPE_COLOR = '#64748b';
 
 const estado = z.enum(Object.keys(STATUS));
 const prioridad = z.enum(Object.keys(PRIORITY));
@@ -169,21 +173,27 @@ async function moduleId(name) {
   );
 }
 
-/** "cliente" → the client is responsible; "ninguno" or empty → nobody; otherwise the name of a responsible of the catalog. */
-async function assignee(name) {
+/**
+ * "ninguno", "sin asignar" or empty → nobody (null); otherwise the id of the responsible of the
+ * catalog called `name`, or of the only one whose name starts with it. `reading` is for a filter:
+ * it takes an inactive responsible too, because their cases are still there to be found.
+ */
+async function assigneeId(name, { reading = false } = {}) {
   const wanted = key(name);
-  if (!wanted || wanted === 'ninguno' || wanted === 'sin asignar') return { assigneeId: null, assignedToClient: false };
-  if (wanted === 'cliente') return { assigneeId: null, assignedToClient: true };
+  if (!wanted || wanted === 'ninguno' || wanted === 'sin asignar') return null;
   const everyone = await api('GET', 'assignees');
-  const people = everyone.filter((person) => person.active);
+  const people = everyone.filter((person) => person.active || reading);
   const exact = people.filter((person) => key(person.name) === wanted);
   const matches = exact.length ? exact : people.filter((person) => key(person.name).startsWith(wanted));
-  if (matches.length === 1) return { assigneeId: matches[0].id, assignedToClient: false };
+  if (matches.length === 1) return matches[0].id;
 
   // As with a module: the choice is put to the person, never made here.
-  const list = `Responsables existentes: ${[...people.map((person) => person.name), 'Cliente'].join(', ')}.`;
+  const list = people.length ? `Responsables existentes: ${people.map((person) => person.name).join(', ')}.` : 'Todavía no hay responsables en la lista.';
   if (matches.length > 1) {
     throw new Error(`Hay varios responsables que coinciden con "${name}": ${matches.map((person) => person.name).join(', ')}. Pregunta a la persona cuál es.`);
+  }
+  if (reading) {
+    throw new Error(`No existe el responsable "${name}". ${list} Si no sabes cuál es, pregunta a la persona.`);
   }
   const inactive = everyone.find((person) => key(person.name) === wanted);
   if (inactive) {
@@ -196,6 +206,92 @@ async function assignee(name) {
     `No existe el responsable "${name}". No lo agregues ni elijas otro por tu cuenta: pregunta a la persona si quiere que lo agregues ` +
       `a la lista (herramienta crear_responsable), asignar el caso a uno de los existentes o dejarlo sin asignar. ${list}`,
   );
+}
+
+/** The words of a name that tell it from another one: "de", "la" or the letters of "S.A." are in too many. */
+function nameWords(name) {
+  return key(name)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length > 2);
+}
+
+/**
+ * The companies a person may have meant by `name`: the ones whose name contains it, then the ones
+ * that share a word with it. Ten at most: a catalog of clients is too long to put in an error.
+ */
+function similarCompanies(companies, name) {
+  const wanted = key(name);
+  const words = nameWords(name);
+  const shared = (company) => nameWords(company.name).filter((word) => words.includes(word)).length;
+  const containing = companies.filter((company) => key(company.name).includes(wanted));
+  const sharing = companies.filter((company) => !containing.includes(company) && shared(company) > 0).sort((a, b) => shared(b) - shared(a));
+  return [...containing, ...sharing].slice(0, 10);
+}
+
+/**
+ * The company of the catalog called `name`, by its exact name. `reading` is for a filter: it takes
+ * an inactive company too, because its cases are still there to be found.
+ * As with a module, a name that is not there is put to the person. The error offers the companies
+ * with a similar name: the one the person means is often registered under another spelling.
+ */
+async function companyId(name, { reading = false } = {}) {
+  const wanted = key(name);
+  if (!wanted) throw new Error('Falta la empresa. No la supongas: pregunta a la persona cuál es.');
+  const companies = await api('GET', 'companies');
+  const found = companies.find((company) => key(company.name) === wanted);
+  if (found && (found.active || reading)) return found.id;
+
+  const similar = similarCompanies(companies.filter((company) => company.active || reading), name);
+  const list = similar.length ? `Empresas con un nombre parecido: ${similar.map((company) => company.name).join('; ')}.` : 'No hay otra empresa con un nombre parecido.';
+  if (found) {
+    throw new Error(
+      `La empresa "${found.name}" existe pero está inactiva. No uses otra por tu cuenta: pregunta a la persona si la reactiva ` +
+        `(Configuración > Empresas) o si el caso es de otra empresa. ${list}`,
+    );
+  }
+  if (reading) {
+    throw new Error(
+      `No existe la empresa "${name}": el filtro necesita el nombre exacto. ${list} Si no sabes cuál es, pregunta a la persona, ` +
+        'o busca por una parte del nombre con `texto`.',
+    );
+  }
+  throw new Error(
+    `No existe la empresa "${name}". No la crees ni elijas otra por tu cuenta: pregunta a la persona si quiere que la crees ` +
+      `(herramienta crear_empresa) o si es una de las existentes. ${list}`,
+  );
+}
+
+/**
+ * The ids of the support types called `names`, each by its exact name, as with a company. Two
+ * situations take an inactive type too. `carried`, the types the case already has: sending its
+ * list again must not take one off. And `reading`, for a filter: the cases that carry it are
+ * still there to be found.
+ */
+async function supportTypeIds(names, { carried = [], reading = false } = {}) {
+  const wanted = names.filter((name) => key(name));
+  if (!wanted.length) return [];
+  const types = await api('GET', 'support-types');
+  const offered = types.filter((type) => type.active || reading).map((type) => type.name);
+  const list = offered.length ? `Tipos de soporte existentes: ${offered.join('; ')}.` : 'Todavía no hay tipos de soporte en el catálogo.';
+  const ids = wanted.map((name) => {
+    const found = types.find((type) => key(type.name) === key(name));
+    if (found && (found.active || reading || carried.some((own) => own.id === found.id))) return found.id;
+    if (found) {
+      throw new Error(
+        `El tipo de soporte "${found.name}" existe pero está inactivo. No uses otro por tu cuenta: pregunta a la persona si lo reactiva ` +
+          `(Configuración > Tipos de soporte), si el caso lleva otro tipo o si queda sin ese tipo. ${list}`,
+      );
+    }
+    if (reading) {
+      throw new Error(`No existe el tipo de soporte "${name}": el filtro necesita el nombre exacto. ${list} Si no sabes cuál es, pregunta a la persona.`);
+    }
+    throw new Error(
+      `No existe el tipo de soporte "${name}". No lo crees ni elijas otro por tu cuenta: pregunta a la persona si quiere que lo crees ` +
+        `(herramienta crear_tipo_soporte), usar uno de los existentes o dejar el caso sin ese tipo. ${list}`,
+    );
+  });
+  // A type named twice counts once.
+  return [...new Set(ids)];
 }
 
 function brief(t) {
@@ -212,12 +308,15 @@ function brief(t) {
     responsable: t.assigneeName ?? 'Sin asignar',
     prioridad: t.priority ? PRIORITY_LABEL[t.priority] : null,
     modulo: t.moduleName,
+    tipos_soporte: t.supportTypes.map((type) => type.name),
     vencido: t.overdue,
     // Day promised to the client, and where the open case stands against it.
     promesa_entrega: t.promisedDate,
     estado_promesa: t.promiseState ? PROMISE_LABEL[t.promiseState] : null,
     olvidado: t.stale,
     ultimo_movimiento: t.lastActivityAt,
+    // Put away: out of the lists and the reminders unless asked for, with everything it had.
+    archivado: t.archivedAt !== null,
     ultima_observacion: t.lastNote,
   };
 }
@@ -278,15 +377,30 @@ function tool(name, title, description, inputSchema, handler) {
 
 tool('leer_guia', 'Leer la guía de soporte', 'Devuelve las reglas del equipo para registrar, dar seguimiento y cerrar casos, y para redactar la respuesta al cliente. Incluye la guía de estilo del equipo para mensajes a clientes. Léela una vez antes de usar las demás herramientas.', {}, () => guide());
 
-tool('listar_catalogos', 'Listar catálogos', 'Devuelve los módulos, responsables, estados y prioridades vigentes. Úsalo antes de registrar o modificar un caso: los catálogos cambian. Si la persona nombra un módulo o un responsable que no está aquí, pregúntale qué hacer antes de crear nada.', {}, async () => {
-  const [modules, people] = await Promise.all([api('GET', 'modules'), api('GET', 'assignees')]);
+tool('listar_catalogos', 'Listar catálogos', 'Devuelve las empresas, los módulos, los responsables, los tipos de soporte, los estados y las prioridades vigentes. Úsalo antes de registrar o modificar un caso: los catálogos cambian. Si la persona nombra una empresa, un módulo, un responsable o un tipo de soporte que no está aquí, pregúntale qué hacer antes de crear nada.', {}, async () => {
+  const [companies, modules, people, types] = await Promise.all([api('GET', 'companies'), api('GET', 'modules'), api('GET', 'assignees'), api('GET', 'support-types')]);
+  // What a new case can use: an inactive entry keeps its cases and is not offered.
+  const names = (entries) => entries.filter((entry) => entry.active).map((entry) => entry.name);
   return {
+    empresas: names(companies),
     modulos: modules.map((m) => m.fullName),
-    responsables: [...people.filter((person) => person.active).map((person) => person.name), 'Cliente'],
+    responsables: names(people),
+    tipos_soporte: names(types),
     estados: Object.keys(STATUS),
     prioridades: Object.keys(PRIORITY),
   };
 });
+
+tool(
+  'crear_empresa',
+  'Agregar una empresa',
+  'Agrega una empresa cliente al catálogo para poder registrar casos a su nombre. Úsalo solo cuando la persona lo pidió o lo confirmó después de que le preguntaste; nunca por tu cuenta porque un nombre no existía: puede ser una empresa que ya está con otro nombre.',
+  { nombre: z.string().min(1).max(200).describe('Nombre de la empresa, como debe verse en los casos') },
+  async (args) => {
+    const created = await api('POST', 'companies', { body: { name: args.nombre } });
+    return { empresa: created.name, mensaje: `"${created.name}" ya está en el catálogo de empresas. Úsala con ese nombre.` };
+  },
+);
 
 tool(
   'crear_responsable',
@@ -334,13 +448,33 @@ tool(
 );
 
 tool(
+  'crear_tipo_soporte',
+  'Agregar un tipo de soporte',
+  'Agrega un tipo de soporte al catálogo: una etiqueta que dice qué clase de soporte fue un caso (falla del sistema, capacitación...). Úsalo solo cuando la persona lo pidió o lo confirmó después de que le preguntaste; nunca por tu cuenta porque un nombre no existía.',
+  {
+    nombre: z.string().min(1).max(60).describe('Nombre del tipo de soporte, como debe verse en los casos'),
+    color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, 'Usa un color hexadecimal, por ejemplo #1a2b3c')
+      .optional()
+      .describe('Color de la etiqueta, en hexadecimal (#rrggbb), solo si la persona lo indicó. Sin este dato queda en gris; se cambia en Configuración > Tipos de soporte'),
+  },
+  async (args) => {
+    const created = await api('POST', 'support-types', { body: { name: args.nombre, color: args.color ?? DEFAULT_TYPE_COLOR } });
+    return { tipo_soporte: created.name, color: created.color, mensaje: `"${created.name}" ya está en el catálogo de tipos de soporte. Úsalo con ese nombre.` };
+  },
+);
+
+tool(
   'buscar_casos',
   'Buscar casos',
-  'Busca casos por texto y filtros. El texto se compara con empresa, descripción, observaciones y código, sin distinguir tildes ni mayúsculas. Devuelve primero los de número de caso más alto (los más recientes).',
+  'Busca casos por texto y filtros. El texto se compara con empresa, descripción, observaciones y código, sin distinguir tildes ni mayúsculas. Devuelve primero los de número de caso más alto (los más recientes). Los filtros `empresa`, `responsable` y `tipo_soporte` aceptan también una entrada inactiva del catálogo: sus casos siguen ahí. Los casos archivados quedan fuera, salvo que los pidas con `archivados`.',
   {
     texto: z.string().optional().describe('Palabras de la empresa, la descripción o una observación'),
     estado: estado.optional(),
-    responsable: z.string().optional().describe('Nombre del responsable, "Cliente" o "ninguno"'),
+    empresa: z.string().optional().describe('Nombre exacto de una empresa del catálogo: solo sus casos. Para buscar por una parte del nombre usa `texto`'),
+    responsable: z.string().optional().describe('Nombre de un responsable, o "ninguno" para los casos sin asignar'),
+    tipo_soporte: z.string().optional().describe('Nombre de un tipo de soporte del catálogo: solo los casos que lo llevan'),
     desde: fecha.optional().describe('Fecha del caso desde, AAAA-MM-DD'),
     hasta: fecha.optional().describe('Fecha del caso hasta, AAAA-MM-DD'),
     solo_vencidos: z.boolean().optional().describe('Solo casos abiertos fuera de plazo'),
@@ -349,19 +483,25 @@ tool(
       .enum(Object.keys(PROMISE_FILTER))
       .optional()
       .describe('Filtra por promesa de entrega al cliente: "con promesa" (cualquiera), "vencida", "hoy", "proxima" (dentro del aviso anticipado configurado) o "por atender" (vencidas, de hoy y próximas, de casos abiertos)'),
+    archivados: z
+      .enum(Object.keys(ARCHIVED_FILTER))
+      .optional()
+      .describe('Casos archivados: "no" los deja fuera (por defecto), "solo" devuelve únicamente los archivados y "todos" incluye unos y otros'),
     limite: z.number().int().min(1).max(100).optional().describe('Máximo de casos a devolver. Por defecto 20'),
   },
   async (args) => {
-    let assigneeFilter;
-    if (args.responsable !== undefined) {
-      const who = await assignee(args.responsable);
-      assigneeFilter = who.assignedToClient ? 'client' : (who.assigneeId ?? 'none');
-    }
+    // A name left empty does not filter. The responsible is the exception: empty, like "ninguno", asks for the cases nobody has.
+    const company = key(args.empresa) ? await companyId(args.empresa, { reading: true }) : undefined;
+    const responsible = args.responsable !== undefined ? ((await assigneeId(args.responsable, { reading: true })) ?? 'none') : undefined;
+    const [supportType] = key(args.tipo_soporte) ? await supportTypeIds([args.tipo_soporte], { reading: true }) : [];
     const page = await api('GET', 'tickets', {
       query: {
         q: args.texto,
         status: args.estado ? STATUS[args.estado] : undefined,
-        assignee: assigneeFilter,
+        companyId: company,
+        assignee: responsible,
+        supportType,
+        archived: ARCHIVED_FILTER[args.archivados ?? 'no'],
         from: args.desde,
         to: args.hasta,
         overdue: args.solo_vencidos ? '1' : undefined,
@@ -383,7 +523,7 @@ tool(
   'Registrar un caso',
   'Registra un caso nuevo. Sigue la guía: confirma el borrador con la persona antes de crear, salvo que haya pedido registrarlo directamente. Devuelve el caso con su código.',
   {
-    empresa: z.string().min(1).max(200).describe('Empresa cliente que reporta. No la supongas: si no la sabes, pregunta'),
+    empresa: z.string().min(1).max(200).describe('Empresa cliente que reporta, con el nombre que tiene en listar_catalogos. No la supongas: si no la sabes, pregunta. Si la persona nombra una que no existe, pregúntale antes de crearla'),
     descripcion: z.string().min(1).max(5000).describe('Qué problema reporta el cliente, en una o dos frases estilo bitácora'),
     fecha_caso: fecha.optional().describe('Día en que el cliente reportó el problema, AAAA-MM-DD, si se conoce. Por defecto hoy. La fecha de registro la pone el sistema'),
     hora_caso: hora.optional().describe('Hora en que el cliente lo reportó, HH:MM de 24 horas, solo si la evidencia la muestra (la hora de un mensaje) o la persona la dijo'),
@@ -392,14 +532,15 @@ tool(
     modulo: z.string().optional().describe('Nombre de un módulo de listar_catalogos. Si la persona nombra uno que no existe, pregúntale antes de crearlo'),
     minutos_estimados: z.number().int().min(1).max(100000).optional(),
     promesa_entrega: fecha.optional().describe('Día en que se le prometió al cliente tener el caso resuelto, AAAA-MM-DD. Solo si la persona lo indicó; no la propongas tú'),
-    responsable: z.string().optional().describe('Nombre de un responsable de listar_catalogos, o "Cliente". Sin este dato el caso queda sin asignar. Si la persona nombra a alguien que no está en la lista, pregúntale antes de agregarlo'),
+    responsable: z.string().optional().describe('Nombre de un responsable de listar_catalogos. Sin este dato el caso queda sin asignar. Si la persona nombra a alguien que no está en la lista, pregúntale antes de agregarlo'),
+    tipos_soporte: z.array(z.string()).max(20).optional().describe('Nombres de tipos de soporte de listar_catalogos. Solo los que la persona indicó o confirmó: no los elijas tú. Sin este dato el caso queda sin tipo'),
     observacion: z.string().max(5000).optional().describe('Datos útiles de la evidencia: mensaje de error, pantalla, documento, usuario'),
     imagenes: z.array(z.string()).max(10).optional().describe('Rutas en disco de imágenes o archivos para adjuntar al caso'),
   },
   async (args) => {
     let ticket = await api('POST', 'tickets', {
       body: {
-        company: args.empresa,
+        companyId: await companyId(args.empresa),
         description: args.descripcion,
         date: args.fecha_caso,
         time: args.hora_caso,
@@ -409,7 +550,8 @@ tool(
         estimatedMinutes: args.minutos_estimados ?? null,
         promisedDate: args.promesa_entrega ?? null,
         // Without an explicit responsible the case stays unassigned: the assistant does not own cases.
-        ...(await assignee(args.responsable)),
+        assigneeId: await assigneeId(args.responsable),
+        supportTypeIds: await supportTypeIds(args.tipos_soporte ?? []),
         note: args.observacion,
         aiGenerated: true,
       },
@@ -429,14 +571,19 @@ tool(
 tool(
   'actualizar_caso',
   'Actualizar un caso',
-  'Cambia campos de un caso. Envía solo los que cambian. Para cerrar un caso usa cerrar_caso.',
+  'Cambia campos de un caso, y lo archiva o desarchiva. Envía solo los que cambian. Para cerrar un caso usa cerrar_caso.',
   {
     caso,
     estado: estado.optional(),
     prioridad: prioridad.nullable().optional().describe('null quita la prioridad'),
     modulo: z.string().optional().describe('Nombre de un módulo. Cadena vacía quita el módulo'),
-    responsable: z.string().optional().describe('Nombre, "Cliente" o "ninguno"'),
-    empresa: z.string().min(1).max(200).optional(),
+    responsable: z.string().optional().describe('Nombre de un responsable, o "ninguno" para dejar el caso sin asignar'),
+    tipos_soporte: z
+      .array(z.string())
+      .max(20)
+      .optional()
+      .describe('Lista completa de los tipos de soporte del caso, con nombres de listar_catalogos: reemplaza la que tenía. Para agregar uno, envía también los que ya tiene (ver_caso los muestra). Lista vacía los quita todos'),
+    empresa: z.string().min(1).max(200).optional().describe('Nombre de una empresa de listar_catalogos'),
     descripcion: z.string().min(1).max(5000).optional(),
     fecha_caso: fecha.optional().describe('Día en que el cliente reportó el problema, AAAA-MM-DD. La fecha de registro no se puede cambiar'),
     hora_caso: hora.nullable().optional().describe('Hora en que el cliente lo reportó, HH:MM de 24 horas. null quita la hora'),
@@ -444,14 +591,24 @@ tool(
     minutos_estimados: z.number().int().min(0).max(100000).nullable().optional(),
     minutos_reales: z.number().int().min(0).max(100000).optional(),
     respuesta_cliente: z.string().max(5000).optional().describe('Mensaje para el cliente. Cadena vacía lo borra'),
+    archivar: z
+      .boolean()
+      .optional()
+      .describe('true archiva el caso: deja de aparecer en las listas, el tablero y los avisos, y se conserva completo. false lo desarchiva. Solo cuando la persona lo pida'),
   },
   async (args) => {
+    const id = caseId(args.caso);
     const body = {};
     if (args.estado !== undefined) body.status = STATUS[args.estado];
     if (args.prioridad !== undefined) body.priority = args.prioridad ? PRIORITY[args.prioridad] : null;
     if (args.modulo !== undefined) body.moduleId = await moduleId(args.modulo);
-    if (args.responsable !== undefined) Object.assign(body, await assignee(args.responsable));
-    if (args.empresa !== undefined) body.company = args.empresa;
+    if (args.responsable !== undefined) body.assigneeId = await assigneeId(args.responsable);
+    if (args.tipos_soporte !== undefined) {
+      // The list replaces the one the case has, so an inactive type the case already carries is allowed to stay in it.
+      const current = await api('GET', `tickets/${id}`);
+      body.supportTypeIds = await supportTypeIds(args.tipos_soporte, { carried: current.supportTypes });
+    }
+    if (args.empresa !== undefined) body.companyId = await companyId(args.empresa);
     if (args.descripcion !== undefined) body.description = args.descripcion;
     if (args.fecha_caso !== undefined) body.date = args.fecha_caso;
     if (args.hora_caso !== undefined) body.time = args.hora_caso;
@@ -459,8 +616,9 @@ tool(
     if (args.minutos_estimados !== undefined) body.estimatedMinutes = args.minutos_estimados;
     if (args.minutos_reales !== undefined) body.spentMinutes = args.minutos_reales;
     if (args.respuesta_cliente !== undefined) body.customerReply = args.respuesta_cliente;
+    if (args.archivar !== undefined) body.archived = args.archivar;
     if (!Object.keys(body).length) throw new Error('No se indicó ningún cambio.');
-    return detail(await api('PATCH', `tickets/${caseId(args.caso)}`, { body }));
+    return detail(await api('PATCH', `tickets/${id}`, { body }));
   },
 );
 

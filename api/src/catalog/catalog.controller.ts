@@ -16,7 +16,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { IdPipe, MAX_ID } from '../common/id.pipe';
-import { PRIORITIES, moduleFullName } from '../common/labels';
+import { NO_MODULE, PRIORITIES, moduleFullName, searchKey } from '../common/labels';
 import { PrismaService } from '../prisma.service';
 
 // An id that no module can have. Passed on, the database rejects the number and the answer is a 500.
@@ -67,7 +67,7 @@ export class CatalogController {
 
   @Post('modules')
   async createModule(@Body() dto: ModuleInput): Promise<{ id: number }> {
-    const name = dto.name?.trim();
+    const name = usableName(dto.name);
     if (!name) throw new BadRequestException('El nombre es obligatorio');
     await this.assertValidParent(dto.parentId ?? null, null);
     const row = await this.prisma.systemModule.create({ data: { name, parentId: dto.parentId ?? null } });
@@ -76,12 +76,13 @@ export class CatalogController {
 
   @Patch('modules/:id')
   async updateModule(@Param('id', IdPipe) id: number, @Body() dto: ModuleInput): Promise<void> {
+    const name = usableName(dto.name);
     if (dto.parentId !== undefined) await this.assertValidParent(dto.parentId, id);
     await this.prisma.systemModule.update({
       where: { id },
       // `@IsOptional()` lets a null through. `active` cannot be empty in the database, so for it null
       // means "not sent"; for `parentId` null is a real value: no parent.
-      data: { name: dto.name?.trim() || undefined, parentId: dto.parentId, active: dto.active ?? undefined },
+      data: { name: name ?? undefined, parentId: dto.parentId, active: dto.active ?? undefined },
     });
   }
 
@@ -116,4 +117,17 @@ export class CatalogController {
       throw new BadRequestException('Este módulo tiene submódulos; no puede convertirse en submódulo');
     }
   }
+}
+
+/**
+ * The name of a module as it will be stored. Null when none was sent. The words the reports use
+ * for the cases without a module are refused, however they are written.
+ */
+function usableName(sent: string | null | undefined): string | null {
+  const name = sent?.trim();
+  if (!name) return null;
+  if (searchKey(name) === searchKey(NO_MODULE)) {
+    throw new BadRequestException(`"${name}" no puede ser el nombre de un módulo: en los reportes ya significa que el caso no tiene ninguno`);
+  }
+  return name;
 }

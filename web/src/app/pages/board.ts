@@ -6,10 +6,12 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api';
 import type { Ticket, TicketStatus } from '../core/api';
 import { Catalogs } from '../core/catalogs';
+import { SELECT } from '../core/select';
 import { TicketEvents } from '../core/ticket-events';
 import type { TicketEvent } from '../core/ticket-events';
 import { TicketFlags } from '../core/ticket-flags';
 import { Toast } from '../core/toast';
+import { TypeChip } from '../core/type-chip';
 import { STATUSES, STATUS_LABEL, formatCaseDate } from '../core/ui';
 import { TicketPanel } from './tickets/ticket-panel';
 
@@ -17,24 +19,30 @@ const RESOLVED_SHOWN = 30;
 /** Open cases asked for in one request: the largest page the API serves. */
 const OPEN_LIMIT = 500;
 
-/** Kanban: one column per status. Dragging a card changes the status of the case. */
+/**
+ * Kanban: one column per status. Dragging a card changes the status of the case, at once: it is
+ * the one change made outside the form of the case. Archived cases are never on the board.
+ */
 @Component({
   selector: 'app-board',
-  imports: [FormsModule, CdkDropListGroup, CdkDropList, CdkDrag, TicketFlags, TicketPanel],
+  imports: [FormsModule, CdkDropListGroup, CdkDropList, CdkDrag, ...SELECT, TicketFlags, TypeChip, TicketPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex h-full flex-col gap-3 p-3 md:p-5">
       <div class="flex flex-wrap items-center gap-2">
         <h1 class="mr-auto text-lg font-semibold">Tablero</h1>
         <input class="input w-56" type="search" placeholder="Buscar en el tablero" aria-label="Buscar en el tablero" [(ngModel)]="search" />
-        <select class="input w-auto" aria-label="Filtrar por responsable" [(ngModel)]="assignee">
-          <option value="">Responsable: todos</option>
-          @for (person of catalogs.assignees(); track person.id) {
-            <option [value]="person.id">{{ person.name }}</option>
-          }
-          <option value="client">Cliente</option>
-          <option value="none">Sin asignar</option>
-        </select>
+        <!-- Its list hangs from the body: inside the page it would be cut where the page scrolls. -->
+        <ng-select
+          class="w-56"
+          ariaLabel="Filtrar por responsable"
+          bindValue="id"
+          bindLabel="name"
+          placeholder="Responsable: todos"
+          appendTo="body"
+          [items]="assigneeOptions()"
+          [(ngModel)]="assignee"
+        />
         <button type="button" class="btn btn-soft px-2.5" (click)="load()" aria-label="Actualizar">
           <i class="mdi mdi-refresh text-base" [class.mdi-spin]="loading()" aria-hidden="true"></i>
         </button>
@@ -81,6 +89,13 @@ const OPEN_LIMIT = 500;
                   </div>
                   <div class="mt-1 font-medium">{{ t.company }}</div>
                   <p class="line-clamp-3 text-muted">{{ t.description }}</p>
+                  @if (t.supportTypes.length) {
+                    <div class="mt-1.5 flex flex-wrap gap-1">
+                      @for (type of t.supportTypes; track type.id) {
+                        <app-type-chip [type]="type" />
+                      }
+                    </div>
+                  }
                   <div class="mt-1.5 flex items-center gap-1 text-xs text-muted">
                     <i class="mdi mdi-account-outline" aria-hidden="true"></i>
                     <span class="truncate">{{ t.assigneeName ?? 'Sin asignar' }}</span>
@@ -99,7 +114,8 @@ const OPEN_LIMIT = 500;
     </div>
 
     @if (openId(); as id) {
-      <app-ticket-panel [ticketId]="id" [autoReply]="replyOnOpen()" (closed)="closePanel()" />
+      <!-- Given another case with unsaved changes, the panel may stay on the one it has: it says which through ticketIdChange. -->
+      <app-ticket-panel [ticketId]="id" [autoReply]="replyOnOpen()" (ticketIdChange)="openId.set($event)" (closed)="closePanel()" />
     }
   `,
 })
@@ -118,7 +134,10 @@ export class BoardPage {
   protected readonly openLeftOut = signal(0);
   protected readonly loading = signal(true);
   protected readonly search = signal('');
-  protected readonly assignee = signal('');
+  /** The responsible whose cases are shown, or `none` for the cases nobody has. Null: everyone's. */
+  protected readonly assignee = signal<number | 'none' | null>(null);
+  /** Everyone of the catalog, active or not (their cases are still theirs), and the cases nobody has. */
+  protected readonly assigneeOptions = computed<{ id: number | 'none'; name: string }[]>(() => [{ id: 'none', name: 'Sin asignar' }, ...this.catalogs.assignees()]);
   protected readonly openId = signal<number | null>(null);
   protected readonly replyOnOpen = signal(false);
 
@@ -126,9 +145,7 @@ export class BoardPage {
     const text = this.search().trim().toLowerCase();
     const assignee = this.assignee();
     const visible = this.tickets().filter((t) => {
-      if (assignee === 'client' && !t.assignedToClient) return false;
-      if (assignee === 'none' && (t.assigneeId !== null || t.assignedToClient)) return false;
-      if (assignee && assignee !== 'client' && assignee !== 'none' && String(t.assigneeId) !== assignee) return false;
+      if (assignee !== null && t.assigneeId !== (assignee === 'none' ? null : assignee)) return false;
       return !text || `${t.code} ${t.company} ${t.description}`.toLowerCase().includes(text);
     });
     return STATUSES.map((status) => ({ status, tickets: visible.filter((t) => t.status === status) }));
@@ -147,12 +164,15 @@ export class BoardPage {
 
   private onTicketEvent(event: TicketEvent): void {
     if (event.kind === 'removed') {
-      this.tickets.update((tickets) => tickets.filter((t) => t.id !== event.id));
+      this.remove(event.id);
+    } else if (event.kind === 'saved' && event.ticket.archivedAt) {
+      // An archived case is put away: its card leaves the board, like the one of a deleted case.
+      this.remove(event.ticket.id);
     } else if (event.kind === 'saved' && this.tickets().some((t) => t.id === event.ticket.id)) {
       this.replace(event.ticket);
     } else {
-      // A case that is not on the board (new, or reopened), or cases changed elsewhere:
-      // the columns are read again.
+      // A case that is not on the board (new, reopened, or brought back from the archive), or
+      // cases changed elsewhere: the columns are read again.
       void this.load();
       return;
     }
@@ -165,6 +185,7 @@ export class BoardPage {
     const sequence = ++this.loadSequence;
     this.loading.set(true);
     try {
+      // Neither request asks for archived cases, and the API lists none unless asked.
       const [open, resolved] = await Promise.all([
         // In the API's default order, highest ticket numbers first: past the limit, the oldest are left out.
         this.api.tickets({ status: 'UNRESOLVED,PENDING', pageSize: OPEN_LIMIT }),
@@ -204,6 +225,10 @@ export class BoardPage {
 
   private replace(updated: Ticket): void {
     this.tickets.update((tickets) => tickets.map((t) => (t.id === updated.id ? updated : t)));
+  }
+
+  private remove(id: number): void {
+    this.tickets.update((tickets) => tickets.filter((t) => t.id !== id));
   }
 
   protected closePanel(): void {

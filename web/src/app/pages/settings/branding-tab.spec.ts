@@ -4,6 +4,7 @@ import type { TestRequest } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { Branding } from '../../core/branding';
+import { Confirm } from '../../core/confirm';
 import { toSmallPng } from '../../core/ui';
 import { BrandingTab } from './branding-tab';
 
@@ -77,8 +78,9 @@ describe('BrandingTab, the company logo in Configuración', () => {
   let el: HTMLElement;
   let http: HttpTestingController;
   let branding: Branding;
+  let confirm: Confirm;
 
-  const button = (text: string): HTMLButtonElement | undefined => Array.from(el.querySelectorAll('button')).find((item) => item.textContent?.includes(text));
+  const button =(text: string): HTMLButtonElement | undefined => Array.from(el.querySelectorAll('button')).find((item) => item.textContent?.includes(text));
   const picker = (): HTMLInputElement => el.querySelector<HTMLInputElement>('input[type=file]')!;
   /** What choosing a file in the browser's dialog does. */
   function choose(file: File): void {
@@ -88,6 +90,8 @@ describe('BrandingTab, the company logo in Configuración', () => {
     picker().dispatchEvent(new Event('change'));
     fixture.detectChanges();
   }
+  /** An answer to a question of the tab reaches it a turn later. */
+  const answered = (): Promise<void> => new Promise((resolve) => setTimeout(resolve));
   async function upload(file: File): Promise<TestRequest> {
     choose(file);
     let request: TestRequest | undefined;
@@ -100,6 +104,7 @@ describe('BrandingTab, the company logo in Configuración', () => {
     TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
     branding = TestBed.inject(Branding);
+    confirm = TestBed.inject(Confirm);
     fixture = TestBed.createComponent(BrandingTab);
     el = fixture.nativeElement as HTMLElement;
     fixture.detectChanges();
@@ -155,28 +160,35 @@ describe('BrandingTab, the company logo in Configuración', () => {
     http.expectNone('/api/branding/logo');
   });
 
+  // The question is asked in the dialog of the app, as every other one: here it is answered without the dialog.
   it('removes the logo after asking, and goes back to the default icon', async () => {
     branding.use('v1');
     fixture.detectChanges();
-    const asked = spyOn(window, 'confirm').and.returnValue(true);
 
     button('Quitar logo')!.click();
+    expect(confirm.current()).toEqual(jasmine.objectContaining({ title: '¿Quitar el logo y volver al icono por defecto?', confirmLabel: 'Quitar', danger: true }));
+    // Nothing is removed while the question is on screen.
+    http.expectNone('/api/branding/logo');
+
+    confirm.answer(true);
+    await answered();
     http.expectOne({ method: 'DELETE', url: '/api/branding/logo' }).flush(null);
     await until(() => branding.logoUrl() === null);
     fixture.detectChanges();
 
-    expect(asked).toHaveBeenCalledTimes(1);
+    expect(confirm.current()).toBeNull();
     expect(branding.logoUrl()).toBeNull();
     expect(el.querySelector('app-logo i.mdi-lifebuoy')).not.toBeNull();
     expect(button('Quitar logo')).toBeUndefined();
   });
 
-  it('keeps the logo when the person answers no', () => {
+  it('keeps the logo when the person answers no', async () => {
     branding.use('v1');
     fixture.detectChanges();
-    spyOn(window, 'confirm').and.returnValue(false);
 
     button('Quitar logo')!.click();
+    confirm.answer(false);
+    await answered();
 
     http.expectNone('/api/branding/logo');
     expect(branding.logoUrl()).toBe('/api/branding/logo?v=v1');

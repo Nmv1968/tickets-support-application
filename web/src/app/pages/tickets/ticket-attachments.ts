@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { Api } from '../../core/api';
 import type { Attachment } from '../../core/api';
+import { Confirm } from '../../core/confirm';
 import { Toast } from '../../core/toast';
 import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
 
@@ -58,6 +59,7 @@ import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
 export class TicketAttachments {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
+  private readonly confirm = inject(Confirm);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly ticketId = input.required<number>();
@@ -143,7 +145,9 @@ export class TicketAttachments {
   }
 
   protected async removeAttachment(attachment: Attachment): Promise<void> {
-    if (!confirm(`¿Eliminar el adjunto "${attachment.filename}"?`)) return;
+    if (!(await this.confirm.ask({ title: `¿Eliminar el adjunto "${attachment.filename}"?`, confirmLabel: 'Eliminar', danger: true }, this.destroyRef))) return;
+    // The question was on screen for a while: the panel may have gone, or moved on to another case.
+    if (this.destroyRef.destroyed || !this.attachments().some((other) => other.id === attachment.id)) return;
     try {
       await this.api.deleteAttachment(this.ticketId(), attachment.id);
     } catch (error) {

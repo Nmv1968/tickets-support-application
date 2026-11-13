@@ -5,7 +5,9 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { Assignee, User } from '../../core/api';
+import { Confirm } from '../../core/confirm';
 import { Toast } from '../../core/toast';
+import { answerCatalogs } from '../../testing/catalogs';
 import { AssigneesTab } from './assignees-tab';
 
 const REFUSED = { status: 409, statusText: 'Conflict' };
@@ -20,7 +22,8 @@ describe('AssigneesTab, the responsibles in Configuración', () => {
   const ana: Assignee = { id: 1, name: 'Ana', active: true, tickets: 3 };
   const jose: Assignee = { id: 2, name: 'José Pérez', active: true, tickets: 0 };
   const zoe: Assignee = { id: 3, name: 'Zoe', active: false, tickets: 1 };
-  const admin: User = { id: 7, username: 'admin', name: 'Administrador', active: true, canLogin: true, assigneeId: 1 };
+  // A user with the name of a responsible: the two lists have nothing to do with each other.
+  const userAna: User = { id: 1, username: 'ana', name: 'Ana', active: true, canLogin: true };
 
   beforeEach(() => {
     TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
@@ -41,11 +44,8 @@ describe('AssigneesTab, the responsibles in Configuración', () => {
   }
 
   /** Answers the read of the shared catalogs, which every arrival and every write ends with. */
-  function catalogs(people: Assignee[], users: User[] = [admin]): void {
-    http.expectOne({ method: 'GET', url: '/api/users' }).flush(users);
-    http.expectOne({ method: 'GET', url: '/api/assignees' }).flush(people);
-    http.expectOne({ method: 'GET', url: '/api/modules' }).flush([]);
-    http.expectOne({ method: 'GET', url: '/api/ai/config' }).flush([]);
+  function catalogs(people: Assignee[]): void {
+    answerCatalogs(http, { users: [userAna], assignees: people });
     settle();
   }
 
@@ -76,25 +76,35 @@ describe('AssigneesTab, the responsibles in Configuración', () => {
     render();
   }
 
+  /** The question on screen, which the shell draws as a dialog. */
+  const asked = (): unknown => TestBed.inject(Confirm).current();
+
+  /** The person answers it. */
+  function answer(confirmed: boolean): void {
+    TestBed.inject(Confirm).answer(confirmed);
+    render();
+  }
+
   it('lists each responsible with the cases they have, and says who is inactive', fakeAsync(() => {
     open();
 
     expect(rows().map((row) => nameOf(row).value)).toEqual(['Ana', 'José Pérez', 'Zoe']);
-    // What each row says after the name: user, cases, state and what can be done.
+    // What each row says after the name: cases, state and what can be done. Nothing about users:
+    // a responsible is a name of this list, and no user "is" one.
     const said = (row: HTMLElement): string[] => [...row.querySelectorAll('span, button')].map((item) => item.textContent?.replace(/\s+/g, ' ').trim() ?? '').filter(Boolean);
     expect(rows().map(said)).toEqual([
-      ['admin', '3 casos', 'Desactivar'],
+      ['3 casos', 'Desactivar'],
       ['0 casos', 'Desactivar'],
       ['1 caso', 'Inactivo', 'Activar'],
     ]);
   }));
 
-  // A responsible is a name. The badge tells apart the ones who are also a user of the app.
-  it('shows the user a responsible is, and nothing for the ones who are not users', fakeAsync(() => {
+  // "Cliente" used to be an option of every case; now a team that wants it adds it here.
+  it('explains what deactivating and deleting do, without a word about users or about "Cliente"', fakeAsync(() => {
     open();
 
-    expect(rows()[0].querySelector('.badge')?.textContent?.trim()).toBe('admin');
-    expect(rows()[1].querySelector('.badge')).toBeNull();
+    const help = el.querySelector('p.text-xs')!.textContent!.replace(/\s+/g, ' ').trim();
+    expect(help).toBe('Un responsable inactivo ya no aparece al registrar o reasignar casos, pero conserva los que tiene. Solo se puede eliminar a quien no tiene casos.');
   }));
 
   it('invites to add the first one when there is none', fakeAsync(() => {
@@ -240,9 +250,20 @@ describe('AssigneesTab, the responsibles in Configuración', () => {
       expect(trash(rows()[1]).getAttribute('aria-label')).toBe('Eliminar a José Pérez');
     }));
 
-    it('removes a responsible without cases from the list', fakeAsync(() => {
+    // The trash is next to "Desactivar", and what it does cannot be undone.
+    it('asks first, naming the responsible, and sends nothing until the person says yes', fakeAsync(() => {
       open();
       click(trash(rows()[1]));
+
+      expect(asked()).toEqual(jasmine.objectContaining({ title: '¿Eliminar al responsable «José Pérez»?', confirmLabel: 'Eliminar', danger: true }));
+      http.expectNone({ method: 'DELETE', url: '/api/assignees/2' });
+      answer(false);
+    }));
+
+    it('confirmed, removes a responsible without cases from the list', fakeAsync(() => {
+      open();
+      click(trash(rows()[1]));
+      answer(true);
 
       write('DELETE', '/api/assignees/2').flush(null);
       settle();
@@ -253,10 +274,22 @@ describe('AssigneesTab, the responsibles in Configuración', () => {
       tick(3000);
     }));
 
+    // No DELETE leaves: `http.verify` fails on a request nobody answered.
+    it('cancelled, deletes nobody and says nothing', fakeAsync(() => {
+      open();
+      click(trash(rows()[1]));
+      answer(false);
+
+      expect(asked()).toBeNull();
+      expect(rows().map((row) => nameOf(row).value)).toEqual(['Ana', 'José Pérez', 'Zoe']);
+      expect(toasts()).toEqual([]);
+    }));
+
     // A case was assigned to them from another screen after this list was read.
     it('refused by the server, shows its reason and the list as it is now', fakeAsync(() => {
       open();
       click(trash(rows()[1]));
+      answer(true);
 
       const reason = 'José Pérez tiene 1 caso asignado. Desactívalo para que no aparezca en los casos nuevos, o reasigna sus casos antes de eliminarlo.';
       write('DELETE', '/api/assignees/2').flush({ message: reason }, REFUSED);

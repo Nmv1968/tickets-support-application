@@ -5,7 +5,7 @@ const BOX = { sm: 'size-8', md: 'size-9', lg: 'size-11', xl: 'size-20' } as cons
 const ICON = { sm: 'text-lg', md: 'text-xl', lg: 'text-2xl', xl: 'text-5xl' } as const;
 
 /**
- * The mark of the app: the company logo when one is set (Configuración > Empresa), otherwise the
+ * The mark of the app: the company logo when one is set (Configuración > Logo), otherwise the
  * default icon on the brand colour. Decorative: the name of the app is always written beside it.
  */
 @Component({

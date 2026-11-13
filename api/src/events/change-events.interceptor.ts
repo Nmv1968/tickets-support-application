@@ -7,9 +7,12 @@ import type { ChangeEvent } from './events.service';
 
 const SCOPES: { pattern: RegExp; scope: ChangeEvent['scope'] }[] = [
   { pattern: /^\/api\/(tickets|attachments|import|ai\/reply)(\/|$)/, scope: 'tickets' },
-  { pattern: /^\/api\/(modules|users|assignees|sla|ai\/config)(\/|$)/, scope: 'catalogs' },
+  { pattern: /^\/api\/(modules|users|assignees|companies|support-types|sla|ai\/config)(\/|$)/, scope: 'catalogs' },
   { pattern: /^\/api\/(settings|branding)(\/|$)/, scope: 'settings' },
 ];
+
+/** One entry of a catalog whose name, or colour, every case that points at it shows. */
+const ENTRY_SHOWN_ON_CASES = /^\/api\/(companies|support-types|assignees|modules)\/\d+\/?$/;
 
 /**
  * Announces every successful write. Working from the request (method and path) keeps
@@ -38,11 +41,21 @@ export class ChangeEventsInterceptor implements NestInterceptor {
           created: ticket && req.method === 'POST' && req.path === '/api/tickets' ? { code: ticket.code, by: req.user?.name ?? '' } : null,
           clientId,
         });
-        // The import is the one write that also changes a catalog: it adds the responsibles named in
-        // the sheet that did not exist yet (`newPeople` in its answer). The other browsers must
-        // reload that list too, or the new cases show there without a responsible person.
-        const newPeople = body && typeof body === 'object' && 'newPeople' in body ? body.newPeople : null;
-        if (Array.isArray(newPeople) && newPeople.length) this.events.emit({ scope: 'catalogs', ticketId: null, created: null, clientId });
+        // The import is the one write that can also change the catalogs: asked to, it adds the
+        // companies, responsibles and support types of the sheet that did not exist yet (`created`
+        // in its answer, a list of names per catalog). The other browsers must reload those lists
+        // too, or the new cases show there without their company, responsible or types.
+        const added = body && typeof body === 'object' && 'created' in body ? body.created : null;
+        const addedAny = !!added && typeof added === 'object' && Object.values(added).some((names) => Array.isArray(names) && names.length > 0);
+        if (addedAny) this.events.emit({ scope: 'catalogs', ticketId: null, created: null, clientId });
+        // And the other way round: an edit of a company, a support type, a responsible or a module
+        // can rename it, or give a type another colour. Each case carries the name and the colour
+        // as they were when it was read, so the lists, the board and the bell of the other browsers
+        // have to read their cases again, or they keep showing the old ones next to selects that
+        // already offer the new.
+        if (req.method === 'PATCH' && ENTRY_SHOWN_ON_CASES.test(req.path)) {
+          this.events.emit({ scope: 'tickets', ticketId: null, created: null, clientId });
+        }
       }),
     );
   }

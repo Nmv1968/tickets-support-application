@@ -1,38 +1,32 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import type { Subscription } from 'rxjs';
 import { Api } from './api';
-import type { ReminderList, Ticket } from './api';
+import type { ReminderList } from './api';
 import { Auth } from './auth';
-import { Catalogs } from './catalogs';
 import { TicketEvents } from './ticket-events';
 
-const MINE_KEY = 'st.reminders.mine';
 const REFRESH_MS = 120_000;
 
 /**
  * Cases that need attention, for the bell: delivery promises due, forgotten cases (no activity
  * for the time set in Configuración > Recordatorios) and cases past their SLA deadline.
  * A reminder goes away by itself when the case is attended or resolved; there is nothing to dismiss.
+ * Everyone sees the same ones: a case belongs to a responsible, and the responsibles are not users.
  */
 @Injectable({ providedIn: 'root' })
 export class Reminders {
   private readonly api = inject(Api);
   private readonly auth = inject(Auth);
-  private readonly catalogs = inject(Catalogs);
   private readonly ticketEvents = inject(TicketEvents);
 
   private readonly data = signal<ReminderList | null>(null);
-  /** Show only cases assigned to the logged-in user. Remembered per browser. */
-  readonly onlyMine = signal(localStorage.getItem(MINE_KEY) === '1');
-  /** False for a user who is not a responsible: no case is theirs, so there is nothing to narrow to. */
-  readonly canShowMine = computed(() => this.catalogs.ownAssigneeId() !== null);
 
   readonly staleHours = computed(() => this.data()?.staleHours ?? 0);
   readonly promiseSoonDays = computed(() => this.data()?.promiseSoonDays ?? 0);
   /** Delivery promises that passed, are due today or, with advance notice on, are coming up. */
-  readonly promises = computed(() => this.visible(this.data()?.promises ?? []));
-  readonly stale = computed(() => this.visible(this.data()?.stale ?? []));
-  readonly overdue = computed(() => this.visible(this.data()?.overdue ?? []));
+  readonly promises = computed(() => this.data()?.promises ?? []);
+  readonly stale = computed(() => this.data()?.stale ?? []);
+  readonly overdue = computed(() => this.data()?.overdue ?? []);
   /** A case that appears in more than one group counts once. */
   readonly count = computed(() => new Set([...this.promises(), ...this.stale(), ...this.overdue()].map((t) => t.id)).size);
 
@@ -70,15 +64,5 @@ export class Reminders {
   refreshSoon(): void {
     clearTimeout(this.soon);
     this.soon = setTimeout(() => void this.refresh(), 800);
-  }
-
-  setOnlyMine(value: boolean): void {
-    this.onlyMine.set(value);
-    localStorage.setItem(MINE_KEY, value ? '1' : '0');
-  }
-
-  private visible(tickets: Ticket[]): Ticket[] {
-    const mine = this.catalogs.ownAssigneeId();
-    return this.onlyMine() && mine !== null ? tickets.filter((t) => t.assigneeId === mine) : tickets;
   }
 }

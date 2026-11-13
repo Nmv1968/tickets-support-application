@@ -5,22 +5,25 @@ import { Toast } from '../../core/toast';
 import { AiTab } from './ai-tab';
 import { AssigneesTab } from './assignees-tab';
 import { BrandingTab } from './branding-tab';
+import { CompaniesTab } from './companies-tab';
 import { ModulesTab } from './modules-tab';
 import { RemindersTab } from './reminders-tab';
 import { SlaTab } from './sla-tab';
+import { SupportTypesTab } from './support-types-tab';
 import { UsersTab } from './users-tab';
 
-type TabId = 'users' | 'assignees' | 'modules' | 'sla' | 'reminders' | 'ai' | 'branding' | 'account';
+type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 'sla' | 'reminders' | 'ai' | 'branding' | 'account';
 
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule, UsersTab, AssigneesTab, ModulesTab, SlaTab, RemindersTab, AiTab, BrandingTab],
+  imports: [FormsModule, UsersTab, AssigneesTab, CompaniesTab, SupportTypesTab, ModulesTab, SlaTab, RemindersTab, AiTab, BrandingTab],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="mx-auto max-w-4xl space-y-4 p-3 md:p-5">
       <h1 class="text-lg font-semibold">Configuración</h1>
 
-      <div class="flex gap-1 overflow-x-auto rounded-control bg-elevated p-1" role="tablist">
+      <!-- More tabs than fit in a line: a phone scrolls them sideways, a wider screen puts them in two lines. -->
+      <div class="flex gap-1 overflow-x-auto rounded-control bg-elevated p-1 md:flex-wrap" role="tablist">
         @for (item of tabs; track item.id) {
           <button
             type="button"
@@ -43,6 +46,12 @@ type TabId = 'users' | 'assignees' | 'modules' | 'sla' | 'reminders' | 'ai' | 'b
         }
         @case ('assignees') {
           <app-assignees-tab />
+        }
+        @case ('companies') {
+          <app-companies-tab />
+        }
+        @case ('supportTypes') {
+          <app-support-types-tab />
         }
         @case ('modules') {
           <app-modules-tab />
@@ -84,11 +93,14 @@ export class SettingsPage {
   protected readonly tabs: { id: TabId; label: string; icon: string }[] = [
     { id: 'users', label: 'Usuarios', icon: 'mdi-account-multiple-outline' },
     { id: 'assignees', label: 'Responsables', icon: 'mdi-account-hard-hat-outline' },
+    { id: 'companies', label: 'Empresas', icon: 'mdi-domain' },
+    { id: 'supportTypes', label: 'Tipos de soporte', icon: 'mdi-tag-multiple-outline' },
     { id: 'modules', label: 'Módulos', icon: 'mdi-view-grid-outline' },
     { id: 'sla', label: 'SLA', icon: 'mdi-timer-cog-outline' },
     { id: 'reminders', label: 'Recordatorios', icon: 'mdi-bell-cog-outline' },
     { id: 'ai', label: 'IA', icon: 'mdi-creation-outline' },
-    { id: 'branding', label: 'Empresa', icon: 'mdi-domain' },
+    // "Logo" and not "Empresa": the companies of the catalog are the clients, and have their own tab.
+    { id: 'branding', label: 'Logo', icon: 'mdi-image-outline' },
     { id: 'account', label: 'Mi cuenta', icon: 'mdi-account-key-outline' },
   ];
   protected readonly tab = signal<TabId>('users');

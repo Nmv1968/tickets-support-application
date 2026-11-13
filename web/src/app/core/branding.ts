@@ -3,7 +3,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { Api } from './api';
 
 /**
- * The look an installation gives itself: the company logo, set in Configuración > Empresa. When
+ * The look an installation gives itself: the company logo, set in Configuración > Logo. When
  * there is one it takes the place of the default icon in the menu and on the login page, and it
  * is also the icon of the browser tab.
  */

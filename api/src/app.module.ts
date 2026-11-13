@@ -9,14 +9,17 @@ import { AuthController } from './auth/auth.controller';
 import { CatalogController } from './catalog/catalog.controller';
 import { JwtGuard } from './common/auth';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
+import { CompaniesController } from './companies/companies.controller';
 import { DashboardController } from './dashboard/dashboard.controller';
 import { ChangeEventsInterceptor } from './events/change-events.interceptor';
 import { EventsController } from './events/events.controller';
 import { EventsService } from './events/events.service';
+import { PreferencesController } from './preferences/preferences.controller';
 import { PrismaService } from './prisma.service';
 import { SeedService } from './seed.service';
 import { SettingsController } from './settings/settings.controller';
 import { SettingsService } from './settings/settings.service';
+import { SupportTypesController } from './support-types/support-types.controller';
 import { BrandingController } from './branding/branding.controller';
 import { BrandingService } from './branding/branding.service';
 import { AttachmentsController } from './tickets/attachments.controller';
@@ -43,6 +46,8 @@ import { UsersController } from './users/users.controller';
     AuthController,
     UsersController,
     AssigneesController,
+    CompaniesController,
+    SupportTypesController,
     CatalogController,
     TicketsController,
     AttachmentsController,
@@ -50,6 +55,7 @@ import { UsersController } from './users/users.controller';
     DashboardController,
     TransferController,
     SettingsController,
+    PreferencesController,
     BrandingController,
     EventsController,
   ],

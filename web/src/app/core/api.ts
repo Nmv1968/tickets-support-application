@@ -18,11 +18,9 @@ export interface User extends AuthUser {
   active: boolean;
   /** False for a user without a password, until one is set. */
   canLogin: boolean;
-  /** The responsible this user is. Null for a user who does not attend cases. */
-  assigneeId: number | null;
 }
 
-/** A person a case can be assigned to ("Responsable"). Need not be a user of the app. */
+/** A person a case can be assigned to ("Responsable"). A name in a list of its own: not a user of the app. */
 export interface Assignee {
   id: number;
   name: string;
@@ -31,6 +29,31 @@ export interface Assignee {
   /** Cases assigned to them, open or closed. With any, the responsible cannot be deleted. */
   tickets: number;
 }
+
+/** A client company that reports cases ("Empresa"). */
+export interface Company {
+  id: number;
+  name: string;
+  /** False keeps its cases and takes it out of the lists for new ones. */
+  active: boolean;
+  /** Cases of the company, open or closed. With any, the company cannot be deleted. */
+  tickets: number;
+}
+
+/** A label a case can carry ("Tipo de soporte"): system failure, the user did not know how… */
+export interface SupportType {
+  id: number;
+  name: string;
+  /** `#rrggbb`, lowercase. */
+  color: string;
+  /** False keeps it on the cases that carry it and takes it out of the lists for new ones. */
+  active: boolean;
+  /** Cases that carry it. With any, the type cannot be deleted. */
+  tickets: number;
+}
+
+/** A support type as a case carries it. */
+export type TicketSupportType = Pick<SupportType, 'id' | 'name' | 'color'>;
 
 export interface SystemModule {
   id: number;
@@ -47,12 +70,15 @@ export interface Ticket {
   date: string;
   /** "Hora del caso": time of day the client reported it, `HH:mm`. Optional. */
   time: string | null;
+  companyId: number;
+  /** Name of the company. */
   company: string;
   description: string;
   status: TicketStatus;
   assigneeId: number | null;
-  assignedToClient: boolean;
   assigneeName: string | null;
+  /** "Tipos de soporte" of the case, by name. Empty for a case without any. */
+  supportTypes: TicketSupportType[];
   priority: Priority | null;
   estimatedMinutes: number | null;
   spentMinutes: number;
@@ -75,6 +101,10 @@ export interface Ticket {
   customerReply: string | null;
   /** "Fecha de registro": moment the ticket was created here. Set by the server, never editable. */
   createdAt: string;
+  /** The user who registered it, when there is one to name. */
+  createdById: number | null;
+  /** Moment the case was archived. Null = not archived. */
+  archivedAt: string | null;
   lastNote: string | null;
   notesCount: number;
   attachmentsCount: number;
@@ -115,11 +145,16 @@ export interface TicketInput {
   date?: string;
   /** Null removes the time of the case. */
   time?: string | null;
-  company?: string;
+  /** A company of the catalog. A new case needs one. */
+  companyId?: number;
   description?: string;
   status?: TicketStatus;
+  /** Null leaves the case without a responsible, which is also how a new case starts. */
   assigneeId?: number | null;
-  assignedToClient?: boolean;
+  /** The whole set: the types left out are taken off the case, and `[]` takes all of them off. */
+  supportTypeIds?: number[];
+  /** True archives the case, false brings it back. */
+  archived?: boolean;
   priority?: Priority | null;
   estimatedMinutes?: number | null;
   spentMinutes?: number;
@@ -131,14 +166,23 @@ export interface TicketInput {
   aiGenerated?: boolean;
 }
 
-/** Query-string filters. Empty values are not sent. */
+/**
+ * Query-string filters. Empty values (`''`, null) are not sent. An id is a number where a select
+ * gives it and text where it comes from a link.
+ */
 export interface TicketFilters {
   status?: string;
-  /** Id of a responsible, `client` or `none`. */
-  assignee?: string;
-  company?: string;
-  priority?: string;
-  moduleId?: string;
+  /** Id of a responsible, or `none` for the cases without one. */
+  assignee?: number | string | null;
+  companyId?: number | string | null;
+  priority?: string | null;
+  moduleId?: number | string | null;
+  /** Id of a support type: the cases that carry it. */
+  supportType?: number | string | null;
+  /** Id of a user: the cases they registered. */
+  createdBy?: number | string | null;
+  /** Archived cases are left out unless this asks for `only` them or for `all` (them and the rest). */
+  archived?: 'only' | 'all' | '' | null;
   from?: string;
   to?: string;
   overdue?: string;
@@ -222,20 +266,62 @@ export interface Dashboard {
   spentMinutes: number;
   byAssignee: StatusCount[];
   byCompany: { name: string; total: number }[];
+  /** A case with two types counts in both. The cases without one come as "Sin tipo", with no colour. */
+  bySupportType: { name: string; color: string | null; total: number }[];
   byModule: { name: string; total: number }[];
   byPriority: { priority: Priority | null; total: number }[];
   monthly: { month: string; total: number; resolved: number; open: number }[];
 }
 
+/** A row of the sheet as the import read it. What comes from a catalog carries the name the catalog gives it. */
+export interface ImportRow {
+  date: string;
+  time: string | null;
+  company: string;
+  description: string;
+  status: TicketStatus;
+  priority: Priority | null;
+  /** Full name of the module. */
+  module: string | null;
+  assignee: string | null;
+  supportTypes: string[];
+  note: string | null;
+}
+
+/** The values of the sheet that are in no catalog, by catalog, as they were first written. */
+export interface ImportUnknown {
+  companies: string[];
+  assignees: string[];
+  supportTypes: string[];
+  modules: string[];
+  priorities: string[];
+  /** What the sheet says in "Estado" that is none of the three statuses. */
+  statuses: string[];
+}
+
 export interface ImportResult {
   dryRun: boolean;
-  columns: Record<'date' | 'time' | 'company' | 'description' | 'status' | 'assignee' | 'note', string | null>;
+  /** The import was asked to add the companies, responsibles and support types that do not exist. */
+  createMissing: boolean;
+  /**
+   * Header found in the sheet for each column the import reads, or null when the sheet does not
+   * have it. Several columns of support types come together, separated by commas.
+   */
+  columns: Record<'date' | 'time' | 'company' | 'description' | 'status' | 'priority' | 'module' | 'assignee' | 'supportTypes' | 'note', string | null>;
   totalRows: number;
   skippedEmpty: number;
   duplicates: number;
+  /** Rows that can be imported: the rejected ones are not counted. */
   toCreate: number;
-  newPeople: string[];
-  sample: { date: string; time: string | null; company: string; description: string; status: TicketStatus; assignee: string | null; note: string | null }[];
+  /** Rows left out because a value of theirs is in no catalog. */
+  rejected: number;
+  /** The first rejected rows, each with its row number in the sheet and why it was left out. */
+  rejectedSample: { row: number; reasons: string[] }[];
+  unknown: ImportUnknown;
+  /** What `createMissing` adds to the catalogs. In a preview, what it would add. */
+  created: Pick<ImportUnknown, 'companies' | 'assignees' | 'supportTypes'>;
+  /** The first rows that can be imported. */
+  sample: ImportRow[];
 }
 
 type Params = Record<string, string | number | undefined | null>;
@@ -277,11 +363,12 @@ export class Api {
 
   /**
    * Announces a case as the server stored it once the write is answered, so every screen shows
-   * it without the caller passing it on (see TicketEvents).
+   * it without the caller passing it on (see TicketEvents). `change` says what the write did
+   * besides editing the case: it created it, or archived it or brought it back.
    */
-  private async announce(write: Promise<TicketDetail>, created = false): Promise<TicketDetail> {
+  private async announce(write: Promise<TicketDetail>, change: { created?: boolean; archiving?: boolean } = {}): Promise<TicketDetail> {
     const ticket = await write;
-    this.ticketEvents.saved(ticket, created);
+    this.ticketEvents.saved(ticket, change);
     return ticket;
   }
 
@@ -316,10 +403,10 @@ export class Api {
   users(): Promise<User[]> {
     return this.get('users');
   }
-  createUser(input: { username: string; name: string; password: string; assigneeId?: number | null }): Promise<User> {
+  createUser(input: { username: string; name: string; password: string }): Promise<User> {
     return this.send('POST', 'users', input);
   }
-  updateUser(id: number, input: { name?: string; active?: boolean; password?: string; assigneeId?: number | null }): Promise<User> {
+  updateUser(id: number, input: { name?: string; active?: boolean; password?: string }): Promise<User> {
     return this.send('PATCH', `users/${id}`, input);
   }
 
@@ -335,6 +422,43 @@ export class Api {
   }
   deleteAssignee(id: number): Promise<void> {
     return this.send('DELETE', `assignees/${id}`);
+  }
+
+  // Companies
+  companies(): Promise<Company[]> {
+    return this.get('companies');
+  }
+  createCompany(name: string): Promise<Company> {
+    return this.send('POST', 'companies', { name });
+  }
+  updateCompany(id: number, input: { name?: string; active?: boolean }): Promise<Company> {
+    return this.send('PATCH', `companies/${id}`, input);
+  }
+  deleteCompany(id: number): Promise<void> {
+    return this.send('DELETE', `companies/${id}`);
+  }
+
+  // Support types
+  supportTypes(): Promise<SupportType[]> {
+    return this.get('support-types');
+  }
+  createSupportType(input: { name: string; color: string }): Promise<SupportType> {
+    return this.send('POST', 'support-types', input);
+  }
+  updateSupportType(id: number, input: { name?: string; color?: string; active?: boolean }): Promise<SupportType> {
+    return this.send('PATCH', `support-types/${id}`, input);
+  }
+  deleteSupportType(id: number): Promise<void> {
+    return this.send('DELETE', `support-types/${id}`);
+  }
+
+  // Preferences of the logged-in user: nobody else reads or changes them.
+  /** What this user saved under `key`, or null when they never saved it. */
+  async preference<T>(key: string): Promise<T | null> {
+    return (await this.get<{ value: T | null }>(`preferences/${key}`)).value;
+  }
+  savePreference(key: string, value: unknown): Promise<void> {
+    return this.send('PUT', `preferences/${key}`, { value });
   }
 
   // Catalogs
@@ -380,18 +504,15 @@ export class Api {
   removeLogo(): Promise<void> {
     return this.send('DELETE', 'branding/logo');
   }
-  companies(q: string): Promise<string[]> {
-    return this.get('tickets/companies', { q });
-  }
   ticket(id: number): Promise<TicketDetail> {
     return this.get(`tickets/${id}`);
   }
   // Every write to a case below announces its result; callers do not refresh other screens.
   createTicket(input: TicketInput): Promise<TicketDetail> {
-    return this.announce(this.send('POST', 'tickets', input), true);
+    return this.announce(this.send('POST', 'tickets', input), { created: true });
   }
   updateTicket(id: number, input: TicketInput): Promise<TicketDetail> {
-    return this.announce(this.send('PATCH', `tickets/${id}`, input));
+    return this.announce(this.send('PATCH', `tickets/${id}`, input), { archiving: input.archived !== undefined });
   }
   async deleteTicket(id: number): Promise<void> {
     await this.send('DELETE', `tickets/${id}`);
@@ -445,13 +566,23 @@ export class Api {
   }
 
   // Dashboard and transfer
-  dashboard(from?: string, to?: string): Promise<Dashboard> {
-    return this.get('dashboard', { from, to });
+  /** Archived cases count unless `includeArchived` is false. */
+  dashboard(from?: string, to?: string, includeArchived = true): Promise<Dashboard> {
+    return this.get('dashboard', { from, to, archived: includeArchived ? undefined : 'exclude' });
   }
-  async importFile(file: File, dryRun: boolean, dateOrder: 'mdy' | 'dmy'): Promise<ImportResult> {
+  /** The report of the dashboard as a file, for the same period and cases as `dashboard`. */
+  dashboardExport(format: 'xlsx' | 'pdf', from?: string, to?: string, includeArchived = true): Promise<Blob> {
+    return this.blob(`dashboard/export/${format}`, { from, to, archived: includeArchived ? undefined : 'exclude' });
+  }
+  /**
+   * `createMissing` adds the companies, responsibles and support types of the sheet that do not
+   * exist; without it, the rows that name them are rejected.
+   */
+  async importFile(file: File, dryRun: boolean, dateOrder: 'mdy' | 'dmy', createMissing = false): Promise<ImportResult> {
     const form = new FormData();
     form.append('file', file, file.name);
-    const result = await this.send<ImportResult>('POST', 'import', form, { dryRun: dryRun ? '1' : undefined, dateOrder });
+    const params = { dryRun: dryRun ? '1' : undefined, dateOrder, createMissing: createMissing ? '1' : undefined };
+    const result = await this.send<ImportResult>('POST', 'import', form, params);
     // A preview writes nothing. A real import adds many cases at once.
     if (!dryRun) this.ticketEvents.outdated(null);
     return result;

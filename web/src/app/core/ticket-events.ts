@@ -4,8 +4,12 @@ import type { TicketDetail } from './api';
 
 /** Something happened to cases that the screens showing them have to follow. */
 export type TicketEvent =
-  /** This tab saved a case; `ticket` is how the server stored it. `created` is true for a new case. */
-  | { kind: 'saved'; ticket: TicketDetail; created: boolean }
+  /**
+   * This tab saved a case; `ticket` is how the server stored it. `created` is true for a new
+   * case, and `archiving` for one that the save archived or brought back. Either way the case
+   * joins the lists or leaves them, which no other edit does.
+   */
+  | { kind: 'saved'; ticket: TicketDetail; created: boolean; archiving: boolean }
   /** This tab deleted a case. */
   | { kind: 'removed'; id: number }
   /**
@@ -28,8 +32,8 @@ export class TicketEvents {
   private readonly subject = new Subject<TicketEvent>();
   readonly events = this.subject.asObservable();
 
-  saved(ticket: TicketDetail, created = false): void {
-    this.subject.next({ kind: 'saved', ticket, created });
+  saved(ticket: TicketDetail, change: { created?: boolean; archiving?: boolean } = {}): void {
+    this.subject.next({ kind: 'saved', ticket, created: change.created ?? false, archiving: change.archiving ?? false });
   }
 
   removed(id: number): void {
