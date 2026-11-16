@@ -9,7 +9,8 @@ import { formatDateTime } from '../../core/ui';
   host: { class: 'block' },
   template: `
     <details class="rounded-card border border-line px-3 py-2">
-      <summary class="section-title cursor-pointer">Historial de cambios ({{ history().length }})</summary>
+      <!-- 24 px high for a finger (WCAG 2.5.8); the margins keep the box as high as before. -->
+      <summary class="section-title -my-1 cursor-pointer py-1">Historial de cambios ({{ history().length }})</summary>
       <ul class="mt-2 space-y-1 text-xs">
         @for (h of history(); track h.id) {
           <li>

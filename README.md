@@ -308,7 +308,8 @@ reportes del dashboard. También revisan las cabeceras de seguridad y recorren c
 comprobando que el navegador no informe ninguna infracción de su política de contenido, y prueban los
 límites de las subidas: el envío más grande de adjuntos, uno que nginx rechaza, y la hoja más pesada
 que el API lee dentro de la memoria de su contenedor, además de que el API explique en español,
-campo por campo, lo que no acepta de una solicitud. Corren contra una instalación desechable que se construye con Docker
+campo por campo, lo que no acepta de una solicitud, y vigilan la accesibilidad y que cada pantalla quepa
+en un teléfono (ver [Accesibilidad](#accesibilidad)). Corren contra una instalación desechable que se construye con Docker
 Compose desde el código del repositorio, con su propio proyecto (`support-e2e`), sus propios
 volúmenes y su propio puerto (4321). No tocan la instalación con Docker de la máquina ni sus
 respaldos: el servicio `backup` nunca se enciende ahí.
@@ -336,6 +337,70 @@ En GitHub, cada push y cada pull request a `main` pasa por
 servidor MCP, la revisión de tipos, el lint del API y de la web, que el esquema de la base de datos
 coincida con sus migraciones, la compilación de la web y las pruebas de extremo a extremo.
 Cuando estas fallan, el informe de Playwright y sus trazas quedan como artefacto de la ejecución.
+
+### Accesibilidad
+
+El objetivo es WCAG 2.2 nivel AA, en español, en el tema claro y en el oscuro, desde un teléfono de
+320 px de ancho hasta un monitor de 1920 px. Dos de las pruebas de extremo a extremo lo vigilan en
+cada push, cada una a sus tamaños, con datos propios que llevan cada pantalla al límite (nombres
+larguísimos o sin espacios, cada estado, prioridad y promesa, chips de colores extremos, adjuntos,
+entradas inactivas):
+
+- `e2e/tests/accessibility.spec.ts` pasa [axe](https://github.com/dequelabs/axe-core) (las reglas de
+  WCAG 2.0, 2.1 y 2.2, niveles A y AA), en los dos temas, por cada pantalla y diálogo en un
+  escritorio de 1280 × 800, como administrador y, donde cambia lo que ve (la lista, el panel del
+  caso, la campana y Configuración), como agente: el ingreso y su error, la lista con sus filtros,
+  sus columnas, el menú de exportar y el caso nuevo con campos que faltan, el panel del caso con un
+  campo vacío, el aviso de un cambio hecho en otra pantalla, sus dos preguntas y la imagen ampliada,
+  un aviso de la aplicación, la importación con filas rechazadas, los dos pasos del caso con IA, la
+  campana, el tablero, el dashboard y cada pestaña de Configuración, con un desplegable abierto en
+  la lista y en el panel. En un teléfono de 375 × 812 (emulado como tal: táctil, sin pasar el
+  puntero por encima) pasa otra vez por lo que solo un teléfono muestra: la lista en tarjetas con el
+  encabezado y la barra de pestañas, el enlace "Saltar al contenido" con el foco, el panel del caso
+  y la campana. Falla con cada infracción grave o crítica, y dice el elemento y lo que encontró axe.
+  También con cada región viva que llegó con sus palabras (un lector de pantalla puede no leerla) o
+  que tiene un botón (se leería con cada mensaje), algo que axe no mira.
+- `e2e/tests/responsive.spec.ts` recorre esas pantallas y diálogos a 360 × 740 y 320 × 568
+  (teléfonos), 740 × 360 (un teléfono de lado, la pantalla baja, también con el "Menú" del
+  encabezado abierto), 768 × 1024 (tableta), 1280 × 800 y 1920 × 1080, y falla si la página se
+  desplaza de lado, si un control queda cortado o fuera de la pantalla sin forma de llegar a él, o si
+  un botón que muestra solo su icono (un SVG, o un signo escrito como "×" o "?") mide menos de 24 px
+  por lado (44 px por debajo de 768 px de ancho, salvo el "?" de una ayuda, el "×" de un chip y el
+  "×" que vacía un select, que se quedan en 24 a propósito). También abre con un toque, en un teléfono de 390 × 844 emulado como tal, cada desplegable
+  del panel del caso, y falla si su lista se cierra sola o pasa del borde de la pantalla.
+
+```bash
+cd e2e
+npm run stack:up
+npx playwright test tests/accessibility.spec.ts tests/responsive.spec.ts   # solo estas dos
+npm run stack:down
+```
+
+Lo que axe no puede ver (el orden del teclado, adónde va el foco, lo que dice un lector de pantalla, el
+zoom al 400 %) lo prueban los componentes en Karma. Un cambio en una pantalla se revisa también a
+mano: solo con el teclado, con un lector de pantalla (NVDA, VoiceOver) y con el zoom del navegador.
+
+Con el teclado, Escape cierra primero el aviso de error más reciente (salvo con algo abierto más
+adentro, que se cierra antes: la lista de un select, el texto de un "?", "Menú", "Columnas" o
+"Exportar") y, con la siguiente pulsación, el diálogo o el panel abierto. Si el aviso que se cierra
+tenía el foco en su "Cerrar aviso", el foco pasa al aviso siguiente o vuelve adonde estaba. Un toque
+fuera de un "?" abierto que cae en el fondo de un diálogo solo oculta su texto. Un control
+que recibe el foco nunca queda tapado del todo por los avisos: se desplaza hasta quedar sobre ellos,
+salvo el que la persona acaba de pulsar, que ya está a la vista. El lector
+de pantalla oye cada aviso una vez, sin su botón; el mensaje de un campo obligatorio cuando el foco ya
+estaba en él; y "Actualizando…" solo cuando la persona pidió la lectura, no cuando otro cambia un caso.
+El anillo del foco de un campo de fecha o de hora se ve también en el botón de su calendario. Con
+"reducir movimiento" nada se desliza ni se desvanece, y lo que decía un icono que gira se escribe (el
+texto del botón que trabaja, "Actualizando…" junto al botón del tablero).
+`e2e/tests/focus-and-motion.spec.ts` lo comprueba en el navegador.
+
+En una pantalla baja (un teléfono de lado, el zoom al 400 %) las cuatro pantallas están en el botón
+"Menú" del encabezado, y la lista de un select siempre cabe: se abre del lado con más espacio, tan alta
+como ese lado permite (una opción como mínimo) y, si ni eso cabe, sobre el select. Por debajo de
+416 px de ancho (`xs:`) los formularios de dos columnas pasan a una, y el valor elegido de un select y los chips de los tipos de
+soporte se escriben enteros. Lo que explica una etiqueta o una columna está en un "?" a su lado, que
+se abre con un clic, un toque o el teclado. `e2e/tests/short-screens.spec.ts` lo comprueba en el
+navegador.
 
 ### Cambios en la base de datos
 

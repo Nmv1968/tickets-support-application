@@ -2,7 +2,7 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
 import type { TicketDetail } from '../../core/api';
 import { ticket } from '../../testing/fixtures';
-import { screenOf } from '../../testing/screen';
+import { isDisabled, screenOf } from '../../testing/screen';
 import { NO_NOT_NUMBER } from './ticket-form';
 import type { NotNumber, Problems } from './ticket-form';
 import { TicketTimes } from './ticket-times';
@@ -140,7 +140,7 @@ describe('TicketTimes', () => {
     it('cannot be started on a case stored as resolved', fakeAsync(() => {
       create({ status: 'RESOLVED' });
 
-      expect(button('Iniciar cronómetro').disabled).toBeTrue();
+      expect(isDisabled(button('Iniciar cronómetro'))).toBeTrue();
     }));
 
     it('running: says since when, and asks to stop it', fakeAsync(() => {
@@ -155,7 +155,7 @@ describe('TicketTimes', () => {
       create(RUNNING);
       give('spentUnsaved', true);
 
-      expect(button('Detener cronómetro').disabled).toBeTrue();
+      expect(isDisabled(button('Detener cronómetro'))).toBeTrue();
       expect(el.textContent).toContain('Actualiza o descarta el cambio en «Real (minutos)» para detenerlo.');
       expect(el.textContent).not.toContain('En marcha desde');
     }));
@@ -177,6 +177,45 @@ describe('TicketTimes', () => {
       expect(due.classList).toContain('text-danger');
       expect(dates()[2]).toBe('Resuelto');
       expect(resolved.textContent?.trim()).not.toBe('');
+    }));
+  });
+
+  // The button pressed is replaced by the other one, and the browser put the focus nowhere.
+  describe('the focus, as the timer starts and stops', () => {
+    it('goes to the button that takes the place of the one pressed', fakeAsync(() => {
+      create();
+      button('Iniciar cronómetro').focus();
+      click(button('Iniciar cronómetro'));
+      expect(told).toEqual(['timer start']);
+
+      // The case comes back with its timer running: "Detener" takes the place of "Iniciar".
+      fixture.componentRef.setInput('ticket', ticket({ spentMinutes: 15, ...RUNNING }));
+      render();
+      expect(document.activeElement).toBe(button('Detener cronómetro'));
+
+      click(button('Detener cronómetro'));
+      fixture.componentRef.setInput('ticket', ticket({ spentMinutes: 20 }));
+      render();
+      expect(document.activeElement).toBe(button('Iniciar cronómetro'));
+    }));
+
+    it('leaves it where it is when the timer changes elsewhere', fakeAsync(() => {
+      create();
+      estimated().focus();
+      fixture.componentRef.setInput('ticket', ticket({ spentMinutes: 15, ...RUNNING }));
+      render();
+      expect(document.activeElement).toBe(estimated());
+    }));
+
+    // Disabled, the button could not be reached to read why.
+    it('reaches "Detener cronómetro" while it cannot be used, and says why', fakeAsync(() => {
+      create(RUNNING);
+      give('spentUnsaved', true);
+      const stop = button('Detener cronómetro');
+
+      expect(stop.disabled).toBeFalse();
+      expect(isDisabled(stop)).toBeTrue();
+      expect(find(`#${stop.getAttribute('aria-describedby')}`).textContent).toContain('Actualiza o descarta el cambio en «Real (minutos)» para detenerlo.');
     }));
   });
 });

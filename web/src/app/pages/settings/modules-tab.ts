@@ -5,12 +5,13 @@ import type { SystemModule } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
 import { Icon } from '../../core/icon';
 import { SELECT } from '../../core/select';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { Toast } from '../../core/toast';
 
 /** Catalog of the supported software's modules. It changes as the software grows, so it is edited here. */
 @Component({
   selector: 'app-modules-tab',
-  imports: [FormsModule, ...SELECT, Icon],
+  imports: [FormsModule, ...SELECT, Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4">
@@ -22,22 +23,26 @@ import { Toast } from '../../core/toast';
         <div>
           <label class="label" for="module-parent">Dentro de (opcional)</label>
           <!-- Left empty, the module is a main one: that is what the placeholder says. -->
-          <ng-select labelForId="module-parent" name="parent" placeholder="Módulo principal" bindValue="id" bindLabel="name" [items]="parents()" [(ngModel)]="parentId" />
+          <ng-select labelForId="module-parent" name="parent" placeholder="Módulo principal" clearAllText="Quitar el módulo que lo contiene" bindValue="id" bindLabel="name" [items]="parents()" [(ngModel)]="parentId" />
         </div>
-        <button type="submit" class="btn btn-primary" [disabled]="!name().trim()"><app-icon name="plus" /> Agregar</button>
+        <!-- Keeps the focus once the module is added and the field is empty again. -->
+        <button type="submit" class="btn btn-primary" [appSoftDisabled]="!name().trim()"><app-icon name="plus" /> Agregar</button>
       </form>
 
       <div class="card divide-y divide-line">
         @for (module of all(); track module.id) {
-          <div class="flex items-center gap-2 px-3 py-1.5" [class.opacity-60]="!module.active" [class.pl-9]="module.parentId">
+          <!-- An inactive module says so in its badge, and its name is in the softer colour: still readable, as the rest of the row. -->
+          <div class="flex items-center gap-2 px-3 py-1.5" [class.pl-9]="module.parentId">
             @if (module.parentId) {
               <app-icon name="subdirectory-arrow-right" class="text-muted" />
             }
-            <input class="cell-control flex-1 cursor-text" [value]="module.name" [attr.aria-label]="'Nombre del módulo ' + module.name" (change)="rename(module, $event)" />
+            <input class="cell-control flex-1 cursor-text" [class.text-muted]="!module.active" [value]="module.name" [attr.aria-label]="'Nombre del módulo ' + module.name" (change)="rename(module, $event)" />
             @if (!module.active) {
               <span class="badge bg-elevated text-muted">Inactivo</span>
             }
-            <button type="button" class="btn btn-soft px-2 py-1 text-xs" (click)="toggle(module)">{{ module.active ? 'Desactivar' : 'Activar' }}</button>
+            <button type="button" class="btn btn-soft px-2 py-1 text-xs" [attr.aria-label]="(module.active ? 'Desactivar ' : 'Activar ') + module.name" (click)="toggle(module)">
+              {{ module.active ? 'Desactivar' : 'Activar' }}
+            </button>
           </div>
         } @empty {
           <p class="p-6 text-center text-muted">No hay módulos. Agrega el primero arriba.</p>

@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Auth } from '../../core/auth';
 import { Icon } from '../../core/icon';
 import type { IconName } from '../../core/icons';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { Toast } from '../../core/toast';
 import { AiTab } from './ai-tab';
 import { BrandingTab } from './branding-tab';
@@ -17,23 +18,29 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
 
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule, UsersTab, NamedCatalogTab, SupportTypesTab, ModulesTab, SlaTab, RemindersTab, AiTab, BrandingTab, Icon],
+  imports: [FormsModule, UsersTab, NamedCatalogTab, SupportTypesTab, ModulesTab, SlaTab, RemindersTab, AiTab, BrandingTab, Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="mx-auto max-w-4xl space-y-4 p-3 md:p-5">
       <h1 class="text-lg font-semibold">Configuración</h1>
 
-      <!-- More tabs than fit in a line: a phone scrolls them sideways, a wider screen puts them in two lines. -->
-      <div class="flex gap-1 overflow-x-auto rounded-control bg-elevated p-1 md:flex-wrap" role="tablist">
+      <!--
+        More tabs than fit in a line: a phone scrolls them sideways, a wider screen puts them in two lines.
+        Tabs as the keyboard expects them: one stop of the Tab key, the one chosen; the arrows, Home
+        and End move between them and choose. The chosen one has a line under it, besides its colours.
+      -->
+      <div class="flex gap-1 overflow-x-auto rounded-control bg-elevated p-1 md:flex-wrap" role="tablist" aria-label="Secciones de configuración">
         @for (item of tabs(); track item.id) {
           <button
             type="button"
             role="tab"
-            class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap"
-            [class.bg-surface]="shown() === item.id"
-            [class.text-muted]="shown() !== item.id"
+            class="flex items-center gap-1.5 rounded-lg border-b-2 border-transparent px-3 py-1.5 text-sm font-medium whitespace-nowrap text-muted aria-selected:border-primary aria-selected:bg-surface aria-selected:text-ink"
+            [id]="'settings-tab-' + item.id"
+            aria-controls="settings-panel"
             [attr.aria-selected]="shown() === item.id"
+            [attr.tabindex]="shown() === item.id ? 0 : -1"
             (click)="tab.set(item.id)"
+            (keydown)="onTabKey($event)"
           >
             <app-icon [name]="item.icon" class="text-base leading-none" />
             {{ item.label }}
@@ -41,6 +48,7 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
         }
       </div>
 
+      <div id="settings-panel" role="tabpanel" tabindex="0" class="rounded-card focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary" [attr.aria-labelledby]="'settings-tab-' + shown()">
       @switch (shown()) {
         @case ('users') {
           <app-users-tab />
@@ -80,10 +88,12 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
               <label class="label" for="pw-next">Contraseña nueva (mínimo 6 caracteres)</label>
               <input id="pw-next" class="input" type="password" name="next" autocomplete="new-password" [(ngModel)]="next" />
             </div>
-            <button type="submit" class="btn btn-primary" [disabled]="!current() || next().length < 6">Cambiar contraseña</button>
+            <!-- Keeps the focus once the password is changed and the fields are empty again. -->
+            <button type="submit" class="btn btn-primary" [appSoftDisabled]="!current() || next().length < 6">Cambiar contraseña</button>
           </form>
         }
       }
+      </div>
     </div>
   `,
 })
@@ -114,6 +124,26 @@ export class SettingsPage {
   protected readonly companies = COMPANIES;
   protected readonly current = signal('');
   protected readonly next = signal('');
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+
+  /**
+   * The arrows, Home and End on a tab: the focus goes to the tab before or after it (round the
+   * row), the first or the last, and that one is chosen. Brought into view: on a phone the row
+   * scrolls sideways.
+   */
+  protected onTabKey(event: KeyboardEvent): void {
+    const tabs = this.tabs();
+    const at = tabs.findIndex((item) => item.id === this.shown());
+    const moves: Partial<Record<string, number>> = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: tabs.length - 1 };
+    const to = moves[event.key];
+    if (to === undefined) return;
+    event.preventDefault();
+    const next = tabs[(to + tabs.length) % tabs.length];
+    this.tab.set(next.id);
+    const button = this.host.querySelector<HTMLElement>(`#settings-tab-${next.id}`);
+    button?.focus();
+    button?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
 
   protected async changePassword(): Promise<void> {
     try {

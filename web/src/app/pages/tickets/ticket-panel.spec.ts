@@ -4,14 +4,17 @@ import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing
 import type { Company, TicketDetail } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { Catalogs } from '../../core/catalogs';
+import { STATUS_DELAY_MS } from '../../core/status';
 import { Confirm } from '../../core/confirm';
 import { TicketEvents } from '../../core/ticket-events';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ASSIGNEES, COMPANIES, FAILURE, MODULES, SUPPORT_TYPES, TRAINING, WARRANTY, ticket } from '../../testing/fixtures';
 import { httpTestBed } from '../../testing/http';
 import { clearSelect, closeSelect, openSelect, optionTexts, removeChosen, typeInSelect } from '../../testing/ng-select';
-import { screenOf, toasts } from '../../testing/screen';
+import { isDisabled, said, screenOf, toasts } from '../../testing/screen';
 import { textOf } from '../../testing/text';
+import { resizeScreen } from '../../testing/viewport';
+import { todayIso } from '../../core/ui';
 import { TicketPanel } from './ticket-panel';
 
 const OTHER = ticket({ id: 8, code: 'SOP-00008', date: '2026-11-03', companyId: 5, company: 'Bodega Sur', description: 'No abre la caja' });
@@ -133,7 +136,7 @@ describe('TicketPanel', () => {
   const discard = (): HTMLButtonElement | null => Array.from(footer().querySelectorAll('button')).find((candidate) => candidate.textContent?.includes('Descartar cambios')) ?? null;
   const unsaved = (): boolean => !!footer().textContent?.includes('Cambios sin guardar');
   /** The notice that the case changed elsewhere while the form had changes. */
-  const notice = (): HTMLElement | null => Array.from(el.querySelectorAll<HTMLElement>('[role=status]')).find((item) => item.textContent?.includes('Este caso cambió en otra pantalla')) ?? null;
+  const notice = (): HTMLElement | null => el.querySelector<HTMLElement>('#tp-behind');
 
   /** Presses "Actualizar" and gives back the save it sends. */
   function update(id = 7): TestRequest {
@@ -180,19 +183,19 @@ describe('TicketPanel', () => {
 
     it('has nothing to save, and nothing to discard, until something changes', fakeAsync(() => {
       open();
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(save().textContent).toContain('Actualizar');
       expect(discard()).toBeNull();
       expect(unsaved()).toBeFalse();
 
       type(description(), 'No imprime desde el lunes');
-      expect(save().disabled).toBeFalse();
+      expect(isDisabled(save())).toBeFalse();
       expect(discard()).not.toBeNull();
       expect(unsaved()).toBeTrue();
 
       // Put back by hand, it is the case again.
       type(description(), 'No imprime');
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(discard()).toBeNull();
       expect(unsaved()).toBeFalse();
     }));
@@ -212,7 +215,7 @@ describe('TicketPanel', () => {
       expect(find('header .badge').textContent).toContain('Sin resolver');
       expect(description().value).toBe('No imprime desde el lunes');
       expect(chosen('tp-assignee')).toEqual(['Luis']);
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(unsaved()).toBeFalse();
       expect(discard()).toBeNull();
     }));
@@ -237,26 +240,26 @@ describe('TicketPanel', () => {
       render();
 
       expect(patches().length).toBe(1);
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(save().textContent).toContain('Guardando…');
       // Nor can the draft be discarded from under the save.
-      expect(discard()!.disabled).toBeTrue();
+      expect(isDisabled(discard()!)).toBeTrue();
       click(save());
       noPatch();
     }));
 
     it('keeps the draft when the server refuses it, says why, and sends it again with "Actualizar"', fakeAsync(() => {
       open();
-      type(caseDate(), '2099-01-01');
+      type(caseDate(), '2026-11-01');
       pick('tp-priority', 'Alta');
 
-      update().flush({ message: 'La fecha del caso no puede ser posterior a hoy' }, REFUSED);
+      update().flush({ message: 'El módulo elegido ya no existe' }, REFUSED);
       settle();
-      expect(toasts()).toEqual(['La fecha del caso no puede ser posterior a hoy']);
-      expect(caseDate().value).toBe('2099-01-01');
+      expect(toasts()).toEqual(['El módulo elegido ya no existe']);
+      expect(caseDate().value).toBe('2026-11-01');
       expect(chosen('tp-priority')).toEqual(['Alta']);
       expect(unsaved()).toBeTrue();
-      expect(save().disabled).toBeFalse();
+      expect(isDisabled(save())).toBeFalse();
       expect(save().textContent).toContain('Actualizar');
 
       // Corrected, the whole draft goes again.
@@ -320,7 +323,7 @@ describe('TicketPanel', () => {
       expect(promiseDate()!.value).toBe('2026-12-24');
       expect(replyBox().value).toBe('Listo.');
       expect(unsaved()).toBeFalse();
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       noPatch();
     }));
 
@@ -330,7 +333,7 @@ describe('TicketPanel', () => {
       type(description(), '  No imprime \n');
       type(replyBox(), 'Listo. ');
 
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(unsaved()).toBeFalse();
     }));
 
@@ -385,9 +388,9 @@ describe('TicketPanel', () => {
       pick('tp-priority', 'Alta');
       for (const typed of ['', '0002-11-05', '0202-11-05']) {
         type(caseDate(), typed);
-        expect(save().disabled).withContext(typed).toBeTrue();
+        expect(isDisabled(save())).withContext(typed).toBeTrue();
         expect(caseDate().getAttribute('aria-invalid')).toBe('true');
-        expect(find(`#${caseDate().getAttribute('aria-describedby')}`).textContent).toContain('Escribe la fecha completa.');
+        expect(find(`#${caseDate().getAttribute('aria-describedby')!.split(' ')[0]}`).textContent).toContain('Escribe la fecha completa.');
       }
 
       type(caseDate(), '2026-11-02');
@@ -397,6 +400,25 @@ describe('TicketPanel', () => {
       expect(sent.request.body).toEqual({ date: '2026-11-02', priority: 'HIGH' });
       sent.flush(ticket({ date: '2026-11-02', priority: 'HIGH' }));
       settle();
+    }));
+
+    // The max of the field did not stop a date typed in it: "Actualizar" sent it, and the refusal of
+    // the API was only a toast that went away, with the field unmarked and the focus lost.
+    it('the date of the case after today: says so by the field, as the API would, and nothing is sent', fakeAsync(() => {
+      open();
+      type(caseDate(), '2099-01-01');
+
+      expect(isDisabled(save())).toBeTrue();
+      expect(caseDate().getAttribute('aria-invalid')).toBe('true');
+      expect(caseDate().getAttribute('aria-describedby')).toBe('tp-date-error tp-date-hint');
+      expect(textOf(find('#tp-date-error'))).toBe('La fecha del caso no puede ser posterior a hoy');
+      // Pressed all the same, it sends nothing (http.verify after each test).
+      click(save());
+      noPatch();
+
+      type(caseDate(), todayIso());
+      expect(caseDate().hasAttribute('aria-invalid')).toBeFalse();
+      expect(isDisabled(save())).toBeFalse();
     }));
 
     it('the date of the case, left empty: "Descartar cambios" shows the one the case has', fakeAsync(() => {
@@ -413,7 +435,7 @@ describe('TicketPanel', () => {
       open();
       type(description(), '   ');
 
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(description().getAttribute('aria-invalid')).toBe('true');
       expect(find(`#${description().getAttribute('aria-describedby')}`).textContent).toContain('La descripción no puede quedar vacía.');
       wait(1000);
@@ -421,13 +443,17 @@ describe('TicketPanel', () => {
 
       type(description(), 'No enciende');
       expect(description().hasAttribute('aria-invalid')).toBeFalse();
-      expect(save().disabled).toBeFalse();
+      expect(isDisabled(save())).toBeFalse();
     }));
 
     // It was 12 px text in the danger colour, under 4:1 against the panel in the light theme.
     it('says it in the colour of the text around it, with the danger colour only in its icon and in the border of the field', fakeAsync(() => {
+      // In the light theme, whatever the machine that runs the tests prefers. Its danger colour is
+      // 5.6:1 on the panel: at 3.9:1 once, it was never enough for small text either.
+      const dark = document.documentElement.classList.contains('dark');
+      document.documentElement.classList.remove('dark');
       open();
-      const danger = 'rgb(229, 72, 77)';
+      const danger = 'rgb(196, 43, 49)';
       const ink = getComputedStyle(description()).color;
       expect(ink).not.toBe(danger);
       type(description(), '');
@@ -437,6 +463,7 @@ describe('TicketPanel', () => {
       expect(getComputedStyle(message).fontSize).toBe('12px');
       expect(getComputedStyle(find('#tp-description-error app-icon[aria-hidden=true]')).color).toBe(danger);
       expect(getComputedStyle(description()).borderTopColor).toBe(danger);
+      document.documentElement.classList.toggle('dark', dark);
     }));
   });
 
@@ -520,9 +547,9 @@ describe('TicketPanel', () => {
       pick('tp-priority', 'Alta');
       halfType();
 
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(caseTime().getAttribute('aria-invalid')).toBe('true');
-      expect(find(`#${caseTime().getAttribute('aria-describedby')}`).textContent).toContain('Completa la hora o quítala.');
+      expect(find(`#${caseTime().getAttribute('aria-describedby')!.split(' ')[0]}`).textContent).toContain('Completa la hora o quítala.');
 
       complete('15:00');
       expect(caseTime().hasAttribute('aria-invalid')).toBeFalse();
@@ -536,7 +563,7 @@ describe('TicketPanel', () => {
       open();
       halfType();
       expect(unsaved()).toBeTrue();
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
 
       click(clearButton()!);
       expect(el.querySelector('#tp-time-error')).toBeNull();
@@ -570,7 +597,7 @@ describe('TicketPanel', () => {
       turnPromise(true);
       expect(promiseDate()).not.toBeNull();
       expect(el.textContent).toContain('Elige la fecha prometida');
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       // It is the person's all the same: leaving would ask, and it can be given up.
       expect(unsaved()).toBeTrue();
 
@@ -620,7 +647,7 @@ describe('TicketPanel', () => {
       open(promised);
       for (const typed of ['', '0202-12-24']) {
         type(promiseDate()!, typed);
-        expect(save().disabled).withContext(typed).toBeTrue();
+        expect(isDisabled(save())).withContext(typed).toBeTrue();
         expect(el.textContent).toContain('Elige la fecha prometida');
       }
 
@@ -653,7 +680,7 @@ describe('TicketPanel', () => {
       turnPromise(true);
       expect(promiseDate()!.value).toBe('2026-12-24');
       expect(unsaved()).toBeFalse();
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
     }));
 
     it('turned off, stays off in the draft when the server refuses to remove the promise', fakeAsync(() => {
@@ -898,7 +925,7 @@ describe('TicketPanel', () => {
       render();
       expect(chosen('tp-types')).toEqual(['Falla del sistema', 'Capacitación']);
       expect(unsaved()).toBeFalse();
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
     }));
   });
 
@@ -1013,7 +1040,7 @@ describe('TicketPanel', () => {
     it('written another way are the same minutes: nothing to save', fakeAsync(() => {
       open(ticket({ estimatedMinutes: 20 }));
       type(estimated(), '20.2');
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(unsaved()).toBeFalse();
 
       fire(estimated(), 'change');
@@ -1041,12 +1068,12 @@ describe('TicketPanel', () => {
         pick('tp-priority', 'Alta');
         typeText(estimated());
 
-        expect(save().disabled).toBeTrue();
+        expect(isDisabled(save())).toBeTrue();
         expect(estimated().getAttribute('aria-invalid')).toBe('true');
         expect(find(`#${estimated().getAttribute('aria-describedby')}`).textContent).toContain('Escribe solo el número de minutos.');
         // Leaving the field does not make it something to save.
         fire(estimated(), 'change');
-        expect(save().disabled).toBeTrue();
+        expect(isDisabled(save())).toBeTrue();
         expect(el.querySelector('#tp-spent-error')).toBeNull();
         noPatch();
 
@@ -1068,7 +1095,7 @@ describe('TicketPanel', () => {
         expect(spent().value).toBe('');
         expect(spent().getAttribute('aria-invalid')).toBe('true');
         expect(find(`#${spent().getAttribute('aria-describedby')}`).textContent).toContain('Escribe solo el número de minutos.');
-        expect(save().disabled).toBeTrue();
+        expect(isDisabled(save())).toBeTrue();
 
         typeNumber(spent(), '20');
         fire(spent(), 'change');
@@ -1083,7 +1110,7 @@ describe('TicketPanel', () => {
         open();
         typeText(estimated());
         expect(unsaved()).toBeTrue();
-        expect(save().disabled).toBeTrue();
+        expect(isDisabled(save())).toBeTrue();
         pressEscape();
         expect(confirm.current()).toEqual(jasmine.objectContaining(LEAVE));
         answer(false);
@@ -1419,13 +1446,35 @@ describe('TicketPanel', () => {
         changedUnderTheDraft();
 
         expect(notice()).not.toBeNull();
-        expect(button('Ver la versión actual', notice()!).disabled).toBeFalse();
+        expect(isDisabled(button('Ver la versión actual', notice()!))).toBeFalse();
         expect(chosen('tp-priority')).toEqual(['Alta']);
         expect(description().value).toBe('No imprime');
         expect(chosen('tp-status')).toEqual(['Pendiente']);
         expect(unsaved()).toBeTrue();
         // What is not a field of the form shows the case as it is.
         expect(find('header .badge').textContent).toContain('Resuelto');
+      }));
+
+      // It was a status that came with its words, which a screen reader may not read, and that held its button, read out with them.
+      it('says that the case changed as the notice comes, once, with its button in no live region', fakeAsync(() => {
+        changedUnderTheDraft();
+
+        expect(textOf(notice())).toContain('Este caso cambió en otra pantalla.');
+        expect(said()).toEqual(['Este caso cambió en otra pantalla.']);
+        const show = button('Ver la versión actual', notice()!);
+        expect(show.closest('[role=status], [role=alert], [aria-live]')).toBeNull();
+        expect(notice()!.querySelector('[role=status], [role=alert], [aria-live]')).toBeNull();
+
+        // Another change elsewhere while it is on screen says nothing more.
+        events.outdated(7);
+        read().flush(ticket({ description: 'Escrito otra vez por otra persona', status: 'RESOLVED' }));
+        settle();
+        expect(said()).toEqual(['Este caso cambió en otra pantalla.']);
+
+        // Gone with "Ver la versión actual", it leaves nothing to be found at the end of the page.
+        click(show);
+        expect(notice()).toBeNull();
+        expect(said()).toEqual([]);
       }));
 
       it('"Ver la versión actual" drops the draft and shows the case as it is now', fakeAsync(() => {
@@ -1510,7 +1559,7 @@ describe('TicketPanel', () => {
         expect(description().value).toBe('No imprime desde el lunes');
         expect(unsaved()).toBeFalse();
         expect(notice()).toBeNull();
-        expect(save().disabled).toBeTrue();
+        expect(isDisabled(save())).toBeTrue();
       }));
 
       // An observation added from the panel is answered with the case as it is now. The form is still the person's.
@@ -1532,7 +1581,7 @@ describe('TicketPanel', () => {
         changedUnderTheDraft();
         const sent = update();
 
-        expect(button('Ver la versión actual', notice()!).disabled).toBeTrue();
+        expect(isDisabled(button('Ver la versión actual', notice()!))).toBeTrue();
         sent.flush(ticket({ description: 'Escrito por otra persona', status: 'RESOLVED', priority: 'HIGH' }));
         settle();
         expect(notice()).toBeNull();
@@ -1777,7 +1826,7 @@ describe('TicketPanel', () => {
       settle();
 
       expect(noteBox().value).toBe('');
-      expect(button('Agregar').disabled).toBeTrue();
+      expect(isDisabled(button('Agregar'))).toBeTrue();
       http.expectNone({ method: 'POST', url: '/api/tickets/7/notes' });
     }));
   });
@@ -1792,10 +1841,10 @@ describe('TicketPanel', () => {
 
     it('counts as an unsaved change: "Actualizar" can be pressed, and the form says so', fakeAsync(() => {
       open();
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
 
       type(noteBox(), TYPED);
-      expect(save().disabled).toBeFalse();
+      expect(isDisabled(save())).toBeFalse();
       expect(unsaved()).toBeTrue();
       expect(discard()).not.toBeNull();
       // Typing it sends nothing, however long it stays there.
@@ -1804,7 +1853,7 @@ describe('TicketPanel', () => {
 
       // Spaces are not an observation.
       type(noteBox(), '   ');
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(unsaved()).toBeFalse();
     }));
 
@@ -1816,7 +1865,7 @@ describe('TicketPanel', () => {
       noPatch();
       const add = noteAdd();
       expect(add.request.body).toEqual({ text: TYPED });
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       expect(save().textContent).toContain('Guardando…');
       add.flush(ticket(noted));
       settle();
@@ -1905,7 +1954,7 @@ describe('TicketPanel', () => {
       expect(chosen('tp-status')).toEqual(['Sin resolver']);
       expect(noteBox().value).toBe(TYPED);
       expect(unsaved()).toBeTrue();
-      expect(save().disabled).toBeFalse();
+      expect(isDisabled(save())).toBeFalse();
       pressEscape();
       expect(confirm.current()).toEqual(jasmine.objectContaining(LEAVE));
       answer(false);
@@ -1944,7 +1993,7 @@ describe('TicketPanel', () => {
       expect(noteBox().value).toBe('');
       expect(description().value).toBe('No imprime');
       expect(unsaved()).toBeFalse();
-      expect(save().disabled).toBeTrue();
+      expect(isDisabled(save())).toBeTrue();
       noPatch();
       noNoteAdd();
     }));
@@ -1997,7 +2046,7 @@ describe('TicketPanel', () => {
       noNoteAdd();
       expect(noteBox().value).toBe('Se reinició el servicio');
       expect(unsaved()).toBeTrue();
-      expect(save().disabled).toBeFalse();
+      expect(isDisabled(save())).toBeFalse();
     }));
 
     // It is not a field of the case: nothing of the case is held back for it.
@@ -2068,10 +2117,10 @@ describe('TicketPanel', () => {
         open();
         type(noteBox(), TYPED);
 
-        expect(button('Generar con IA').disabled).toBeTrue();
+        expect(isDisabled(button('Generar con IA'))).toBeTrue();
         expect(button('Generar con IA').title).toBe('Actualiza o descarta los cambios primero: la IA redacta con el caso guardado');
         click(discard()!);
-        expect(button('Generar con IA').disabled).toBeFalse();
+        expect(isDisabled(button('Generar con IA'))).toBeFalse();
       }));
     });
   });
@@ -2120,14 +2169,14 @@ describe('TicketPanel', () => {
       open(running);
       type(spent(), '45');
 
-      expect(button('Detener cronómetro').disabled).toBeTrue();
+      expect(isDisabled(button('Detener cronómetro'))).toBeTrue();
       expect(el.textContent).toContain('Actualiza o descarta el cambio en «Real (minutos)» para detenerlo.');
       // A press that reaches it all the same.
       fire(button('Detener cronómetro'), 'click');
       http.expectNone({ method: 'POST', url: '/api/tickets/7/timer/stop' });
 
       click(discard()!);
-      expect(button('Detener cronómetro').disabled).toBeFalse();
+      expect(isDisabled(button('Detener cronómetro'))).toBeFalse();
       expect(el.textContent).toContain('En marcha desde');
     }));
 
@@ -2135,7 +2184,7 @@ describe('TicketPanel', () => {
       open(ticket({ spentMinutes: 10 }));
       type(spent(), '45');
 
-      expect(button('Iniciar cronómetro').disabled).toBeFalse();
+      expect(isDisabled(button('Iniciar cronómetro'))).toBeFalse();
       click(button('Iniciar cronómetro'));
       http.expectOne({ method: 'POST', url: '/api/tickets/7/timer/start' }).flush(running);
       settle();
@@ -2146,10 +2195,10 @@ describe('TicketPanel', () => {
     // The server refuses it. What counts is the case as it is stored, not the status chosen in the draft.
     it('cannot be started on a case that is stored as resolved', fakeAsync(() => {
       open(ticket({ status: 'RESOLVED' }));
-      expect(button('Iniciar cronómetro').disabled).toBeTrue();
+      expect(isDisabled(button('Iniciar cronómetro'))).toBeTrue();
 
       pick('tp-status', 'Pendiente');
-      expect(button('Iniciar cronómetro').disabled).toBeTrue();
+      expect(isDisabled(button('Iniciar cronómetro'))).toBeTrue();
     }));
 
     it('that could not be started says why', fakeAsync(() => {
@@ -2172,7 +2221,7 @@ describe('TicketPanel', () => {
       const dropped = new DataTransfer();
       dropped.items.add(new File(['png'], 'captura.png', { type: 'image/png' }));
       const drop = new DragEvent('drop', { dataTransfer: dropped, cancelable: true });
-      find('aside').dispatchEvent(drop);
+      find('[role="dialog"]').dispatchEvent(drop);
       render();
 
       // Not prevented, the browser would open the file in place of the app.
@@ -2195,10 +2244,10 @@ describe('TicketPanel', () => {
       http.expectOne({ method: 'GET', url: '/api/attachments/3' }).flush(new Blob(['png'], { type: 'image/png' }));
       settle();
       click(find('button[title="captura.png"]'));
-      expect(el.querySelector('button[aria-label="Cerrar imagen"]')).not.toBeNull();
+      expect(el.querySelector('[role="dialog"][aria-label="Imagen: captura.png"]')).not.toBeNull();
 
       pressEscape();
-      expect(el.querySelector('button[aria-label="Cerrar imagen"]')).toBeNull();
+      expect(el.querySelector('[aria-label="Imagen: captura.png"]')).toBeNull();
       expect(closed).toBe(0);
 
       pressEscape();
@@ -2234,13 +2283,13 @@ describe('TicketPanel', () => {
       // Alone: sent with anything else, the server would count it as work on the case.
       expect(sent.request.body).toEqual({ archived: true });
       expect(confirm.current()).toBeNull();
-      expect(button('Archivar').disabled).toBeTrue();
+      expect(isDisabled(button('Archivar'))).toBeTrue();
       sent.flush(archived);
       settle();
 
       expect(toasts()).toEqual(['Caso archivado']);
       expect(find('header').textContent).toContain('Archivado');
-      expect(button('Desarchivar').disabled).toBeFalse();
+      expect(isDisabled(button('Desarchivar'))).toBeFalse();
       // The panel stays open: the same button brings the case back.
       expect(closed).toBe(0);
     }));
@@ -2287,7 +2336,7 @@ describe('TicketPanel', () => {
 
       expect(toasts()).toEqual(['No se pudo archivar']);
       expect(find('header').textContent).not.toContain('Archivado');
-      expect(button('Archivar').disabled).toBeFalse();
+      expect(isDisabled(button('Archivar'))).toBeFalse();
     }));
 
     // The same button does both. On a fast server it already says "Desarchivar" when the
@@ -2401,10 +2450,10 @@ describe('TicketPanel', () => {
 
     it('is written like any other field, and saved with "Actualizar"', fakeAsync(() => {
       open();
-      expect(button('Copiar').disabled).toBeTrue();
+      expect(isDisabled(button('Copiar'))).toBeTrue();
       type(replyBox(), ' Ya puede imprimir. ');
       // What is in the box can be copied before it is saved.
-      expect(button('Copiar').disabled).toBeFalse();
+      expect(isDisabled(button('Copiar'))).toBeFalse();
       wait(5000);
       noPatch();
 
@@ -2446,7 +2495,7 @@ describe('TicketPanel', () => {
     it('emptied, is saved as none, and there is nothing left to copy', fakeAsync(() => {
       open(ticket({ customerReply: 'Ya puede imprimir.' }));
       type(replyBox(), '  ');
-      expect(button('Copiar').disabled).toBeTrue();
+      expect(isDisabled(button('Copiar'))).toBeTrue();
 
       const sent = update();
       expect(sent.request.body).toEqual({ customerReply: null });
@@ -2461,13 +2510,13 @@ describe('TicketPanel', () => {
         click(button('Generar con IA'));
 
         expect(confirm.current()).toBeNull();
-        expect(button('Redactando…').disabled).toBeTrue();
+        expect(isDisabled(button('Redactando…'))).toBeTrue();
         http.expectOne(reply).flush(ticket({ customerReply: 'Estimado cliente: listo.' }));
         settle();
         expect(replyBox().value).toBe('Estimado cliente: listo.');
         // The server stored it with the case: nothing is left to save.
         expect(unsaved()).toBeFalse();
-        expect(button('Volver a generar').disabled).toBeFalse();
+        expect(isDisabled(button('Volver a generar'))).toBeFalse();
       }));
 
       it('asks before replacing the message the case has, and leaves it when the answer is no', fakeAsync(() => {
@@ -2497,11 +2546,11 @@ describe('TicketPanel', () => {
       it('waits for the draft to be saved or discarded: with unsaved changes it cannot be pressed, and says why', fakeAsync(() => {
         open();
         const generate = (): HTMLButtonElement => button('Generar con IA');
-        expect(generate().disabled).toBeFalse();
+        expect(isDisabled(generate())).toBeFalse();
         expect(generate().title).toBe('Redacta el mensaje con el caso y sus observaciones');
 
         type(description(), 'No imprime desde el lunes');
-        expect(generate().disabled).toBeTrue();
+        expect(isDisabled(generate())).toBeTrue();
         expect(generate().title).toBe('Actualiza o descarta los cambios primero: la IA redacta con el caso guardado');
         expect(el.textContent).toContain('Para redactarlo con IA, actualiza o descarta antes los cambios: la IA lee el caso guardado.');
         // A press that reaches it all the same.
@@ -2509,7 +2558,7 @@ describe('TicketPanel', () => {
         http.expectNone(reply);
 
         click(discard()!);
-        expect(generate().disabled).toBeFalse();
+        expect(isDisabled(generate())).toBeFalse();
         expect(el.textContent).not.toContain('Para redactarlo con IA');
       }));
 
@@ -2523,7 +2572,7 @@ describe('TicketPanel', () => {
           catalogs.aiReady.set(false);
           open();
 
-          expect(button('Generar con IA').disabled).toBeTrue();
+          expect(isDisabled(button('Generar con IA'))).toBeTrue();
           expect(button('Generar con IA').title).toBe(hint);
         }));
       }
@@ -2535,7 +2584,7 @@ describe('TicketPanel', () => {
         settle();
 
         expect(toasts()).toEqual(['El proveedor de IA no respondió']);
-        expect(button('Generar con IA').disabled).toBeFalse();
+        expect(isDisabled(button('Generar con IA'))).toBeFalse();
       }));
     });
 
@@ -2548,7 +2597,7 @@ describe('TicketPanel', () => {
 
         update().flush(ticket({ status: 'RESOLVED' }));
         settle();
-        expect(button('Redactando…').disabled).toBeTrue();
+        expect(isDisabled(button('Redactando…'))).toBeTrue();
         http.expectOne(reply).flush(ticket({ status: 'RESOLVED', customerReply: 'Estimado cliente: ya puede imprimir.' }));
         settle();
         expect(replyBox().value).toBe('Estimado cliente: ya puede imprimir.');
@@ -2662,7 +2711,7 @@ describe('TicketPanel', () => {
       expect(chosen('tp-priority')).toEqual(['Alta']);
       expect(unsaved()).toBeTrue();
       // Its own "Actualizar" is not held by the save of the other case.
-      expect(save().disabled).toBeFalse();
+      expect(isDisabled(save())).toBeFalse();
       expect(save().textContent).toContain('Actualizar');
     }));
 
@@ -2734,7 +2783,7 @@ describe('TicketPanel', () => {
       settle();
       const draft = http.expectOne({ method: 'POST', url: '/api/ai/reply/7' });
       // The case on screen is not the one being written for.
-      expect(button('Generar con IA').disabled).toBeFalse();
+      expect(isDisabled(button('Generar con IA'))).toBeFalse();
 
       draft.flush(ticket({ status: 'RESOLVED', customerReply: 'Ya puede imprimir.' }));
       settle();
@@ -2746,22 +2795,22 @@ describe('TicketPanel', () => {
       open();
       click(button('Generar con IA'));
       const left = http.expectOne({ method: 'POST', url: '/api/ai/reply/7' });
-      expect(button('Redactando…').disabled).toBeTrue();
+      expect(isDisabled(button('Redactando…'))).toBeTrue();
 
       moveTo(OTHER);
-      expect(button('Generar con IA').disabled).toBeFalse();
+      expect(isDisabled(button('Generar con IA'))).toBeFalse();
       click(button('Generar con IA'));
       const own = http.expectOne({ method: 'POST', url: `/api/ai/reply/${OTHER.id}` });
 
       left.flush(ticket({ customerReply: 'Ya puede imprimir.' }));
       settle();
       expect(replyBox().value).toBe('');
-      expect(button('Redactando…').disabled).toBeTrue();
+      expect(isDisabled(button('Redactando…'))).toBeTrue();
 
       own.flush({ ...OTHER, customerReply: 'Ya abre la caja.' });
       settle();
       expect(replyBox().value).toBe('Ya abre la caja.');
-      expect(button('Volver a generar').disabled).toBeFalse();
+      expect(isDisabled(button('Volver a generar'))).toBeFalse();
     }));
 
     it('of an AI reply: does not take the place of what the person is writing for the case on screen', fakeAsync(() => {
@@ -2776,7 +2825,7 @@ describe('TicketPanel', () => {
       settle();
       expect(replyBox().value).toBe('Ya abre la caja.');
       expect(unsaved()).toBeTrue();
-      expect(button('Copiar').disabled).toBeFalse();
+      expect(isDisabled(button('Copiar'))).toBeFalse();
     }));
   });
 
@@ -2801,6 +2850,222 @@ describe('TicketPanel', () => {
 
       expect(registered.textContent).toContain('Ana Torres');
       expect(registered.tagName).toBe('DIV');
+    }));
+  });
+
+  // Drawn for real, with the stylesheet of the app, on a screen of the size of each test.
+  describe('on the screen', () => {
+    const panel = (): HTMLElement => find('[role=dialog]');
+
+    /** Unsaved changes, and the case changed elsewhere meanwhile: the notice above the footer is on. */
+    function changedUnderTheDraft(): void {
+      open(ticket({ notes: [{ ...NOTE, text: 'https://soporte.example.test/casos/133?empresa=UnidadEducativaParticularJaguarDelValle&modulo=Facturacion' }] }));
+      pick('tp-priority', 'Alta');
+      events.outdated(7);
+      read().flush(ticket({ description: 'Escrito por otra persona' }));
+      settle();
+      expect(notice()).not.toBeNull();
+    }
+
+    // A laptop or a phone: the footer stays in view wherever the person is in the form.
+    it('keeps its footer in view on a screen of usual height, and its form scrolls', fakeAsync(() => {
+      resizeScreen(390, 844);
+      changedUnderTheDraft();
+
+      // Nothing of the form reaches past the panel, not even the hidden box of the switch.
+      expect(panel().scrollHeight).toBe(panel().clientHeight);
+      expect(save().getBoundingClientRect().bottom).toBeLessThanOrEqual(844);
+      // An observation that is a long link wraps inside the panel.
+      expect(panel().scrollWidth).toBe(panel().clientWidth);
+    }));
+
+    // At 400 % (320 × 200), with the notice on, "Actualizar" and "Descartar cambios" were below
+    // the screen and nothing scrolled to them.
+    it('on a short screen scrolls whole: "Actualizar" and "Descartar cambios" are reached', fakeAsync(() => {
+      resizeScreen(320, 200);
+      changedUnderTheDraft();
+
+      expect(panel().scrollHeight).toBeGreaterThan(panel().clientHeight);
+      for (const target of [save(), discard()!, button('Ver la versión actual', notice()!)]) {
+        target.scrollIntoView();
+        expect(target.getBoundingClientRect().top).withContext(textOf(target)).toBeGreaterThanOrEqual(0);
+        expect(target.getBoundingClientRect().bottom).withContext(textOf(target)).toBeLessThanOrEqual(200);
+      }
+    }));
+
+    /** The box of a field of the case, from its label to its control. */
+    const cellOf = (id: string): DOMRect => find(`#${id}`).closest('section > div')!.getBoundingClientRect();
+
+    // In half of a phone a select was some 55 px wide inside: the responsible and the module chosen were cut mid-word.
+    for (const width of [320, 375, 414]) {
+      it(`on a phone ${width} px wide puts the fields of the case in one column, as wide as the form`, fakeAsync(() => {
+        resizeScreen(width, 800);
+        open();
+        const form = find('section[aria-label="Datos del caso"]').getBoundingClientRect();
+
+        for (const id of ['tp-date', 'tp-time', 'tp-status', 'tp-assignee', 'tp-priority', 'tp-module']) {
+          expect(cellOf(id).width).withContext(id).toBeCloseTo(form.width, 0);
+        }
+        expect(cellOf('tp-assignee').top).toBeGreaterThan(cellOf('tp-status').bottom);
+      }));
+    }
+
+    it('puts two fields side by side where both still show a name of some thirty letters', fakeAsync(() => {
+      resizeScreen(430, 800);
+      open();
+      const form = find('section[aria-label="Datos del caso"]').getBoundingClientRect();
+
+      expect(cellOf('tp-assignee').top).toBeCloseTo(cellOf('tp-status').top, 0);
+      expect(cellOf('tp-assignee').width).toBeLessThan(form.width / 2);
+      // The fields of a whole line keep it.
+      expect(cellOf('tp-company').width).toBeCloseTo(form.width, 0);
+      expect(cellOf('tp-description').width).toBeCloseTo(form.width, 0);
+    }));
+
+    // Cut with an ellipsis on a phone, the name of who registered the case was only in the title.
+    it('writes who registered the case whole, on more lines where it does not fit in one', fakeAsync(() => {
+      resizeScreen(320, 800);
+      open(ticket({ createdByName: 'María de los Ángeles Villavicencio-Quiñónez de la Torre' }));
+      const registered = find('[aria-labelledby=tp-registered-label]');
+
+      expect(getComputedStyle(registered).textOverflow).not.toBe('ellipsis');
+      expect(registered.scrollWidth).toBeLessThanOrEqual(registered.clientWidth);
+      expect(registered.scrollHeight).toBeLessThanOrEqual(registered.clientHeight);
+      expect(registered.offsetHeight).toBeGreaterThan(40);
+    }));
+  });
+
+  // What a label means was only in its title: shown under a mouse that stays on it, never to a keyboard or a finger.
+  describe('the hints of the labels', () => {
+    for (const [label, field, hint] of [
+      ['Fecha del caso', '#tp-date', 'Día en que el cliente reportó el problema'],
+      ['Hora del caso', '#tp-time', 'Hora en que el cliente reportó el problema. Opcional'],
+      ['Fecha de registro', '[aria-labelledby=tp-registered-label]', 'Momento en que se registró el ticket, y quién lo registró. Los pone el sistema y no se editan'],
+      ['Promesa de entrega', 'input[role=switch]', 'Día en que se le prometió al cliente tener el caso resuelto'],
+    ]) {
+      it(`shows the one of "${label}" with its "?", which its field is described by`, fakeAsync(() => {
+        open();
+        const help = find<HTMLButtonElement>(`button[aria-label="Ayuda sobre ${label}"]`);
+        const text = find(`#${help.getAttribute('aria-describedby')}`);
+
+        expect(textOf(text)).toBe(hint);
+        expect(find(field).getAttribute('aria-describedby')).toContain(text.id);
+        expect(text.hidden).toBeTrue();
+
+        click(help);
+        expect(text.hidden).toBeFalse();
+        expect(help.getAttribute('aria-expanded')).toBe('true');
+        click(help);
+        expect(text.hidden).toBeTrue();
+      }));
+    }
+
+    it('says what the "IA" of the head means with its "?"', fakeAsync(() => {
+      open(ticket({ aiGenerated: true }));
+      const help = find<HTMLButtonElement>('header button[aria-label="Ayuda sobre IA"]');
+
+      click(help);
+      expect(textOf(find(`#${help.getAttribute('aria-describedby')}`))).toBe('El borrador de este caso lo redactó la IA');
+      click(help);
+    }));
+  });
+
+  // The browser puts the focus nowhere when the element that has it is disabled or leaves the
+  // screen: the next Tab started again at "Cerrar", at the top of the panel, and nothing was said.
+  describe('the focus', () => {
+    /** The element with the focus, by what it says. */
+    const focused = (): string => textOf(document.activeElement) || (document.activeElement?.getAttribute('aria-label') ?? '') || (document.activeElement?.tagName ?? '');
+
+    it('is named by its heading, the code of its case, and its description is required', fakeAsync(() => {
+      create(7);
+      // While the case is read: a name of its own, and busy.
+      const dialog = (): HTMLElement => find('[role=dialog]');
+      expect(dialog().getAttribute('aria-label')).toBe('Detalle del caso');
+      expect(dialog().getAttribute('aria-busy')).toBe('true');
+      // Its status is on screen before what it says: "Cargando…" comes into it, a change a screen reader hears.
+      expect(textOf(find('app-status'))).toBe('');
+      wait(STATUS_DELAY_MS);
+      expect(textOf(find('app-status'))).toBe('Cargando…');
+      read().flush(ticket());
+      settle();
+
+      expect(dialog().tagName).toBe('DIV');
+      expect(dialog().getAttribute('aria-label')).toBeNull();
+      expect(dialog().getAttribute('aria-busy')).toBeNull();
+      expect(textOf(find(`#${dialog().getAttribute('aria-labelledby')}`))).toBe('Caso SOP-00007');
+      expect(find('#tp-title').tagName).toBe('H2');
+      expect(textOf(find('app-status'))).toBe('');
+      expect(find('section[aria-label="Datos del caso"]')).toBeTruthy();
+      expect(description().required).toBeTrue();
+      // The hints of the labels, said with their fields.
+      expect(textOf(find(`#${caseTime().getAttribute('aria-describedby')}`))).toBe('Hora en que el cliente reportó el problema. Opcional');
+    }));
+
+    it('stays on "Actualizar" while it saves, and after', fakeAsync(() => {
+      open();
+      pick('tp-priority', 'Alta');
+      save().focus();
+      const sent = update();
+
+      expect(save().disabled).toBeFalse();
+      expect(isDisabled(save())).toBeTrue();
+      expect(document.activeElement).toBe(save());
+      sent.flush(ticket({ priority: 'HIGH' }));
+      settle();
+      expect(document.activeElement).toBe(save());
+      expect(isDisabled(save())).toBeTrue();
+      // Pressed again with nothing to save, it sends nothing.
+      click(save());
+      noPatch();
+    }));
+
+    it('goes to "Actualizar" when "Descartar cambios" goes away with what it discarded', fakeAsync(() => {
+      open();
+      pick('tp-priority', 'Alta');
+      discard()!.focus();
+      click(discard()!);
+
+      expect(discard()).toBeNull();
+      expect(document.activeElement).toBe(save());
+    }));
+
+    it('goes to the heading of the case when "Ver la versión actual" goes away with its notice', fakeAsync(() => {
+      open();
+      pick('tp-priority', 'Alta');
+      events.outdated(7);
+      read().flush(ticket({ description: 'Escrito por otra persona' }));
+      settle();
+      const show = button('Ver la versión actual', notice()!);
+      show.focus();
+      click(show);
+
+      expect(notice()).toBeNull();
+      expect(document.activeElement).toBe(find('#tp-title'));
+    }));
+
+    it('stays on "Archivar" while the case is archived', fakeAsync(() => {
+      open();
+      const archive = button('Archivar');
+      archive.focus();
+      click(archive);
+
+      expect(isDisabled(archive)).toBeTrue();
+      expect(document.activeElement).toBe(archive);
+      patch().flush(ticket({ archivedAt: '2026-11-06T10:00:00.000Z' }));
+      settle();
+      expect(focused()).toBe('Desarchivar');
+      expect(toasts()).toEqual(['Caso archivado']);
+      tick(3000);
+    }));
+
+    // The detail of the badges was only in their tooltips, out of reach of a keyboard and a finger.
+    it('finds the meaning of the "Olvidado" and "Archivado" badges written out, and tied to them', fakeAsync(() => {
+      open(ticket({ stale: true, lastActivityAt: '2026-11-01T15:00:00.000Z', archivedAt: '2026-11-06T10:00:00.000Z' }));
+      const badge = (name: string): HTMLElement => Array.from(el.querySelectorAll<HTMLElement>('header .badge')).find((item) => textOf(item) === name)!;
+
+      expect(badge('Olvidado').title).toBe('');
+      expect(textOf(find(`#${badge('Olvidado').getAttribute('aria-describedby')}`))).toMatch(/^Olvidado: último movimiento el .+\. Agrega una observación o actualiza el caso para quitar el aviso\.$/);
+      expect(textOf(find(`#${badge('Archivado').getAttribute('aria-describedby')}`))).toMatch(/^Archivado el .+\. No aparece en las listas salvo que se filtre por archivados\.$/);
     }));
   });
 });

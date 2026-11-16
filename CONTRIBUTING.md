@@ -216,7 +216,16 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   motivo: `// eslint-disable-next-line regla -- por qué` (en una plantilla, en un comentario
   `<!-- … -->`).
 - Estilos con Tailwind CSS. Los colores salen de las variables de `src/styles.css`, nunca de valores
-  escritos en el componente, para que funcionen en tema claro y oscuro.
+  escritos en el componente, para que funcionen en tema claro y oscuro. Cada uno tiene su uso, y
+  `src/styles.spec.ts` mide su contraste en los dos temas: `primary`, `success`, `warning` y `danger`
+  son de texto, iconos, bordes y tintes (`bg-danger/10`), legibles como texto chico sobre la página,
+  la superficie y el gris elevado (4.5:1); un fondo con texto blanco encima (un botón primario, el
+  menú activo, el encabezado de la tabla, un contador) es `bg-primary-fill` o `bg-danger-fill`; el
+  borde de un campo, un select o un interruptor es `control-line` (3:1 contra lo que lo rodea), y
+  `line` queda para los divisores. Los gráficos tienen sus colores (`--chart-*`), que lee
+  `Theme.palette`. Un elemento no se atenúa con `opacity` para decir que está inactivo: lo dice su
+  insignia, y su nombre va en `text-muted`. Tampoco un grupo de campos apagados: cada campo deshabilitado lo dice
+  él mismo (`.input:disabled`, en el gris elevado y con su texto en `text-muted`, como un select).
 - Los iconos son `<app-icon name="…" />` (`src/app/core/icon.ts`): SVG de Material Design Icons
   (`@mdi/js`), del tamaño y el color del texto, que se les dan con clases como al texto. Solo van en
   la aplicación los de `src/app/core/icons.ts`: un icono nuevo se agrega ahí antes de usarlo. Son
@@ -230,12 +239,28 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   `src/app/testing/ng-select.ts`. Las demás ayudas de las pruebas (un caso de ejemplo, botones,
   campos, avisos, el texto de un elemento con `textOf`, y `httpTestBed()` para la prueba que
   responde ella misma las peticiones al API) están en `src/app/testing/`. La ventana de Karma tiene
-  el ancho de un teléfono:
+  el ancho de un teléfono y el alto de una laptop (`src/test.ts`):
   una prueba de una pantalla que se dibuja distinto en una pantalla ancha (`wideScreen()`, de
   `src/app/core/wide-screen.ts`) elige su ancho con `provideScreenWidth`. Una prueba de si algo cabe
   en un ancho le da ese ancho al elemento del componente (`users-tab.spec.ts`): las clases de
-  Tailwind de un contenedor (`@container`, `@min-[…]:`) responden a él; las de la pantalla (`md:`,
-  `lg:`), no.
+  Tailwind de un contenedor (`@container`, `@min-[…]:`) responden a él. Una prueba de cómo se ve en
+  una pantalla de cierto tamaño (un teléfono, una pantalla baja, el zoom al 400 %, que deja
+  320 × 200) la elige con `resizeScreen` (`src/app/testing/viewport.ts`): las clases de la pantalla
+  (`md:`, `lg:`, `short:`) responden a ella, y vuelve a su tamaño al terminar la prueba.
+- Las pantallas bajas (`short:`, hasta 30rem de alto: un teléfono de lado, el zoom al 400 %) no
+  dejan fijo nada que les quite el alto: la barra del teléfono, y el encabezado y el pie de los
+  paneles y diálogos (`.overlay` y `.overlay-body`), se desplazan con el contenido. Ahí no hay barra
+  de pestañas después del contenido, a miles de píxeles: las cuatro pantallas están detrás del botón
+  "Menú" del encabezado, que las abre debajo de él (`aria-expanded`; Escape lo cierra y deja el foco
+  en el botón). En un teléfono de altura normal sigue la barra de pestañas. El
+  texto de las personas se parte donde haga falta (`overflow-wrap: anywhere` en el `body`): un
+  contenedor flexible o una celda no crece por una palabra larga.
+- Un formulario de dos columnas (el caso, el caso nuevo, el paso 2 del caso con IA, los filtros) tiene
+  una sola por debajo de `xs:` (26rem, `src/styles.css`): ahí la mitad de la pantalla cortaba a media
+  palabra el nombre elegido en un select. Sus campos de toda la fila llevan `xs:col-span-2`, no
+  `col-span-2`, que en una columna crearía otra. El valor elegido de un select se escribe entero, en
+  las líneas que necesite, y un chip de tipo de soporte (`app-type-chip`) también: nada se acorta con
+  puntos suspensivos dejando el resto en un `title`.
 - Lo que no se puede deshacer (eliminar) pregunta antes con el servicio `Confirm`, no con el
   `confirm` del navegador.
 - Lo que solo puede usar un administrador (pestañas, botones) se oculta a un agente con
@@ -255,6 +280,123 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   su lista no debe cerrar también el diálogo. Un diálogo se cierra con un clic en su fondo con
   `(appBackdropClick)`, que no cuenta los clics dentro del diálogo.
 - Accesibilidad: todo control tiene nombre, se llega a todo con el teclado y el contraste es legible.
+  El objetivo es WCAG 2.2 AA, en los dos temas y desde 320 px de ancho; `e2e/tests/accessibility.spec.ts`
+  (a 1280 × 800, y a 375 × 812 lo que solo muestra un teléfono) y `e2e/tests/responsive.spec.ts` (de
+  320 a 1920 px de ancho, y un teléfono de lado de 360 px de alto) lo vigilan (ver "Pruebas de extremo
+  a extremo"). En concreto:
+  - Un botón que se deshabilita mientras tiene el foco (el que guarda y espera la respuesta, el que
+    su propia acción deja sin uso, como "Restablecer") lleva `[appSoftDisabled]` de
+    `src/app/core/soft-disabled.ts` en vez de `[disabled]`: queda `aria-disabled`, se ve igual que uno
+    deshabilitado y no hace nada al pulsarlo, pero conserva el foco. Con `disabled`, el navegador
+    manda el foco a ninguna parte. También el botón que dice por qué no se puede usar, con
+    `aria-describedby` hacia un texto en pantalla: uno deshabilitado no se alcanza para leerlo.
+  - El botón que envía un formulario de varios campos obligatorios (el ingreso, el caso nuevo, el
+    segundo paso del caso con IA, el usuario nuevo) no se deshabilita por un campo vacío: al
+    pulsarlo, cada campo que falta se marca (`aria-invalid`), dice qué necesita en un `.field-error`
+    atado con `aria-describedby`, y el foco va al primero con `focusProblem` de
+    `src/app/core/focus.ts`. Ese da el foco después de dibujar el mensaje, para que el lector de
+    pantalla lo lea con el campo, y si el foco ya estaba en el campo dice el mensaje por el
+    `Announcer` (`src/app/core/announcer.ts`). Un `.focus()` directo en el mismo paso que marca los
+    campos llega antes que el mensaje. El asterisco de un campo obligatorio se
+    explica una vez en el formulario ("* Obligatorio."); el campo lleva `required` o `aria-required`.
+    El de un formulario corto cuyas etiquetas ya dicen lo que piden (agregar a un catálogo, una
+    observación, "Cambiar contraseña" en Mi cuenta) queda en `[appSoftDisabled]` mientras falta algo.
+  - Cuando un `@if` quita o cambia el control que tiene el foco (un paso de un diálogo, el botón del
+    cronómetro, una fila borrada), el foco va a donde siga la persona con `focusAfterRender` de
+    `src/app/core/focus.ts`, que solo actúa si el foco quedó perdido. Un panel que se cierra y no
+    encuentra lo que lo abrió da el foco a la fila o la tarjeta del caso (`data-case-id`) o al
+    buscador.
+  - Lo que cambia sin mover el foco (la cuenta de la lista, "Cargando…", "Actualizando…") se dice en
+    un `<app-status>` (`src/app/core/status.ts`), que está siempre en pantalla y cambia su texto. Llega
+    vacío y su contenido entra un momento después (`STATUS_DELAY_MS`): un texto que llega junto con
+    su región puede no leerse. En las pruebas, lo que dice un `<app-status>` recién dibujado se mira
+    tras ese tiempo.
+  - Un mensaje que aparece con sus palabras (dentro de un `@if`: un error, un aviso, "Abriendo…") no
+    es una región viva: nada de `role="status"`, `role="alert"` ni `aria-live` en él. Lleva `appSay`
+    (`Say` de `src/app/core/announcer.ts`), que dice sus palabras por el `Announcer` al aparecer,
+    `sayAs="assertive"` si es un error, y otra vez cada vez que cambia lo que se le da
+    (`[appSay]="error()"`); se quitan cuando el mensaje se va. Un botón nunca va dentro de una región
+    viva (se leería con cada mensaje): el aviso "Este caso cambió en otra pantalla." dice sus
+    palabras y deja fuera su "Ver la versión actual".
+  - "Actualizando…" y la cuenta de la lista se dicen solo por una lectura que pidió la persona: la
+    primera, un filtro, la búsqueda, una página, el orden, el periodo o el botón "Actualizar". La que
+    se hace porque otro cambió un caso se ve igual (el icono que gira, el texto de la lista, la cuenta
+    nueva) pero no se dice: en un `liveResource` es `reread()` y no `refresh()`, y lo que se dice va
+    por `asked`, no por `loading`. Lo que se ve queda `aria-hidden` y el `<app-status>` (`sr-only`)
+    dice la cuenta que dejó la última lectura pedida.
+  - Los avisos (`Toast`, `src/app/core/toast.ts`) no son una región viva: su mensaje, sin el botón
+    "Cerrar aviso", lo dice el `Announcer`, con cortesía si salió bien y de inmediato si es un error.
+    Lo que se dice sin nada en pantalla va por `Announcer.say`, no por una región nueva. Las dos
+    regiones del `Announcer` están fuera de todo diálogo, y VoiceOver no lee lo que queda fuera de uno
+    con `aria-modal`: mientras una tiene un mensaje y hay un diálogo así abierto, el de más arriba la
+    toma en su `aria-owns` (además de lo que ya tenía), como hace el `LiveAnnouncer` de Angular CDK, y
+    la suelta cuando se va su último mensaje. Escape
+    cierra primero el error más nuevo, antes que el diálogo o el panel (una pulsación para el error
+    y otra para el diálogo): dentro de un diálogo el foco no llega a su "Cerrar aviso". Los avisos de
+    lo que salió bien no toman Escape. Antes que el error se cierra lo más interno que esté abierto:
+    la lista de un select, el texto de un "?" y lo que se despliega con un botón `aria-expanded`
+    ("Menú", "Columnas", "Exportar") cuando el foco está en ese botón o en lo que muestra
+    (`aria-controls`). Lo que se cierra con Escape detiene la tecla (`stopPropagation()`); cancelarla
+    (`preventDefault()`) no basta, porque ng-select cancela todo Escape, también con su lista
+    cerrada. Si nada la detuvo (lo que "Filtros" o "Nuevo caso" muestran en la página no se cierra
+    con Escape, tampoco un select de ellos), la tecla vuelve y se lleva el error. Cuando se va
+    el aviso cuyo "Cerrar aviso" tiene el foco (con Escape o un clic), el foco pasa al "Cerrar aviso"
+    del aviso siguiente, o vuelve a lo que lo tenía antes de entrar a los avisos, o a `#contenido` si
+    eso ya no está. Un control que recibe el foco bajo los avisos se desplaza
+    hasta quedar sobre ellos, y al final de una lista esa caja recibe el espacio que le falta mientras
+    haya avisos (WCAG 2.4.11).
+  - No se dice nada solo con un color: la prioridad y el estado de una promesa tienen icono propio
+    (`PRIORITY_ICON`, `PROMISE_ICON` de `src/app/core/ui.ts`), y lo vencido se escribe.
+  - Un `title` no lleva nada que no esté también en pantalla: solo lo ve un ratón que se queda encima,
+    nunca el teclado ni un dedo. Lo que explica una etiqueta, el encabezado de una columna o una
+    casilla va en un "?" a su lado, `<app-hint textId="…" about="…" text="…">` de
+    `src/app/core/hint.ts`: un botón de 24 px que muestra y oculta el texto (clic, toque, Enter o
+    Espacio; Escape, otro clic o el foco en otra parte lo ocultan, y Escape no sigue hasta el panel o
+    el diálogo). Un toque o un clic fuera que cae en el fondo de un diálogo o de un panel
+    (`BACKDROP` de `src/app/core/backdrop-click.ts`) solo oculta el texto, como con la lista de un
+    select abierta: el siguiente cierra el diálogo. El texto, con el id `textId`, está siempre en la
+    página: describe al "?" y el campo lo apunta con `aria-describedby`. Un texto de más de una frase
+    (con iconos, como la leyenda de los indicadores) va entre las etiquetas de `app-hint`, sin
+    `text`. En un `<th>`, el encabezado se nombra con `aria-label` por su etiqueta sola. El `title`
+    puede quedar como copia.
+  - Los iconos de los indicadores de un caso (`app-ticket-flags`) son imágenes con nombre para el
+    lector de pantalla; a la vista llevan sus palabras al lado donde la fila tiene espacio
+    (`labelled`, la tarjeta del teléfono), y donde no (la columna de los códigos, la tarjeta del
+    tablero) su leyenda está detrás de un "?" (`app-ticket-flags-legend`, en el encabezado de los
+    códigos y junto a la ayuda del tablero). Un botón que no se puede usar y cuyo motivo no está
+    escrito a su lado (`appSoftDisabled` con `aria-describedby` a un texto oculto) lo dice también al
+    pulsarlo, con `(refused)`: la papelera de una entrada con casos muestra el motivo en un aviso de
+    error, como lo haría el API. Los que tienen su motivo escrito debajo ("Generar con IA",
+    "Detener cronómetro") no lo necesitan.
+  - Un botón cuyo texto es todo un caso (una tarjeta del tablero, de la lista en el teléfono, de la
+    campana) se nombra con `aria-labelledby` por su código y su empresa, y el resto es su
+    descripción. Los botones repetidos en una lista llevan el nombre de su fila ("Desactivar Acme").
+  - Los gráficos (`app-chart`) llevan sus números en una tabla para el lector de pantalla y no se
+    animan con "reducir movimiento"; sus series se separan con una línea del color de la tarjeta.
+  - Con "reducir movimiento" nada tiene transición (`transition: none` al final de `src/styles.css`)
+    y una animación dura un instante: un icono que gira se queda quieto. Por eso nada espera el fin
+    de una transición, y lo que decía un icono que gira se dice también con palabras: el botón que
+    trabaja cambia su texto ("Guardando…", "Subiendo…", "Cargando modelos…"), y el tablero escribe
+    "Actualizando…" junto a su botón (`motion-reduce:inline`, `aria-hidden`: al lector de pantalla
+    se lo dice su `<app-status>`). En Karma, `reduceMotion()` de `src/app/testing/reduced-motion.ts`
+    dibuja la página como con "reducir movimiento" hasta el final de la prueba.
+  - Un botón que muestra solo su icono, en toda pantalla o solo en el teléfono (Importar, Filtros),
+    lleva la clase `btn-icon` de `src/styles.css`, con `btn` y su estilo (`btn btn-ghost btn-icon
+    px-2`) o sola en uno sin estilo de botón (el "×" de un aviso): mide 24 px por lado como mínimo
+    (WCAG 2.5.8) y 44 px por debajo de 768 px, donde la app se dibuja para un teléfono. Nada de
+    `min-h-11` botón por botón. Las excepciones se quedan en 24 px también en el teléfono: el "×" de
+    un chip dentro de un select, para no hacer cada chip tan alto como un campo; el "×" que vacía un
+    select entero (el de ng-select), porque uno de 44 px haría más fácil quitar todos los chips sin
+    querer; y el "?" de `app-hint`, que no debe hacer la línea de una etiqueta o el encabezado de una
+    tabla tan alto como un campo. `e2e/support/layout.ts` mide cada botón que muestra solo su icono
+    (un SVG, o un signo escrito como texto, oculto al lector de pantalla o no: "×", "?") en todas las
+    pantallas y tamaños de `responsive.spec.ts`, y nombra estas excepciones en `SMALL_ON_PURPOSE`:
+    un botón de un icono de 24 px fuera de ellas falla.
+  - El anillo del foco de un campo (`.input`) se dibuja con `:focus-within`: un campo de fecha o de
+    hora tiene una parada más del tabulador, el botón de su calendario o de su reloj, en la que el
+    campo no es `:focus`. Lo vigila `e2e/tests/focus-and-motion.spec.ts`.
+  - En las pruebas, `isDisabled` de `src/app/testing/screen.ts` vale para un control `disabled` o
+    `aria-disabled`.
 - Toda escritura de un caso pasa por `Api`, que avisa el cambio a las demás pantallas.
 - Lo que una pantalla lee y vuelve a leer cuando cambian sus filtros o los casos (la lista, el
   tablero, el dashboard) es un `liveResource` de `src/app/core/loading.ts`, hecho con `resource()`
@@ -309,6 +451,40 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   `loginStatus`, `adminHeaders()` para el `request` de Playwright, y `repoFile(...)` para leer un
   archivo del repositorio.
 - Sin esperas fijas: se espera lo que muestra la pantalla o la respuesta del API.
+- Las guardas de accesibilidad (`tests/accessibility.spec.ts`, axe con las reglas de WCAG 2.0, 2.1 y
+  2.2, A y AA, en los dos temas, como administrador y como agente, a 1280 × 800) y de pantallas
+  (`tests/responsive.spec.ts`, a cada tamaño de `SCREENS` en `support/layout.ts`: 360 × 740,
+  320 × 568, 740 × 360, 768 × 1024, 1280 × 800 y 1920 × 1080) recorren las mismas pantallas y diálogos,
+  con los datos que cada prueba crea con `makeShowcase` de `support/screens.ts`: todo lo que una
+  pantalla puede mostrar, en su versión más larga, y la lista, el tablero y el dashboard reducidos a
+  ellos. Su navegador se prepara con `watchShowcase`: del flujo en vivo solo le llegan los cambios de
+  esos casos, no los avisos ni las listas que cambian las demás pruebas mientras tanto. Una pantalla
+  o un diálogo nuevo se agrega a los dos recorridos, con su forma de abrirlo en `support/screens.ts`,
+  que espera su contenido (`settled`: ninguna petición al API sin respuesta). Lo que solo un teléfono
+  muestra (las tarjetas de la lista, el encabezado y la barra de pestañas, el enlace "Saltar al
+  contenido" con el foco, el panel del caso y la campana a lo ancho de la pantalla) pasa también por
+  axe a 375 × 812, con el teléfono emulado como tal (`isMobile`, `hasTouch`: lo que en un escritorio
+  aparece al pasar el puntero, ahí está siempre a la vista); una pantalla que en un teléfono cambia
+  de forma, y no solo de ancho, se agrega a esa pasada. El teléfono de lado (740 × 360) es la única
+  pantalla baja de `SCREENS` (`short:`, 30rem de alto como máximo): ahí el recorrido abre también el
+  "Menú" del encabezado.
+- `expectAccessible` (`support/a11y.ts`) falla con cada infracción grave o crítica; las demás quedan
+  adjuntas al informe. Ninguna regla se apaga para una página: un hallazgo que no es una falla va a
+  `ACCEPTED`, para esa regla y los elementos que nombra, con el motivo. También falla con cada región
+  viva (`role="status"`, `role="alert"`, `aria-live`) que llegó a la página con sus palabras o que
+  tiene un control: cada página de las pruebas se vigila desde antes de su primer script
+  (`watchLiveRegions`, en `support/fixtures.ts`). `expectLayout`
+  (`support/layout.ts`) falla si la página o una caja se desplaza de lado, salvo las que lo hacen a
+  propósito (`SIDEWAYS`: una tabla, las pestañas de Configuración, las columnas del tablero), si un
+  control queda cortado por su caja o fuera de la pantalla sin forma de llegar a él, o si un botón que
+  muestra solo su icono (un SVG o un signo escrito como texto) mide menos de 24 px por lado, o de 44
+  px por debajo de 768 px (`btn-icon`), salvo los de `SMALL_ON_PURPOSE`, que miden 24. La guarda
+  misma tiene su prueba, en una página propia, en `tests/responsive.spec.ts`.
+- Lo que se ve solo en el navegador de verdad y no en Karma (las paradas del tabulador dentro de un
+  campo de fecha, la media query de "reducir movimiento") está en `tests/focus-and-motion.spec.ts`.
+  Las pantallas bajas (el menú del encabezado a 740 × 360 y a 320 × 200, y que la lista de cada select
+  del panel del caso quepa entera a 320 × 200, con el select al inicio, al centro y al final de la
+  pantalla) están en `tests/short-screens.spec.ts`.
 
 ### Integración continua
 

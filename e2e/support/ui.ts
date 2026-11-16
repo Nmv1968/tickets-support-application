@@ -23,9 +23,17 @@ export function toast(page: Page, text: string | RegExp): Locator {
   return page.locator('app-toasts').getByText(text);
 }
 
-/** The side panel with the form of a case. */
+/**
+ * What the application says now to a screen reader without anything on screen for it (core/announcer.ts):
+ * the region of that politeness, where each message is a paragraph. An error is said at once (`assertive`).
+ */
+export function announced(page: Page, politeness: 'polite' | 'assertive' = 'polite'): Locator {
+  return page.locator(`#announcer-${politeness}`);
+}
+
+/** The side panel with the form of a case: named by the code of its case, or "Detalle del caso" while it reads it. */
 export function casePanel(page: Page): Locator {
-  return page.getByRole('dialog', { name: 'Detalle del caso' });
+  return page.getByRole('dialog', { name: /^(Caso [A-Z]+-\d+|Detalle del caso)$/ });
 }
 
 /** The row of the case list with this code. */

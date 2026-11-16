@@ -1,5 +1,6 @@
 import type { Ticket } from '../../core/api';
-import { PRIORITY_CLASS, PRIORITY_LABEL, PROMISE_CLASS, formatCaseDate, formatDateTime, formatDay, formatMinutes, formatMomentDay, promiseText, timeAgo } from '../../core/ui';
+import type { IconName } from '../../core/icons';
+import { PRIORITY_CLASS, PRIORITY_ICON, PRIORITY_LABEL, PROMISE_CLASS, PROMISE_ICON, formatCaseDate, formatDateTime, formatDay, formatMinutes, formatMomentDay, promiseText, timeAgo } from '../../core/ui';
 import type { ColumnId } from './ticket-columns';
 
 /**
@@ -19,11 +20,13 @@ export interface CaseRow {
   readonly archived: string;
   /** "Registrado el …", what its day of registration says to the pointer. */
   readonly registered: string;
-  /** The colour of its priority flag. Empty without a priority. */
+  /** The icon and the colour of its priority (see PRIORITY_ICON). Only shown with a priority: the colour is empty without one. */
+  readonly priorityIcon: IconName;
   readonly priorityClass: string;
-  /** Its delivery promise: the day, how far it is ("vence mañana", only while it is open) and in which colour. */
+  /** Its delivery promise: the day, how far it is ("vence mañana", only while it is open), its icon and its colour. */
   readonly promiseDay: string;
   readonly promiseDue: string;
+  readonly promiseIcon: IconName;
   readonly promiseClass: string;
   /** "hace 20 min": its last activity, as it says to the pointer. */
   readonly lastActivityAgo: string;
@@ -44,9 +47,11 @@ export function caseRow(t: Ticket, userNames: ReadonlyMap<number, string>): Case
     dayAndTime: formatCaseDate(t),
     archived: t.archivedAt ? 'Archivado el ' + formatDateTime(t.archivedAt) : '',
     registered: 'Registrado el ' + formatDateTime(t.createdAt),
+    priorityIcon: t.priority ? PRIORITY_ICON[t.priority] : 'flag',
     priorityClass: t.priority ? PRIORITY_CLASS[t.priority] : '',
     promiseDay,
     promiseDue,
+    promiseIcon: t.promiseState ? PROMISE_ICON[t.promiseState] : 'calendar-clock-outline',
     promiseClass: t.promiseState ? PROMISE_CLASS[t.promiseState] : 'text-muted',
     lastActivityAgo: timeAgo(t.lastActivityAt),
     text: {

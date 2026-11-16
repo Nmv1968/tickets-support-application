@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { test as base } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { BrowserContextOptions, Page } from '@playwright/test';
+import { watchLiveRegions } from './a11y';
 import { Api, login } from './api';
 import type { TestUser } from './api';
 import { BASE_URL, TIME_ZONE } from './env';
@@ -13,11 +14,17 @@ interface Fixtures {
   uid: string;
   /** A user of its own for the test, for what is kept per user (columns, the filter panel). An agent unless asked for an administrator. */
   newUser: (role?: TestUser['role']) => Promise<TestUser>;
-  /** A browser of its own, logged in as that user. */
-  pageAs: (user: TestUser) => Promise<Page>;
+  /** A browser of its own, logged in as that user, with the options given (a theme, a screen size). */
+  pageAs: (user: TestUser, options?: BrowserContextOptions) => Promise<Page>;
 }
 
 export const test = base.extend<Fixtures>({
+  // Every page is watched for live regions that come with their words (see expectAccessible).
+  context: async ({ context }, use) => {
+    await watchLiveRegions(context);
+    await use(context);
+  },
+
   api: async ({}, use) => {
     const api = await Api.as(adminToken());
     await use(api);
@@ -39,10 +46,11 @@ export const test = base.extend<Fixtures>({
 
   pageAs: async ({ browser }, use) => {
     const contexts: Awaited<ReturnType<typeof browser.newContext>>[] = [];
-    await use(async (user) => {
+    await use(async (user, options) => {
       const session = await login(user.username, user.password);
-      const context = await browser.newContext({ baseURL: BASE_URL, timezoneId: TIME_ZONE, locale: 'es-EC', storageState: storageStateFor(session) });
+      const context = await browser.newContext({ ...options, baseURL: BASE_URL, timezoneId: TIME_ZONE, locale: 'es-EC', storageState: storageStateFor(session) });
       contexts.push(context);
+      await watchLiveRegions(context);
       return context.newPage();
     });
     await Promise.all(contexts.map((context) => context.close()));

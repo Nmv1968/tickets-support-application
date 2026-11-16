@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { Announcer } from '../core/announcer';
 import { Toast } from '../core/toast';
 import { chooseOption, closeSelect, ngSelect, optionTexts, selectedTexts } from './ng-select';
 import { textOf } from './text';
@@ -22,6 +23,14 @@ export function buttonIn(root: ParentNode, label: string): HTMLButtonElement {
   return found;
 }
 
+/**
+ * Whether a control cannot be used: `disabled`, or only `aria-disabled` (see SoftDisabled), which
+ * looks and answers the same and keeps the focus. For specs that do not care which of the two.
+ */
+export function isDisabled(control: Element | null | undefined): boolean {
+  return (control as HTMLButtonElement | null | undefined)?.disabled === true || control?.getAttribute('aria-disabled') === 'true';
+}
+
 /** A paste as the browser reports it: on the element that has the focus, with what was copied. */
 export function paste(target: Element, files: File[], copiedText?: string): ClipboardEvent {
   const data = new DataTransfer();
@@ -37,6 +46,26 @@ export function toasts(): string[] {
   return TestBed.inject(Toast)
     .items()
     .map((item) => item.text);
+}
+
+/** What the Announcer says to a screen reader now, oldest first: the messages of the toasts, and of a field (see focusProblem). */
+export function said(): string[] {
+  return TestBed.inject(Announcer)
+    .said()
+    .map((item) => item.text);
+}
+
+/**
+ * What the focus finds on a field each time it gets there: what the field says under it, through
+ * what it points at (`aria-describedby`), at that moment. Empty while it points at nothing on screen.
+ */
+export function heardOnFocus(field: HTMLElement): string[] {
+  const heard: string[] = [];
+  field.addEventListener('focus', () => {
+    const ids = field.getAttribute('aria-describedby')?.split(' ').filter(Boolean) ?? [];
+    heard.push(ids.map((id) => field.ownerDocument.getElementById(id)?.textContent?.trim() ?? '').join(' ').trim());
+  });
+  return heard;
 }
 
 /**

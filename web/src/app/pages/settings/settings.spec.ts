@@ -81,6 +81,63 @@ describe('SettingsPage, the tabs of Configuración', () => {
     expect(el.querySelector<HTMLInputElement>('app-support-types-tab input[aria-label="Nombre del tipo Capacitación"]')!.value).toBe('Capacitación');
   }));
 
+  // Every tab was a stop of the Tab key (ten of them before the content), the arrows did nothing,
+  // and nothing said which part of the page each one showed.
+  describe('as tabs to the keyboard', () => {
+    const selected = (): string => el.querySelector('[role=tab][aria-selected=true]')?.textContent?.trim() ?? '';
+    function press(key: string): void {
+      (document.activeElement ?? tabs()[0]).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+      flushMicrotasks();
+    }
+
+    it('are one stop of the Tab key, the one chosen, in a named list, with the part they show tied to them', fakeAsync(() => {
+      open(admin);
+
+      expect(el.querySelector('[role=tablist]')!.getAttribute('aria-label')).toBe('Secciones de configuración');
+      expect(tabs().map((tab) => tab.tabIndex)).toEqual([0, ...Array<number>(9).fill(-1)]);
+      const panel = el.querySelector<HTMLElement>('[role=tabpanel]')!;
+      expect(panel.id).toBe(tabs()[0].getAttribute('aria-controls')!);
+      expect(panel.getAttribute('aria-labelledby')).toBe(tabs()[0].id);
+      expect(panel.querySelector('app-users-tab')).not.toBeNull();
+    }));
+
+    it('move with the arrows, Home and End, which choose the tab they reach and give it the focus', fakeAsync(() => {
+      open(admin);
+      tabs()[0].focus();
+
+      press('End');
+      expect(selected()).toBe('Mi cuenta');
+      expect(document.activeElement).toBe(tabs()[9]);
+      expect(tabs()[9].tabIndex).toBe(0);
+      expect(tabs()[0].tabIndex).toBe(-1);
+      expect(el.querySelector('[role=tabpanel]')!.getAttribute('aria-labelledby')).toBe(tabs()[9].id);
+
+      // Round the row, both ways.
+      press('ArrowRight');
+      expect(selected()).toBe('Usuarios');
+      press('ArrowLeft');
+      expect(selected()).toBe('Mi cuenta');
+      press('Home');
+      expect(selected()).toBe('Usuarios');
+
+      press('ArrowRight');
+      expect(selected()).toBe('Responsables');
+      expect(document.activeElement).toBe(tabs()[1]);
+      answerCatalogs(http);
+      tick();
+    }));
+
+    // The selected one differed from the others by a background 1.1:1 and a text colour 2.4:1 apart.
+    it('mark the one chosen with a line under it', fakeAsync(() => {
+      open(admin);
+      const [chosen, other] = tabs().map((tab) => getComputedStyle(tab));
+      expect(chosen.borderBottomWidth).toBe('2px');
+      expect(chosen.borderBottomColor).not.toBe(other.borderBottomColor);
+      expect(other.borderBottomColor).toBe('rgba(0, 0, 0, 0)');
+    }));
+  });
+
   // It was called "Empresa", which now reads as the catalog next to it.
   it('"Logo" is where the logo of the installation is uploaded', fakeAsync(() => {
     open(admin);

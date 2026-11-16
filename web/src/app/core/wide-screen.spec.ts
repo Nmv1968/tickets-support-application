@@ -30,14 +30,15 @@ describe('wideScreen', () => {
     expect(wide()).toBe(window.matchMedia(WIDE_SCREEN).matches);
   });
 
-  // The page draws one thing or the other with this, and lays out the rest with the classes `md:`.
-  it('starts where the classes md: of styles.css start: 768 px', () => {
-    const md = Array.from(document.styleSheets)
-      .map((sheet) => mediaOf('.md\\:hidden', sheet.cssRules))
+  // The page draws one thing or the other with this, and lays out the rest with the classes `lg:`.
+  // Not where the menu of the app goes to the side (md): a tablet held upright gets the cards.
+  it('starts where the classes lg: of styles.css start: 1024 px', () => {
+    const lg = Array.from(document.styleSheets)
+      .map((sheet) => mediaOf('.lg\\:inline', sheet.cssRules))
       .find(Boolean);
 
-    expect(md).withContext('the rule of md:hidden in styles.css').toBeTruthy();
-    expect(from(WIDE_SCREEN)).toBe(768);
-    expect(from(md!)).toBe(from(WIDE_SCREEN));
+    expect(lg).withContext('the rule of lg:inline in styles.css').toBeTruthy();
+    expect(from(WIDE_SCREEN)).toBe(1024);
+    expect(from(lg!)).toBe(from(WIDE_SCREEN));
   });
 });

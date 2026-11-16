@@ -1,4 +1,5 @@
 import { expect, test } from '../support/fixtures';
+import { announced } from '../support/ui';
 
 // Starts with no session: this is the test of the login screen itself.
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -12,7 +13,9 @@ test('ingresa por la pantalla de login y rechaza una contraseña incorrecta', as
   await page.getByLabel('Usuario').fill(user.username);
   await page.getByLabel('Contraseña').fill(`${user.password}-mal`);
   await page.getByRole('button', { name: 'Ingresar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Usuario o contraseña incorrectos');
+  await expect(page.locator('#login-error')).toHaveText('Usuario o contraseña incorrectos');
+  // Said at once to a screen reader, as it comes.
+  await expect(announced(page, 'assertive')).toHaveText('Usuario o contraseña incorrectos');
   await expect(page).toHaveURL(/\/login$/);
 
   await page.getByLabel('Contraseña').fill(user.password);

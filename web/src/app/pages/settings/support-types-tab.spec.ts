@@ -1,11 +1,12 @@
 import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
+import { Announcer } from '../../core/announcer';
 import type { SupportType } from '../../core/api';
 import { Confirm } from '../../core/confirm';
 import { answerCatalogs } from '../../testing/catalogs';
 import { httpTestBed } from '../../testing/http';
-import { buttonIn, screenOf, toasts } from '../../testing/screen';
+import { buttonIn, isDisabled, said, screenOf, toasts } from '../../testing/screen';
 import { textOf } from '../../testing/text';
 import { SupportTypesTab } from './support-types-tab';
 
@@ -62,7 +63,9 @@ describe('SupportTypesTab, the support types in Configuración', () => {
   const picker = (within: HTMLElement): HTMLInputElement => within.querySelector<HTMLInputElement>('input[type=color]')!;
   const hex = (within: HTMLElement): HTMLInputElement => within.querySelector<HTMLInputElement>('input[aria-label$="en hexadecimal"]')!;
   const chip = (within: HTMLElement): HTMLElement => within.querySelector<HTMLElement>('app-type-chip')!;
-  const errorOf = (within: HTMLElement): string | null => within.querySelector('[role=alert]')?.textContent?.trim() ?? null;
+  /** The message of a colour field that holds no colour. */
+  const errorBox = (within: HTMLElement): HTMLElement | null => within.querySelector<HTMLElement>('p[id^="color-field-error-"]');
+  const errorOf = (within: HTMLElement): string | null => errorBox(within)?.textContent?.trim() ?? null;
   const trash = (row: HTMLElement): HTMLButtonElement => row.querySelector<HTMLButtonElement>('button[aria-label^="Eliminar "]')!;
   const newName = (): HTMLInputElement => el.querySelector<HTMLInputElement>('#type-name')!;
   const add = (): HTMLButtonElement => el.querySelector<HTMLButtonElement>('form button[type="submit"]')!;
@@ -101,7 +104,7 @@ describe('SupportTypesTab, the support types in Configuración', () => {
     expect(rows().map((row) => picker(row).value)).toEqual(['#12b76a', '#b91c1c', '#64748b']);
     // What each row says after the chip, the name and the colour: cases, state and what can be done.
     const said = (row: HTMLElement): string[] =>
-      [...row.querySelectorAll('span, button')]
+      [...row.querySelectorAll('span:not([hidden]), button')]
         .filter((item) => !item.closest('app-type-chip'))
         .map((item) => textOf(item))
         .filter(Boolean);
@@ -159,14 +162,14 @@ describe('SupportTypesTab, the support types in Configuración', () => {
     it('left as something that is not a colour, says so and cannot be added until it is one', fakeAsync(() => {
       open();
       type(newName(), 'Duda de uso');
-      expect(add().disabled).toBeFalse();
+      expect(isDisabled(add())).toBeFalse();
 
       for (const text of ['rojo', '#12', '#12345g', '1a2b3c', '']) {
         leave(hex(form()), text);
         expect(errorOf(form())).withContext(text).toBe(NOT_A_COLOR);
         expect(hex(form()).getAttribute('aria-invalid')).toBe('true');
-        expect(hex(form()).getAttribute('aria-describedby')).toBe(form().querySelector('[role=alert]')!.id);
-        expect(add().disabled).toBeTrue();
+        expect(hex(form()).getAttribute('aria-describedby')).toBe(errorBox(form())!.id);
+        expect(isDisabled(add())).toBeTrue();
         // Enter in the name sends the form all the same: nothing leaves.
         form().dispatchEvent(new Event('submit'));
         render();
@@ -177,7 +180,23 @@ describe('SupportTypesTab, the support types in Configuración', () => {
       type(hex(form()), '#0c7beb');
       expect(errorOf(form())).toBeNull();
       expect(hex(form()).hasAttribute('aria-invalid')).toBeFalse();
-      expect(add().disabled).toBeFalse();
+      expect(isDisabled(add())).toBeFalse();
+    }));
+
+    // It was an alert that came with its words, which a screen reader may not read: the focus has left the field by then.
+    it('left as something that is not a colour, says so at once as the message comes, and once', fakeAsync(() => {
+      open();
+      leave(hex(form()), 'rojo');
+      expect(errorBox(form())!.closest('[role=alert], [role=status], [aria-live]')).toBeNull();
+      expect(said()).toEqual([NOT_A_COLOR]);
+      expect(TestBed.inject(Announcer).said()[0].politeness).toBe('assertive');
+
+      // Left wrong again, the message stays as it is, and is not said again.
+      leave(hex(form()), 'azul');
+      expect(said()).toEqual([NOT_A_COLOR]);
+
+      type(hex(form()), '#0c7beb');
+      expect(said()).toEqual([]);
     }));
 
     it('picked after a wrong code, replaces it and takes the message away', fakeAsync(() => {
@@ -194,11 +213,11 @@ describe('SupportTypesTab, the support types in Configuración', () => {
     it('needs a name', fakeAsync(() => {
       open();
 
-      expect(add().disabled).toBeTrue();
+      expect(isDisabled(add())).toBeTrue();
       type(newName(), '   ');
-      expect(add().disabled).toBeTrue();
+      expect(isDisabled(add())).toBeTrue();
       type(newName(), 'Duda de uso');
-      expect(add().disabled).toBeFalse();
+      expect(isDisabled(add())).toBeFalse();
       // The server stores up to 60 characters.
       expect(newName().maxLength).toBe(60);
     }));
@@ -241,7 +260,7 @@ describe('SupportTypesTab, the support types in Configuración', () => {
       type(newName(), 'Duda de uso');
       click(add());
 
-      expect(add().disabled).toBeTrue();
+      expect(isDisabled(add())).toBeTrue();
       form().dispatchEvent(new Event('submit'));
       render();
 
@@ -378,10 +397,10 @@ describe('SupportTypesTab, the support types in Configuración', () => {
     it('is not offered for a type that is on cases, and says what to do instead', fakeAsync(() => {
       open();
 
-      expect(trash(rows()[0]).disabled).toBeTrue();
+      expect(isDisabled(trash(rows()[0]))).toBeTrue();
       expect(trash(rows()[0]).title).toBe('Está en casos: desactívalo o quítalo de esos casos');
-      expect(trash(rows()[2]).disabled).toBeTrue();
-      expect(trash(rows()[1]).disabled).toBeFalse();
+      expect(isDisabled(trash(rows()[2]))).toBeTrue();
+      expect(isDisabled(trash(rows()[1]))).toBeFalse();
       expect(trash(rows()[1]).getAttribute('aria-label')).toBe('Eliminar Falla del sistema');
     }));
 
@@ -432,7 +451,7 @@ describe('SupportTypesTab, the support types in Configuración', () => {
       catalogs([training, { ...failure, tickets: 1 }, other]);
 
       expect(toasts()).toEqual([reason]);
-      expect(trash(rows()[1]).disabled).toBeTrue();
+      expect(isDisabled(trash(rows()[1]))).toBeTrue();
       tick(6000);
     }));
   });

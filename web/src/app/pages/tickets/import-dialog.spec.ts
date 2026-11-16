@@ -1,12 +1,14 @@
 import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import type { ComponentFixture } from '@angular/core/testing';
+import { Announcer } from '../../core/announcer';
 import type { ImportResult, ImportRow } from '../../core/api';
 import { Toast } from '../../core/toast';
 import { httpTestBed } from '../../testing/http';
 import { chooseOption, ngSelect, openSelect, selectedTexts } from '../../testing/ng-select';
-import { nextTask, toasts } from '../../testing/screen';
+import { isDisabled, nextTask, said, toasts } from '../../testing/screen';
 import { textOf } from '../../testing/text';
+import { resizeScreen } from '../../testing/viewport';
 import { ImportDialog } from './import-dialog';
 
 // The template is how a person gets the format the import reads without guessing it.
@@ -15,9 +17,10 @@ describe('ImportDialog, the template to fill in', () => {
   let http: HttpTestingController;
   let saved: { name: string; href: string }[];
 
-  const button = (): HTMLButtonElement => {
+  /** The button of the template, by what it says when idle or while it downloads. */
+  const button = (text = /Descarga(r|ndo) plantilla/): HTMLButtonElement => {
     const buttons = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'));
-    return buttons.find((item) => item.textContent?.includes('Descargar plantilla')) as HTMLButtonElement;
+    return buttons.find((item) => text.test(item.textContent ?? '')) as HTMLButtonElement;
   };
 
   beforeEach(() => {
@@ -36,7 +39,9 @@ describe('ImportDialog, the template to fill in', () => {
   it('downloads the spreadsheet from the server and saves it under its name', async () => {
     button().click();
     fixture.detectChanges();
-    expect(button().disabled).toBeTrue();
+    expect(isDisabled(button())).toBeTrue();
+    // In words: its icon that turns stands still with less motion asked for.
+    expect(textOf(button())).toBe('Descargando plantilla…');
 
     const request = http.expectOne({ method: 'GET', url: '/api/import/template' });
     expect(request.request.responseType).toBe('blob');
@@ -47,7 +52,8 @@ describe('ImportDialog, the template to fill in', () => {
     expect(saved.length).toBe(1);
     expect(saved[0].name).toBe('plantilla-casos-soporte.xlsx');
     expect(saved[0].href).toMatch(/^blob:/);
-    expect(button().disabled).toBeFalse();
+    expect(isDisabled(button())).toBeFalse();
+    expect(textOf(button())).toBe('Descargar plantilla');
   });
 
   it('says why when the download fails, saves nothing and can be tried again', async () => {
@@ -66,7 +72,7 @@ describe('ImportDialog, the template to fill in', () => {
 
     expect(saved).toEqual([]);
     expect(toast).toHaveBeenCalledTimes(1);
-    expect(button().disabled).toBeFalse();
+    expect(isDisabled(button())).toBeFalse();
   });
 
   it('does not touch the file chosen for the import', async () => {
@@ -77,7 +83,7 @@ describe('ImportDialog, the template to fill in', () => {
 
     // No preview was asked for and the import button still waits for a file.
     const importButton = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find((item) => item.textContent?.includes('Importar'));
-    expect(importButton?.disabled).toBeTrue();
+    expect(isDisabled(importButton)).toBeTrue();
   });
 });
 
@@ -232,7 +238,7 @@ describe('ImportDialog, the preview of a sheet', () => {
   const sampleCells = (): string[] => Array.from(Array.from(el.querySelectorAll('table')).at(-1)?.querySelectorAll('tbody td') ?? [], (cell) => cell.textContent?.trim() ?? '');
 
   it('is asked for as soon as a file is chosen, and stores nothing: neither cases nor what the catalogs lack', async () => {
-    expect(confirm().disabled).toBeTrue();
+    expect(isDisabled(confirm())).toBeTrue();
     chooseFile();
 
     const asked = request();
@@ -255,7 +261,7 @@ describe('ImportDialog, the preview of a sheet', () => {
     expect(confirm().textContent?.trim()).toBe('Importar');
     await preview(result({ toCreate: 12 }));
     expect(confirm().textContent?.trim()).toBe('Importar 12 casos');
-    expect(confirm().disabled).toBeFalse();
+    expect(isDisabled(confirm())).toBeFalse();
 
     chooseFile('uno.xlsx');
     request().flush(result({ toCreate: 1 }));
@@ -266,7 +272,7 @@ describe('ImportDialog, the preview of a sheet', () => {
     request().flush(result({ toCreate: 0, rejected: 3 }));
     await show();
     expect(confirm().textContent?.trim()).toBe('Importar 0 casos');
-    expect(confirm().disabled).toBeTrue();
+    expect(isDisabled(confirm())).toBeTrue();
   });
 
   it('names the columns it found in the sheet, and shows the first rows with the optional columns only when the sheet has them', async () => {
@@ -293,9 +299,13 @@ describe('ImportDialog, the preview of a sheet', () => {
     request().flush({ message: 'No se encontró la fila de encabezados. Se necesitan al menos las columnas "Empresa" y "Descripción".' }, { status: 400, statusText: 'Bad Request' });
     await show();
 
-    expect(el.querySelector('[role=alert]')?.textContent).toContain('No se encontró la fila de encabezados');
+    expect(el.querySelector('.alert-error')?.textContent).toContain('No se encontró la fila de encabezados');
+    // Said at once as it comes: it was an alert that came with its words, which a screen reader may not read.
+    expect(el.querySelector('.alert-error')!.closest('[role=alert], [role=status], [aria-live]')).toBeNull();
+    expect(said()).toEqual([el.querySelector('.alert-error')!.textContent!.trim()]);
+    expect(TestBed.inject(Announcer).said()[0].politeness).toBe('assertive');
     expect(tile('Casos a importar')).toBe('');
-    expect(confirm().disabled).toBeTrue();
+    expect(isDisabled(confirm())).toBeTrue();
   });
 
   describe('of a sheet that names what the system does not have', () => {
@@ -317,7 +327,26 @@ describe('ImportDialog, the preview of a sheet', () => {
       expect(section('Filas rechazadas')).not.toContain('Se muestran las primeras');
       // The rest of the sheet still comes in.
       expect(confirm().textContent?.trim()).toBe('Importar 1 caso');
-      expect(confirm().disabled).toBeFalse();
+      expect(isDisabled(confirm())).toBeFalse();
+    });
+
+    // What "Fila" counts was only in the title of the header.
+    it('says what the number of a rejected row is with a "?" in its header, named "Fila" alone', async () => {
+      await preview(WITH_UNKNOWN);
+      const header = el.querySelector<HTMLElement>('section[aria-labelledby=import-rejected] thead th')!;
+      const help = header.querySelector<HTMLButtonElement>('button')!;
+      const text = el.querySelector<HTMLElement>(`#${header.getAttribute('aria-describedby')}`)!;
+
+      expect(header.getAttribute('aria-label')).toBe('Fila');
+      expect(help.getAttribute('aria-label')).toBe('Ayuda sobre Fila');
+      expect(help.getAttribute('aria-describedby')).toBe(text.id);
+      expect(text.textContent?.trim()).toBe('Número de la fila en la hoja');
+      help.click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(text.hidden).toBeFalse();
+      help.click();
+      fixture.detectChanges();
     });
 
     // The server sends the first twenty with their reasons, and counts them all.
@@ -344,7 +373,7 @@ describe('ImportDialog, the preview of a sheet', () => {
 
       const screen = el.getBoundingClientRect();
       const dialog = el.querySelector<HTMLElement>('[role=dialog]')!;
-      const content = Array.from(dialog.children).find((part) => part.classList.contains('overflow-auto')) as HTMLElement;
+      const content = Array.from(dialog.children).find((part) => part.classList.contains('overlay-body')) as HTMLElement;
       expect(content.scrollHeight).toBeGreaterThan(content.clientHeight);
       for (const part of [dialog.getBoundingClientRect(), confirm().getBoundingClientRect()]) {
         expect(part.top).toBeGreaterThanOrEqual(screen.top);
@@ -352,6 +381,33 @@ describe('ImportDialog, the preview of a sheet', () => {
         expect(part.left).toBeGreaterThanOrEqual(screen.left);
         expect(part.right).toBeLessThanOrEqual(screen.right);
       }
+    });
+
+    // At 400 % (320 × 200) its header and its footer left the preview a strip under the box "Crear…".
+    // There the whole dialog scrolls, and everything in it is reached in its turn.
+    it('on a screen as short as a page zoomed to 400 %, scrolls whole, and the box "Crear…" and the button that imports are reached', async () => {
+      resizeScreen(320, 200);
+      await preview({ ...WITH_UNKNOWN, unknown: { ...WITH_UNKNOWN.unknown, companies: ['Bodega Sur', 'UnidadEducativaParticularJaguarDelValleDeLosChillos'.repeat(3)] } });
+
+      const dialog = el.querySelector<HTMLElement>('[role=dialog]')!;
+      expect(dialog.scrollHeight).toBeGreaterThan(dialog.clientHeight);
+      // Names of the sheet that do not break by themselves wrap inside it.
+      expect(dialog.scrollWidth).toBe(dialog.clientWidth);
+      for (const target of [createBox()!.closest('label')!, confirm()]) {
+        target.scrollIntoView();
+        expect(target.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+        expect(target.getBoundingClientRect().bottom).toBeLessThanOrEqual(200);
+      }
+    });
+
+    // A sheet can name a column with several headers. Its badge, kept on one line, was wider than a
+    // phone, and the preview scrolled sideways.
+    it('names the columns it found on more lines when it has to: on a phone the preview never scrolls sideways', async () => {
+      resizeScreen(320, 568);
+      await preview({ ...WITH_UNKNOWN, columns: { ...WITH_UNKNOWN.columns, supportTypes: 'Tipo de soporte, Otro tipo de soporte, Tipo de soporte del cliente' } });
+
+      const content = el.querySelector<HTMLElement>('[role=dialog] .overlay-body')!;
+      expect(content.scrollWidth).toBe(content.clientWidth);
     });
 
     it('lists the values that are in no catalog, each under its catalog', async () => {
@@ -429,13 +485,13 @@ describe('ImportDialog, the preview of a sheet', () => {
 
         expect(createBox()).toBe(box);
         expect(tile('Casos a importar')).toBe('1');
-        expect(confirm().disabled).toBeTrue();
+        expect(isDisabled(confirm())).toBeTrue();
         expect(confirm().textContent?.trim()).toBe('Procesando…');
 
         request().flush(CREATING);
         await show();
         expect(createBox()).toBe(box);
-        expect(confirm().disabled).toBeFalse();
+        expect(isDisabled(confirm())).toBeFalse();
       });
 
       it('unchecked again, the preview is made without them, and their rows go back to rejected', async () => {
@@ -491,9 +547,9 @@ describe('ImportDialog, the preview of a sheet', () => {
         request().flush({ message: 'El archivo no se pudo leer' }, { status: 400, statusText: 'Bad Request' });
         await show();
 
-        expect(el.querySelector('[role=alert]')?.textContent).toBe('El archivo no se pudo leer');
+        expect(el.querySelector('.alert-error')?.textContent).toBe('El archivo no se pudo leer');
         expect(tile('Casos a importar')).toBe('');
-        expect(confirm().disabled).toBeTrue();
+        expect(isDisabled(confirm())).toBeTrue();
       });
     });
   });
@@ -503,7 +559,7 @@ describe('ImportDialog, the preview of a sheet', () => {
       await preview(result({ toCreate: 12 }));
       confirm().click();
       fixture.detectChanges();
-      expect(confirm().disabled).toBeTrue();
+      expect(isDisabled(confirm())).toBeTrue();
 
       const sent = request('import');
       expect(sent.request.params.get('dateOrder')).toBe('mdy');
@@ -578,10 +634,10 @@ describe('ImportDialog, the preview of a sheet', () => {
       request('import').flush({ message: 'El archivo no se pudo leer' }, { status: 400, statusText: 'Bad Request' });
       await show();
 
-      expect(el.querySelector('[role=alert]')?.textContent).toBe('El archivo no se pudo leer');
+      expect(el.querySelector('.alert-error')?.textContent).toBe('El archivo no se pudo leer');
       expect(imported).toBe(0);
       expect(tile('Casos a importar')).toBe('3');
-      expect(confirm().disabled).toBeFalse();
+      expect(isDisabled(confirm())).toBeFalse();
     });
   });
 
@@ -675,11 +731,39 @@ describe('ImportDialog, the preview of a sheet', () => {
 
     expect(fileField().value).toBe('');
     expect(tile('Filas rechazadas')).toBe('');
-    expect(confirm().disabled).toBeTrue();
+    expect(isDisabled(confirm())).toBeTrue();
 
     chooseFile();
     request().flush(result());
     await show();
     expect(tile('Filas rechazadas')).toBe('0');
+  });
+
+  // The two tables scroll sideways inside boxes that a keyboard could not reach (WCAG 2.1.1), and
+  // the browser made the long one a stop of the Tab key with no name, its ring mostly off screen.
+  it('lets the keyboard scroll the tables of the preview: each box a stop of the Tab key, named, and no higher than part of the dialog', async () => {
+    await preview(WITH_UNKNOWN);
+    const regions = Array.from(el.querySelectorAll<HTMLElement>('[role=region]'));
+
+    expect(regions.map((region) => region.getAttribute('aria-label'))).toEqual(['Filas rechazadas', 'Primeras filas que se importan']);
+    for (const region of regions) {
+      expect(region.tabIndex).withContext(region.getAttribute('aria-label') ?? '').toBe(0);
+      expect(region.querySelector('table')).not.toBeNull();
+      expect(getComputedStyle(region).maxHeight).toBe('320px');
+      expect(getComputedStyle(region).overflowY).toBe('auto');
+    }
+  });
+
+  // Disabled while it imported, it gave the focus away to nowhere.
+  it('keeps the focus on the button that imports while it works', async () => {
+    await preview();
+    confirm().focus();
+    confirm().click();
+    fixture.detectChanges();
+
+    expect(confirm().textContent?.trim()).toBe('Procesando…');
+    expect(document.activeElement).toBe(confirm());
+    request('import').flush({ ...result(), dryRun: false });
+    await show();
   });
 });

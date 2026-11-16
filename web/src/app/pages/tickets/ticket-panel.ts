@@ -1,15 +1,20 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, model, output, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, Injector, computed, effect, inject, input, model, output, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
+import { Say } from '../../core/announcer';
 import { Api } from '../../core/api';
 import type { TicketDetail, TicketInput, TicketSupportType } from '../../core/api';
 import { AssigneeSelect, CompanySelect, ModuleSelect, PrioritySelect, StatusSelect, SupportTypeSelect } from '../../core/case-selects';
 import { Catalogs, offered } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
+import { focusAfterRender } from '../../core/focus';
+import { Hint } from '../../core/hint';
 import { Icon } from '../../core/icon';
 import { latest } from '../../core/loading';
+import { SoftDisabled } from '../../core/soft-disabled';
+import { Status } from '../../core/status';
 import { StatusBadge } from '../../core/status-badge';
 import { TicketEvents } from '../../core/ticket-events';
 import { Toast } from '../../core/toast';
@@ -32,16 +37,39 @@ import { TicketTimes } from './ticket-times';
  */
 @Component({
   selector: 'app-ticket-panel',
-  imports: [FormsModule, A11yModule, CompanySelect, StatusSelect, AssigneeSelect, PrioritySelect, ModuleSelect, SupportTypeSelect, StatusBadge, TicketTimes, TicketNotes, TicketReply, TicketAttachments, TicketHistory, Icon],
+  imports: [
+    FormsModule,
+    A11yModule,
+    CompanySelect,
+    StatusSelect,
+    AssigneeSelect,
+    PrioritySelect,
+    ModuleSelect,
+    SupportTypeSelect,
+    StatusBadge,
+    TicketTimes,
+    TicketNotes,
+    TicketReply,
+    TicketAttachments,
+    TicketHistory,
+    Hint,
+    Icon,
+    Say,
+    SoftDisabled,
+    Status,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'onEscape()', '(window:beforeunload)': 'onBeforeUnload($event)' },
   template: `
     <div class="panel-backdrop" (click)="close()" aria-hidden="true"></div>
-    <aside
-      class="fixed inset-y-0 right-0 z-40 flex w-full max-w-xl flex-col border-l border-line bg-surface shadow-2xl"
+    <!-- Named by its heading, the code of the case, once it is read. -->
+    <div
+      class="overlay fixed inset-y-0 right-0 z-40 w-full max-w-xl border-l border-line bg-surface shadow-2xl"
       role="dialog"
       aria-modal="true"
-      aria-label="Detalle del caso"
+      [attr.aria-label]="stored() ? null : 'Detalle del caso'"
+      [attr.aria-labelledby]="stored() ? 'tp-title' : null"
+      [attr.aria-busy]="stored() ? null : 'true'"
       cdkTrapFocus
       [cdkTrapFocusAutoCapture]="true"
       (dragover)="$event.preventDefault()"
@@ -51,37 +79,53 @@ import { TicketTimes } from './ticket-times';
         <!-- The badges go on to a second line on a narrow screen; the button that closes stays in its corner. -->
         <div class="flex min-h-9 min-w-0 flex-1 flex-wrap items-center gap-2">
           @if (stored(); as t) {
-            <span class="font-mono text-sm font-semibold text-primary">{{ t.code }}</span>
+            <!-- Where the focus goes when what had it in the form is gone (see reset). -->
+            <h2 id="tp-title" class="rounded-sm font-mono text-sm font-semibold text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" tabindex="-1"><span class="sr-only">Caso </span><span>{{ t.code }}</span></h2>
             <span appStatusBadge [status]="t.status"></span>
             @if (t.overdue) {
               <span class="badge bg-danger/10 text-danger"><app-icon name="clock-alert-outline" /> Vencido</span>
             }
             @if (t.stale) {
-              <span class="badge st-PENDING" [title]="'Último movimiento: ' + formatDateTime(t.lastActivityAt) + '. Agrega una observación o actualiza el caso para quitar el aviso.'">
-                <app-icon name="bell-ring-outline" /> Olvidado
-              </span>
+              <span class="badge st-PENDING" aria-describedby="tp-stale-detail"><app-icon name="bell-ring-outline" /> Olvidado</span>
             }
             @if (t.aiGenerated) {
-              <span class="badge bg-elevated text-muted" title="El borrador de este caso lo redactó la IA"><app-icon name="creation-outline" /> IA</span>
+              <span class="inline-flex items-center gap-0.5">
+                <span class="badge bg-elevated text-muted" title="El borrador de este caso lo redactó la IA"><app-icon name="creation-outline" /> IA</span>
+                <app-hint class="text-muted" textId="tp-ai-hint" about="IA" text="El borrador de este caso lo redactó la IA" />
+              </span>
             }
             @if (t.archivedAt) {
-              <span class="badge bg-elevated text-muted" [title]="'Archivado el ' + formatDateTime(t.archivedAt) + '. No aparece en las listas salvo que se filtre por archivados.'">
-                <app-icon name="archive-outline" /> Archivado
-              </span>
+              <span class="badge bg-elevated text-muted" aria-describedby="tp-archived-detail"><app-icon name="archive-outline" /> Archivado</span>
+            }
+            <!-- What the two badges mean, written out: a tooltip is out of reach of a keyboard and of a finger. -->
+            @if (t.stale) {
+              <p class="basis-full text-2xs text-muted" id="tp-stale-detail">
+                Olvidado: último movimiento el {{ formatDateTime(t.lastActivityAt) }}. Agrega una observación o actualiza el caso para quitar el aviso.
+              </p>
+            }
+            @if (t.archivedAt) {
+              <p class="basis-full text-2xs text-muted" id="tp-archived-detail">
+                Archivado el {{ formatDateTime(t.archivedAt) }}. No aparece en las listas salvo que se filtre por archivados.
+              </p>
             }
           }
         </div>
-        <button type="button" class="btn btn-ghost px-2" (click)="close()" aria-label="Cerrar" cdkFocusInitial>
+        <button type="button" class="btn btn-ghost btn-icon px-2" (click)="close()" aria-label="Cerrar" cdkFocusInitial>
           <app-icon name="close" class="text-lg" />
         </button>
       </header>
 
       @if (stored(); as t) {
         @if (draft(); as d) {
-          <div class="min-h-0 flex-1 space-y-5 overflow-auto p-4">
-            <section class="grid grid-cols-2 gap-3">
+          <div class="overlay-body space-y-5 p-4">
+            <!-- One column below xs, where half of the panel cut the responsible or the module chosen (see styles.css). -->
+            <section class="grid grid-cols-1 gap-3 xs:grid-cols-2" aria-label="Datos del caso">
+              <!-- The hint of a label is behind its "?", and is the description of its field too (see Hint). -->
               <div>
-                <label class="label" for="tp-date" title="Día en que el cliente reportó el problema">Fecha del caso</label>
+                <div class="label flex items-center gap-1">
+                  <label for="tp-date" title="Día en que el cliente reportó el problema">Fecha del caso</label>
+                  <app-hint textId="tp-date-hint" about="Fecha del caso" text="Día en que el cliente reportó el problema" />
+                </div>
                 <input
                   id="tp-date"
                   class="input aria-[invalid=true]:border-danger"
@@ -90,15 +134,19 @@ import { TicketTimes } from './ticket-times';
                   [ngModel]="d.date"
                   (ngModelChange)="set('date', $event)"
                   [attr.aria-invalid]="problems().date ? 'true' : null"
-                  [attr.aria-describedby]="problems().date ? 'tp-date-error' : null"
+                  [attr.aria-describedby]="problems().date ? 'tp-date-error tp-date-hint' : 'tp-date-hint'"
                 />
                 @if (problems().date; as problem) {
                   <p class="field-error" id="tp-date-error"><app-icon name="alert-circle-outline" class="text-danger" /> {{ problem }}</p>
                 }
               </div>
               <div>
-                <label class="label" for="tp-time" title="Hora en que el cliente reportó el problema. Opcional">Hora del caso</label>
-                <div class="flex gap-1.5">
+                <div class="label flex items-center gap-1">
+                  <label for="tp-time" title="Hora en que el cliente reportó el problema. Opcional">Hora del caso</label>
+                  <app-hint textId="tp-time-hint" about="Hora del caso" text="Hora en que el cliente reportó el problema. Opcional" />
+                </div>
+                <!-- At the top: the field keeps the height of the one of the date beside it, the "×" of a phone (44 px) is higher. -->
+                <div class="flex items-start gap-1.5">
                   <input
                     #caseTime
                     id="tp-time"
@@ -109,10 +157,10 @@ import { TicketTimes } from './ticket-times';
                     (input)="watchTime(caseTime)"
                     (keyup)="watchTime(caseTime)"
                     [attr.aria-invalid]="problems().time ? 'true' : null"
-                    [attr.aria-describedby]="problems().time ? 'tp-time-error' : null"
+                    [attr.aria-describedby]="problems().time ? 'tp-time-error tp-time-hint' : 'tp-time-hint'"
                   />
                   @if (d.time || timeHalfTyped()) {
-                    <button type="button" class="btn btn-ghost px-2" aria-label="Quitar la hora del caso" title="Quitar la hora" (click)="clearTime()">
+                    <button type="button" class="btn btn-ghost btn-icon px-2" aria-label="Quitar la hora del caso" title="Quitar la hora" (click)="clearTime()">
                       <app-icon name="close" />
                     </button>
                   }
@@ -121,13 +169,17 @@ import { TicketTimes } from './ticket-times';
                   <p class="field-error" id="tp-time-error"><app-icon name="alert-circle-outline" class="text-danger" /> {{ problem }}</p>
                 }
               </div>
-              <div class="col-span-2">
-                <span class="label" id="tp-registered-label" title="Momento en que se registró el ticket. La pone el sistema y no se edita">Fecha de registro</span>
-                <div class="input truncate bg-elevated text-muted" aria-labelledby="tp-registered-label" [title]="t.createdByName ? 'Registrado por ' + t.createdByName : ''">
+              <div class="xs:col-span-2">
+                <div class="label flex items-center gap-1">
+                  <span id="tp-registered-label" title="Momento en que se registró el ticket, y quién lo registró. Los pone el sistema y no se editan">Fecha de registro</span>
+                  <app-hint textId="tp-registered-hint" about="Fecha de registro" text="Momento en que se registró el ticket, y quién lo registró. Los pone el sistema y no se editan" />
+                </div>
+                <!-- Whole, on more lines where it does not fit in one: cut, the name of who registered it was only in the title. -->
+                <div class="input bg-elevated text-muted" aria-labelledby="tp-registered-label" aria-describedby="tp-registered-hint" [title]="t.createdByName ? 'Registrado por ' + t.createdByName : ''">
                   {{ formatDateTime(t.createdAt) }}{{ t.createdByName ? ' · ' + t.createdByName : '' }}
                 </div>
               </div>
-              <div class="col-span-2">
+              <div class="xs:col-span-2">
                 <label class="label" for="tp-company">Empresa</label>
                 <!--
                   A case always has a company: the select cannot be emptied. "Crear empresa «X»" adds it
@@ -142,12 +194,13 @@ import { TicketTimes } from './ticket-times';
                   (valueChange)="set('companyId', $event)"
                 />
               </div>
-              <div class="col-span-2">
+              <div class="xs:col-span-2">
                 <label class="label" for="tp-description">Descripción</label>
                 <textarea
                   id="tp-description"
                   class="input min-h-24 resize-y aria-[invalid=true]:border-danger"
                   maxlength="5000"
+                  required
                   [ngModel]="d.description"
                   (ngModelChange)="set('description', $event)"
                   [attr.aria-invalid]="problems().description ? 'true' : null"
@@ -173,17 +226,20 @@ import { TicketTimes } from './ticket-times';
                 <label class="label" for="tp-module">Módulo</label>
                 <app-module-select inputId="tp-module" [items]="moduleOptions()" [value]="d.moduleId" (valueChange)="set('moduleId', $event)" />
               </div>
-              <div class="col-span-2">
+              <div class="xs:col-span-2">
                 <label class="label" for="tp-types">Tipos de soporte</label>
                 <app-support-type-select inputId="tp-types" multiple [items]="typeOptions()" [value]="d.supportTypeIds" (valueChange)="set('supportTypeIds', $event)" />
               </div>
-              <div class="col-span-2 rounded-control border border-line px-3 py-2.5">
+              <div class="xs:col-span-2 rounded-control border border-line px-3 py-2.5">
                 <div class="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2">
-                  <label class="flex cursor-pointer items-center gap-2 font-medium" title="Día en que se le prometió al cliente tener el caso resuelto">
-                    <input type="checkbox" role="switch" class="sr-only" [ngModel]="d.promiseOn" (ngModelChange)="set('promiseOn', $event)" />
-                    <span class="toggle" aria-hidden="true"></span>
-                    Promesa de entrega
-                  </label>
+                  <span class="flex items-center gap-1">
+                    <label class="flex cursor-pointer items-center gap-2 font-medium" title="Día en que se le prometió al cliente tener el caso resuelto">
+                      <input type="checkbox" role="switch" class="sr-only" aria-describedby="tp-promise-hint" [ngModel]="d.promiseOn" (ngModelChange)="set('promiseOn', $event)" />
+                      <span class="toggle" aria-hidden="true"></span>
+                      Promesa de entrega
+                    </label>
+                    <app-hint textId="tp-promise-hint" about="Promesa de entrega" text="Día en que se le prometió al cliente tener el caso resuelto" />
+                  </span>
                   @if (d.promiseOn) {
                     <input
                       class="input w-auto py-1.5 aria-[invalid=true]:border-danger"
@@ -238,7 +294,7 @@ import { TicketTimes } from './ticket-times';
 
             <div class="flex flex-wrap gap-2">
               <!-- No question asked: a case that was archived is brought back with the same button. -->
-              <button type="button" class="btn btn-soft" [disabled]="archiving()" (click)="archive(!t.archivedAt, $event)">
+              <button type="button" class="btn btn-soft" [appSoftDisabled]="archiving()" (click)="archive(!t.archivedAt, $event)">
                 <app-icon [name]="t.archivedAt ? 'archive-arrow-up-outline' : 'archive-arrow-down-outline'" />
                 {{ t.archivedAt ? 'Desarchivar' : 'Archivar' }}
               </button>
@@ -248,26 +304,31 @@ import { TicketTimes } from './ticket-times';
             </div>
           </div>
 
+          <!--
+            Its words are said as it comes (see Say), and its button is in no live region: a status
+            that came with them may not be read, and one that held the button read it out with them.
+          -->
           @if (behind()) {
-            <p class="flex flex-wrap items-center gap-x-3 border-t border-line bg-warning/10 px-4 py-1.5 text-xs" role="status">
-              <span><app-icon name="alert-outline" class="text-warning" /> Este caso cambió en otra pantalla.</span>
+            <p id="tp-behind" class="flex flex-wrap items-center gap-x-3 border-t border-line bg-warning/10 px-4 py-1.5 text-xs">
+              <span appSay><app-icon name="alert-outline" class="text-warning" /> Este caso cambió en otra pantalla.</span>
               <button type="button" class="py-1 font-medium underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="saving()" (click)="reset()">
                 Ver la versión actual
               </button>
             </p>
           }
           <!--
-            Outside the part that scrolls: always in view, wherever the person is in the form.
-            Its buttons start from the left: the toasts of the app come up over the right corner,
-            and would cover "Actualizar" right when a save that failed has to be sent again.
+            Outside the part that scrolls: always in view, wherever the person is in the form (on
+            a short screen it scrolls with the form instead, see .overlay). The toasts of the app
+            come up above it (see Toasts): they would cover "Actualizar" right when a save that
+            failed has to be sent again.
           -->
           <footer class="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
-            <button type="button" class="btn btn-primary" [disabled]="!canSave()" (click)="update()">
+            <button #saveButton type="button" class="btn btn-primary" [appSoftDisabled]="!canSave()" (click)="update()">
               <app-icon [name]="saving() ? 'loading' : 'content-save-outline'" />
               {{ saving() ? 'Guardando…' : 'Actualizar' }}
             </button>
             @if (unsaved()) {
-              <button type="button" class="btn btn-ghost" [disabled]="saving()" (click)="discard()">Descartar cambios</button>
+              <button type="button" class="btn btn-ghost" [appSoftDisabled]="saving()" (click)="discard()">Descartar cambios</button>
             }
             <p class="ml-auto text-xs text-muted" role="status">
               @if (unsaved()) {
@@ -276,10 +337,13 @@ import { TicketTimes } from './ticket-times';
             </p>
           </footer>
         }
-      } @else {
-        <p class="p-6 text-muted">Cargando…</p>
       }
-    </aside>
+      <app-status class="block">
+        @if (!stored()) {
+          <p class="p-6 text-muted">Cargando…</p>
+        }
+      </app-status>
+    </div>
   `,
 })
 export class TicketPanel {
@@ -288,6 +352,7 @@ export class TicketPanel {
   private readonly confirm = inject(Confirm);
   /** Given with every question the panel asks: closed with one on screen, the question goes with it. */
   private readonly destroyRef = inject(DestroyRef);
+  private readonly injector = inject(Injector);
   protected readonly catalogs = inject(Catalogs);
 
   /**
@@ -352,7 +417,7 @@ export class TicketPanel {
   /** What keeps the draft from being saved as it stands. Each is said next to its field. */
   protected readonly problems = computed<Problems>(() => {
     const draft = this.draft();
-    return draft ? problemsOf(draft, this.unreadable()) : {};
+    return draft ? problemsOf(draft, this.unreadable(), this.today) : {};
   });
 
   /** "Nueva observación": what is typed there is added with its button, or with "Actualizar". */
@@ -387,6 +452,7 @@ export class TicketPanel {
   protected readonly replying = computed(() => this.replyingFor() !== null && this.replyingFor() === this.caseId());
 
   private readonly attachments = viewChild(TicketAttachments);
+  private readonly saveButton = viewChild<ElementRef<HTMLButtonElement>>('saveButton');
 
   // What each select offers: see offered.
   protected readonly companyOptions = computed(() => {
@@ -675,6 +741,8 @@ export class TicketPanel {
     this.times()?.emptyNotNumbers();
     this.draft.set(fields);
     this.base.set(fields);
+    // "Ver la versión actual" goes away with its notice: the focus goes to the top of the case.
+    focusAfterRender(this.injector, () => document.getElementById('tp-title'));
   }
 
   /**
@@ -684,6 +752,8 @@ export class TicketPanel {
    */
   protected discard(): void {
     if (this.saving()) return;
+    // The button goes away with what it discards: the focus goes to "Actualizar", next to it.
+    focusAfterRender(this.injector, this.saveButton()?.nativeElement);
     this.reset();
     this.noteText.set('');
   }

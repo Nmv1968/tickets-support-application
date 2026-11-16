@@ -4,8 +4,10 @@ import type { Priority, TicketFilters, TicketStatus } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { AssigneeSelect, CompanySelect, ModuleSelect, PrioritySelect, StatusSelect, SupportTypeSelect } from '../../core/case-selects';
 import { Catalogs } from '../../core/catalogs';
+import { Hint } from '../../core/hint';
 import { Icon } from '../../core/icon';
 import { SELECT } from '../../core/select';
+import { SoftDisabled } from '../../core/soft-disabled';
 
 /** Delivery promise filter: any promise, or the open cases whose promise stands at that point. */
 export type PromiseFilter = 'any' | 'due' | 'overdue' | 'today' | 'soon';
@@ -109,10 +111,11 @@ export function activeFilters(filters: ListFilters): number {
  */
 @Component({
   selector: 'app-ticket-filters',
-  imports: [FormsModule, ...SELECT, CompanySelect, StatusSelect, AssigneeSelect, PrioritySelect, ModuleSelect, SupportTypeSelect, Icon],
+  imports: [FormsModule, ...SELECT, CompanySelect, StatusSelect, AssigneeSelect, PrioritySelect, ModuleSelect, SupportTypeSelect, Hint, Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Aligned at the bottom: a label that takes two lines on a narrow screen does not push its control out of the row.
-  host: { id: 'ticket-filters', role: 'group', 'aria-label': 'Filtros', class: 'grid grid-cols-2 items-end gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6' },
+  // One column below `xs`, where half of the screen cuts the name chosen in a select (see styles.css).
+  host: { id: 'ticket-filters', role: 'group', 'aria-label': 'Filtros', class: 'grid grid-cols-1 items-end gap-x-3 gap-y-2 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6' },
   template: `
     @let f = filters();
     <!--
@@ -144,12 +147,18 @@ export function activeFilters(filters: ListFilters): number {
       <app-support-type-select inputId="tf-type" placeholder="Todos" [items]="catalogs.supportTypes()" [value]="f.supportType" (valueChange)="set('supportType', $event)" />
     </div>
     <div>
-      <label class="label" for="tf-created-by" title="El usuario que registró el caso">Registrado por</label>
+      <!-- The hint of a label is behind its "?", and is the description of its field too (see Hint). -->
+      <div class="label flex items-center gap-1">
+        <label for="tf-created-by" title="El usuario que registró el caso">Registrado por</label>
+        <app-hint textId="tf-created-by-hint" about="Registrado por" text="El usuario que registró el caso" />
+      </div>
       <ng-select
         labelForId="tf-created-by"
+        [inputAttrs]="{ 'aria-describedby': 'tf-created-by-hint' }"
         bindValue="id"
         bindLabel="name"
         placeholder="Todos"
+        clearAllText="Quitar usuario"
         appendTo="body"
         [items]="catalogs.users()"
         [ngModel]="f.createdBy"
@@ -157,20 +166,31 @@ export function activeFilters(filters: ListFilters): number {
       />
     </div>
     <div>
-      <label class="label" for="tf-from" title="Fecha del caso desde">Desde</label>
-      <input id="tf-from" class="input" type="date" [ngModel]="f.from" (ngModelChange)="set('from', $event)" />
+      <div class="label flex items-center gap-1">
+        <label for="tf-from" title="Fecha del caso desde">Desde</label>
+        <app-hint textId="tf-from-hint" about="Desde" text="Fecha del caso desde" />
+      </div>
+      <input id="tf-from" class="input" type="date" aria-describedby="tf-from-hint" [ngModel]="f.from" (ngModelChange)="set('from', $event)" />
     </div>
     <div>
-      <label class="label" for="tf-to" title="Fecha del caso hasta">Hasta</label>
-      <input id="tf-to" class="input" type="date" [ngModel]="f.to" (ngModelChange)="set('to', $event)" />
+      <div class="label flex items-center gap-1">
+        <label for="tf-to" title="Fecha del caso hasta">Hasta</label>
+        <app-hint textId="tf-to-hint" about="Hasta" text="Fecha del caso hasta" />
+      </div>
+      <input id="tf-to" class="input" type="date" aria-describedby="tf-to-hint" [ngModel]="f.to" (ngModelChange)="set('to', $event)" />
     </div>
     <div>
-      <label class="label" for="tf-promise" title="Promesa de entrega al cliente">Promesa de entrega</label>
+      <div class="label flex items-center gap-1">
+        <label for="tf-promise" title="Promesa de entrega al cliente">Promesa de entrega</label>
+        <app-hint textId="tf-promise-hint" about="Promesa de entrega" text="Promesa de entrega al cliente" />
+      </div>
       <ng-select
         labelForId="tf-promise"
+        [inputAttrs]="{ 'aria-describedby': 'tf-promise-hint' }"
         bindValue="id"
         bindLabel="label"
         placeholder="Todas"
+        clearAllText="Quitar promesa de entrega"
         appendTo="body"
         [items]="promiseOptions"
         [searchable]="false"
@@ -194,15 +214,22 @@ export function activeFilters(filters: ListFilters): number {
       />
     </div>
     <div class="col-span-full flex flex-wrap items-center gap-x-4 gap-y-1">
-      <label class="flex cursor-pointer items-center gap-1.5 py-1 text-xs" title="Abiertos y con la fecha límite de su prioridad ya pasada">
-        <input type="checkbox" class="accent-danger" [ngModel]="f.overdue" (ngModelChange)="set('overdue', $event)" />
-        Vencidos
-      </label>
-      <label class="flex cursor-pointer items-center gap-1.5 py-1 text-xs" [title]="staleHint()">
-        <input type="checkbox" class="accent-warning" [ngModel]="f.stale" (ngModelChange)="set('stale', $event)" />
-        Olvidados
-      </label>
-      <button type="button" class="btn btn-ghost ml-auto px-2 py-1 text-xs" [disabled]="!canClear()" (click)="cleared.emit()">
+      <span class="flex items-center gap-0.5">
+        <label class="flex cursor-pointer items-center gap-1.5 py-1 text-xs" title="Abiertos y con la fecha límite de su prioridad ya pasada">
+          <input type="checkbox" class="accent-danger" aria-describedby="tf-overdue-hint" [ngModel]="f.overdue" (ngModelChange)="set('overdue', $event)" />
+          Vencidos
+        </label>
+        <app-hint class="text-xs text-muted" textId="tf-overdue-hint" about="Vencidos" text="Abiertos y con la fecha límite de su prioridad ya pasada" />
+      </span>
+      <span class="flex items-center gap-0.5">
+        <label class="flex cursor-pointer items-center gap-1.5 py-1 text-xs" [title]="staleHint()">
+          <input type="checkbox" class="accent-warning" aria-describedby="tf-stale-hint" [ngModel]="f.stale" (ngModelChange)="set('stale', $event)" />
+          Olvidados
+        </label>
+        <app-hint class="text-xs text-muted" textId="tf-stale-hint" about="Olvidados" [text]="staleHint()" />
+      </span>
+      <!-- Keeps the focus once there is nothing left to clear. -->
+      <button type="button" class="btn btn-ghost ml-auto px-2 py-1 text-xs" [appSoftDisabled]="!canClear()" (click)="cleared.emit()">
         <app-icon name="filter-off-outline" />
         Limpiar filtros
       </button>

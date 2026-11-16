@@ -14,7 +14,8 @@ import { PRIORITY_OPTIONS, STATUS_OPTIONS } from './ui';
  * its own) and its own placeholder where it says something else.
  *
  * The label stays in the screen, pointing at `inputId`. Every list of options hangs from the
- * body: inside a dialog, a panel or the page it would be cut where they scroll.
+ * body: inside a dialog, a panel or the page it would be cut where they scroll. The "×" that empties
+ * one says what it empties ("Quitar empresa"): a form has several, and "Quitar" alone said none.
  */
 
 /** A client company. `creatable` offers "Crear empresa «X»" for a name the list does not have. */
@@ -30,6 +31,7 @@ import { PRIORITY_OPTIONS, STATUS_OPTIONS } from './ui';
       bindLabel="name"
       appendTo="body"
       [placeholder]="placeholder()"
+      clearAllText="Quitar empresa"
       [items]="items()"
       [clearable]="clearable()"
       [addTag]="creatable() ? create : false"
@@ -51,11 +53,21 @@ export class CompanySelect<V extends number | null> {
   readonly creatable = input(false, { transform: booleanAttribute });
   /** Tells who hears the form that it cannot be sent without a company. */
   readonly required = input(false, { transform: booleanAttribute });
+  /** The form was sent without a company: the select is marked (see styles.css), and says why through `describedBy`. */
+  readonly invalid = input(false, { transform: booleanAttribute });
+  /** The id of the message under the select. */
+  readonly describedBy = input<string | null>(null);
 
-  /** A name typed to create a company is cut where the catalog cuts it. */
+  /**
+   * A name typed to create a company is cut where the catalog cuts it. The state of the field goes on
+   * the box the person types in, which has the focus. ng-select only ever sets these, never takes
+   * one away: each is always given, with the value that says nothing when there is nothing to say.
+   */
   protected readonly inputAttrs = computed(() => ({
     ...(this.creatable() ? { maxlength: String(NAME_MAX.company) } : {}),
     ...(this.required() ? { 'aria-required': 'true' } : {}),
+    'aria-invalid': this.invalid() ? 'true' : 'false',
+    'aria-describedby': this.describedBy() ?? '',
   }));
 
   /**
@@ -85,6 +97,7 @@ export class CompanySelect<V extends number | null> {
       bindLabel="label"
       appendTo="body"
       [placeholder]="placeholder()"
+      clearAllText="Quitar estado"
       [items]="options"
       [clearable]="clearable()"
       [searchable]="false"
@@ -115,6 +128,7 @@ export class StatusSelect<V extends TicketStatus | null> {
       bindLabel="label"
       appendTo="body"
       [placeholder]="placeholder()"
+      clearAllText="Quitar prioridad"
       [items]="options"
       [searchable]="false"
       [ngModel]="value()"
@@ -148,6 +162,7 @@ export class PrioritySelect {
       bindLabel="name"
       appendTo="body"
       [placeholder]="placeholder()"
+      clearAllText="Quitar responsable"
       [items]="items()"
       [ngModel]="value()"
       (ngModelChange)="value.set($event)"
@@ -176,6 +191,7 @@ export class AssigneeSelect<T extends number | 'none'> {
       bindLabel="fullName"
       appendTo="body"
       [placeholder]="placeholder()"
+      clearAllText="Quitar módulo"
       [items]="items()"
       [ngModel]="value()"
       (ngModelChange)="value.set($event)"
@@ -206,6 +222,7 @@ export class ModuleSelect {
       bindLabel="name"
       appendTo="body"
       [placeholder]="placeholder()"
+      [clearAllText]="multiple() ? 'Quitar todos los tipos de soporte' : 'Quitar tipo de soporte'"
       [items]="items()"
       [multiple]="multiple()"
       [closeOnSelect]="!multiple()"

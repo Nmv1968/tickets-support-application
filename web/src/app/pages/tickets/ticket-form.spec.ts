@@ -1,5 +1,5 @@
 import { ticket } from '../../testing/fixtures';
-import { NO_NOT_NUMBER, afterSave, changed, changesOf, draftOf, isDirty, problemsOf, tidied, withVersion } from './ticket-form';
+import { FUTURE_DATE, NO_NOT_NUMBER, afterSave, changed, changesOf, draftOf, futureDate, isDirty, problemsOf, tidied, withVersion } from './ticket-form';
 import type { Draft, Unreadable } from './ticket-form';
 
 /** Case 7 as the form shows it, with what a test is about changed. */
@@ -9,6 +9,9 @@ function draft(changes: Partial<Draft> = {}): Draft {
 
 /** Fields that hold nothing the draft cannot have. */
 const READABLE: Unreadable = { timeHalfTyped: false, notNumber: NO_NOT_NUMBER };
+
+/** The day the problems are looked at: after the date of case 7. */
+const TODAY = '2026-11-14';
 
 // The rules of the form of the case panel, as plain data: what the person changed, what would be
 // sent, what is unsaved and what keeps the draft from being saved. The panel spec tries the same
@@ -137,39 +140,54 @@ describe('ticket form', () => {
 
   describe('problemsOf', () => {
     it('is nothing for a draft that can be saved', () => {
-      expect(problemsOf(draft({ promiseOn: true, promisedDate: '2026-12-24' }), READABLE)).toEqual({});
+      expect(problemsOf(draft({ promiseOn: true, promisedDate: '2026-12-24' }), READABLE, TODAY)).toEqual({});
     });
 
     // Empty while a day is being typed, a year before 1900 while it is the year.
     it('asks for the whole date of the case', () => {
       for (const typed of ['', '0002-11-05', '0202-11-05']) {
-        expect(problemsOf(draft({ date: typed }), READABLE)).withContext(typed).toEqual({ date: 'Escribe la fecha completa.' });
+        expect(problemsOf(draft({ date: typed }), READABLE, TODAY)).withContext(typed).toEqual({ date: 'Escribe la fecha completa.' });
       }
-      expect(problemsOf(draft({ date: '1900-01-01' }), READABLE)).toEqual({});
+      expect(problemsOf(draft({ date: '1900-01-01' }), READABLE, TODAY)).toEqual({});
+    });
+
+    // The max of the date field does not stop a date typed in it: the API refused it, in a toast that went away.
+    it('does not take a case dated after today, with the words of the API', () => {
+      expect(FUTURE_DATE).toBe('La fecha del caso no puede ser posterior a hoy');
+      expect(problemsOf(draft({ date: '2026-11-15' }), READABLE, TODAY)).toEqual({ date: FUTURE_DATE });
+      expect(problemsOf(draft({ date: '2031-01-01' }), READABLE, TODAY)).toEqual({ date: FUTURE_DATE });
+      expect(problemsOf(draft({ date: TODAY }), READABLE, TODAY)).toEqual({});
+    });
+
+    it('tells a date after today apart from one that is not: futureDate', () => {
+      expect(futureDate('2026-11-15', TODAY)).toBe(FUTURE_DATE);
+      expect(futureDate(TODAY, TODAY)).toBeUndefined();
+      // An empty field: the new case is of today.
+      expect(futureDate('', TODAY)).toBeUndefined();
     });
 
     it('asks to finish a time half typed, or to take it off', () => {
-      expect(problemsOf(draft(), { ...READABLE, timeHalfTyped: true })).toEqual({ time: 'Completa la hora o quítala.' });
+      expect(problemsOf(draft(), { ...READABLE, timeHalfTyped: true }, TODAY)).toEqual({ time: 'Completa la hora o quítala.' });
     });
 
     it('does not let the description be emptied, spaces aside', () => {
-      expect(problemsOf(draft({ description: '   ' }), READABLE)).toEqual({ description: 'La descripción no puede quedar vacía.' });
+      expect(problemsOf(draft({ description: '   ' }), READABLE, TODAY)).toEqual({ description: 'La descripción no puede quedar vacía.' });
     });
 
     it('asks for the promised date while the switch is on, and not once it is off', () => {
       for (const typed of ['', '0202-12-24']) {
-        expect(problemsOf(draft({ promiseOn: true, promisedDate: typed }), READABLE)).withContext(typed).toEqual({ promisedDate: 'Elige la fecha prometida' });
+        expect(problemsOf(draft({ promiseOn: true, promisedDate: typed }), READABLE, TODAY)).withContext(typed).toEqual({ promisedDate: 'Elige la fecha prometida' });
       }
-      expect(problemsOf(draft({ promiseOn: false, promisedDate: '' }), READABLE)).toEqual({});
+      expect(problemsOf(draft({ promiseOn: false, promisedDate: '' }), READABLE, TODAY)).toEqual({});
     });
 
     it('asks for numbers in the field of minutes that holds a text', () => {
-      expect(problemsOf(draft(), { ...READABLE, notNumber: { estimatedMinutes: true, spentMinutes: false } })).toEqual({ estimatedMinutes: 'Escribe solo el número de minutos.' });
-      expect(problemsOf(draft(), { ...READABLE, notNumber: { estimatedMinutes: false, spentMinutes: true } })).toEqual({ spentMinutes: 'Escribe solo el número de minutos.' });
+      expect(problemsOf(draft(), { ...READABLE, notNumber: { estimatedMinutes: true, spentMinutes: false } }, TODAY)).toEqual({ estimatedMinutes: 'Escribe solo el número de minutos.' });
+      expect(problemsOf(draft(), { ...READABLE, notNumber: { estimatedMinutes: false, spentMinutes: true } }, TODAY)).toEqual({ spentMinutes: 'Escribe solo el número de minutos.' });
     });
 
     it('says every problem at once, each by its field', () => {
-      const problems = problemsOf(draft({ date: '', description: '' }), { timeHalfTyped: true, notNumber: { estimatedMinutes: true, spentMinutes: true } });
+      const problems = problemsOf(draft({ date: '', description: '' }), { timeHalfTyped: true, notNumber: { estimatedMinutes: true, spentMinutes: true } }, TODAY);
 
       expect(Object.keys(problems).sort()).toEqual(['date', 'description', 'estimatedMinutes', 'spentMinutes', 'time']);
     });

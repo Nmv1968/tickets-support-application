@@ -35,4 +35,14 @@ describe('TicketHistory', () => {
     expect(el.querySelector('summary')?.textContent).toContain('Historial de cambios (0)');
     expect(lines(el)).toEqual(['Sin cambios registrados.']);
   });
+
+  // Its line was 16 px high, the one thing a finger presses to open it (WCAG 2.5.8).
+  it('opens with a press on a line of 24 px, in a box as high as before', () => {
+    const el = render([]);
+    const box = el.querySelector<HTMLElement>('details')!;
+
+    expect(el.querySelector('summary')!.getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
+    // Its padding (8 px a side), its border and the line of the summary.
+    expect(box.offsetHeight).toBe(2 * 8 + 2 + 16);
+  });
 });

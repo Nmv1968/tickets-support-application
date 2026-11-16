@@ -1,11 +1,12 @@
 import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import type { ComponentFixture } from '@angular/core/testing';
+import { Announcer } from '../../core/announcer';
 import { Branding } from '../../core/branding';
 import { Confirm } from '../../core/confirm';
 import { toSmallPng } from '../../core/ui';
 import { httpTestBed } from '../../testing/http';
-import { nextTask } from '../../testing/screen';
+import { nextTask, said } from '../../testing/screen';
 import { BrandingTab } from './branding-tab';
 
 /** Waits, a turn at a time, until `ready` holds: preparing the image is real work of the browser. */
@@ -135,25 +136,58 @@ describe('BrandingTab, the company logo in Configuración', () => {
     expect(picker().value).toBe('');
   });
 
+  // The icon that turns was all that said it, and it stands still with less motion asked for.
+  it('says in words what it is doing while the logo is sent, and while it is removed', async () => {
+    branding.use('v1');
+    fixture.detectChanges();
+    const sent = await upload(await picture(100, 100));
+    fixture.detectChanges();
+    expect(button('Subiendo…')?.disabled).toBeTrue();
+    expect(button('Quitar logo')?.disabled).toBeTrue();
+    sent.flush({ logoVersion: 'v2' });
+    await until(() => branding.logoUrl() === '/api/branding/logo?v=v2');
+    await nextTask();
+    fixture.detectChanges();
+    expect(button('Subiendo…')).toBeUndefined();
+
+    button('Quitar logo')!.click();
+    confirm.answer(true);
+    await nextTask();
+    fixture.detectChanges();
+    expect(button('Quitando…')?.disabled).toBeTrue();
+    expect(button('Cambiar imagen')?.disabled).toBeTrue();
+    expect(button('Cambiar imagen')?.querySelector('app-icon')?.getAttribute('data-icon')).toBe('upload');
+    http.expectOne({ method: 'DELETE', url: '/api/branding/logo' }).flush(null);
+    await until(() => branding.logoUrl() === null);
+    fixture.detectChanges();
+    expect(button('Quitando…')).toBeUndefined();
+    expect(button('Subir imagen')?.disabled).toBeFalse();
+  });
+
   it('shows why when the server refuses the image, and keeps the logo it had', async () => {
     branding.use('v1');
     fixture.detectChanges();
 
     const request = await upload(await picture(100, 100));
     request.flush({ message: 'El logo debe ser una imagen PNG, JPG o WebP.' }, { status: 400, statusText: 'Bad Request' });
-    await until(() => el.querySelector('[role=alert]') !== null);
+    await until(() => el.querySelector('.alert-error') !== null);
     fixture.detectChanges();
 
-    expect(el.querySelector('[role=alert]')?.textContent).toContain('El logo debe ser una imagen PNG, JPG o WebP.');
+    expect(el.querySelector('.alert-error')?.textContent).toContain('El logo debe ser una imagen PNG, JPG o WebP.');
     expect(branding.logoUrl()).toBe('/api/branding/logo?v=v1');
+    // Said at once as it comes: it was an alert that came with its words, which a screen reader may not read.
+    expect(el.querySelector('.alert-error')!.closest('[role=alert], [role=status], [aria-live]')).toBeNull();
+    expect(said()).toEqual(['El logo debe ser una imagen PNG, JPG o WebP.']);
+    expect(TestBed.inject(Announcer).said()[0].politeness).toBe('assertive');
   });
 
   it('sends nothing for a file that is not an image, and says why', async () => {
     choose(new File(['hola'], 'notas.txt', { type: 'text/plain' }));
-    await until(() => el.querySelector('[role=alert]') !== null);
+    await until(() => el.querySelector('.alert-error') !== null);
     fixture.detectChanges();
 
-    expect(el.querySelector('[role=alert]')?.textContent).toContain('El archivo no es una imagen que se pueda leer.');
+    expect(el.querySelector('.alert-error')?.textContent).toContain('El archivo no es una imagen que se pueda leer.');
+    expect(said()).toEqual(['El archivo no es una imagen que se pueda leer.']);
     http.expectNone('/api/branding/logo');
   });
 

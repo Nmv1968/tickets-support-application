@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, model, signal } from '@angular/core';
 import { Icon } from '../../core/icon';
+import { SoftDisabled } from '../../core/soft-disabled';
 
 export type ColumnId =
   | 'code'
@@ -31,13 +32,13 @@ export interface Column {
 }
 
 /** The least a column without a width of its own gets. Below that the table scrolls sideways. */
-const SHARED_MIN_WIDTH = 160;
+const SHARED_MIN_WIDTH = 120;
 
 /**
  * Every column the case list can show, in the order the table has them. The widths are as tight
  * as their content allows, cells padded 8 px a side: the columns a person starts with have to
- * fit a laptop screen without scrolling sideways (1366 px wide, with the menu at its side), and
- * still leave Descripción and Observación room to be read.
+ * fit a laptop screen without scrolling sideways (1280 px wide, with the menu at its side and the
+ * scrollbar of a long list), and still leave Descripción and Observación room to be read.
  *
  * What sets each one: the "Archivado" badge under the code, a date, the widest status badge, a
  * support type of some twenty letters, and the header itself for the ones with little to say.
@@ -46,19 +47,19 @@ const SHARED_MIN_WIDTH = 160;
 export const COLUMNS: readonly Column[] = [
   { id: 'code', label: 'Código', width: 88 },
   { id: 'date', label: 'Fecha del caso', hint: 'Día en que el cliente reportó el problema', width: 100 },
-  { id: 'createdAt', label: 'Registro', hint: 'Día en que se registró el ticket en este sistema. Automática', width: 88 },
-  { id: 'company', label: 'Empresa', width: 136 },
+  { id: 'createdAt', label: 'Registro', hint: 'Día en que se registró el ticket en este sistema. Automática', width: 92 },
+  { id: 'company', label: 'Empresa', width: 128 },
   { id: 'description', label: 'Descripción', width: null },
-  { id: 'status', label: 'Estado', width: 96 },
-  { id: 'assignee', label: 'Responsable', width: 116 },
+  { id: 'status', label: 'Estado', width: 104 },
+  { id: 'assignee', label: 'Responsable', width: 112 },
   { id: 'priority', label: 'Prioridad', width: 92 },
   { id: 'module', label: 'Módulo', width: 142 },
-  { id: 'supportTypes', label: 'Tipos de soporte', width: 128 },
+  { id: 'supportTypes', label: 'Tipos de soporte', width: 120 },
   { id: 'promisedDate', label: 'Promesa de entrega', hint: 'Día en que se le prometió al cliente tener el caso resuelto', width: 140 },
   { id: 'dueAt', label: 'Fecha límite', hint: 'Fecha límite del caso según el SLA de su prioridad', width: 124 },
   { id: 'estimatedMinutes', label: 'Tiempo estimado', width: 120 },
   { id: 'spentMinutes', label: 'Tiempo real', width: 96 },
-  { id: 'lastNote', label: 'Observación', hint: 'La última observación del caso', width: null },
+  { id: 'lastNote', label: 'Observación', hint: 'La última observación del caso, y a su lado cuántas tiene cuando son más de una', width: null },
   { id: 'createdBy', label: 'Registrado por', width: 132 },
   { id: 'lastActivityAt', label: 'Última actividad', hint: 'Último cambio, observación o adjunto del caso', width: 124 },
 ];
@@ -100,12 +101,12 @@ export function tableWidth(columns: readonly Column[]): number {
  */
 @Component({
   selector: 'app-ticket-columns',
-  imports: [Icon],
+  imports: [Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'relative', '(document:pointerdown)': 'onPointerDown($event)', '(document:keydown.escape)': 'onEscape()' },
+  host: { class: 'relative', '(document:pointerdown)': 'onPointerDown($event)', '(document:keydown.escape)': 'onEscape($event)', '(focusout)': 'onFocusOut($event)' },
   template: `
     <!-- On a phone it shows only its icon, so it carries its name apart from the text. -->
-    <button type="button" class="btn btn-soft" aria-label="Columnas" title="Elegir qué columnas ver" aria-controls="ticket-columns" [attr.aria-expanded]="open()" (click)="open.set(!open())">
+    <button type="button" class="btn btn-soft btn-icon" aria-label="Columnas" title="Elegir qué columnas ver" aria-controls="ticket-columns" [attr.aria-expanded]="open()" (click)="open.set(!open())">
       <app-icon name="view-column-outline" class="text-base" />
       <span class="hidden sm:inline">Columnas</span>
     </button>
@@ -125,7 +126,8 @@ export function tableWidth(columns: readonly Column[]): number {
         </div>
         <div class="mt-1 flex items-center gap-2 border-t border-line px-2 pt-1.5">
           <p class="flex-1 text-2xs text-muted">Se guarda solo para tu usuario.</p>
-          <button type="button" class="btn btn-ghost px-2 py-1 text-xs" [disabled]="isDefault()" title="Volver a las columnas iniciales" (click)="reset()">
+          <!-- Keeps the focus once the columns are the initial ones again. -->
+          <button type="button" class="btn btn-ghost px-2 py-1 text-xs" [appSoftDisabled]="isDefault()" title="Volver a las columnas iniciales" (click)="reset()">
             <app-icon name="restore" />
             Restablecer
           </button>
@@ -162,9 +164,23 @@ export class TicketColumnsMenu {
     if (this.open() && !this.host.contains(event.target as Node)) this.open.set(false);
   }
 
-  /** Escape closes it. The focus goes back to its button: on a checkbox it would be lost with the list. */
-  protected onEscape(): void {
+  /**
+   * The focus left the button and its list: the list closes, as the export menu does. Not when the
+   * focus goes nowhere: Safari gives a pressed checkbox or button no focus.
+   */
+  protected onFocusOut(event: FocusEvent): void {
+    const next = event.relatedTarget;
+    if (this.open() && next instanceof Node && !this.host.contains(next)) this.open.set(false);
+  }
+
+  /**
+   * Escape closes it, and takes the key (stopped): an error toast waits for the next one (see
+   * Toasts). The focus goes back to its button: on a checkbox it would be lost with the list.
+   */
+  protected onEscape(event: Event): void {
     if (!this.open()) return;
+    event.stopPropagation();
+    event.preventDefault();
     this.open.set(false);
     this.host.querySelector('button')?.focus();
   }

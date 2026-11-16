@@ -3,6 +3,7 @@ import type { Signal } from '@angular/core';
 import { Catalogs } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
 import { Icon } from '../../core/icon';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { Toast } from '../../core/toast';
 
 /** What a catalog tab of Configuración does with its writes (see catalogTab). */
@@ -69,16 +70,21 @@ export function catalogTab(): CatalogTab {
   };
 }
 
+let rows = 0;
+
 /**
  * The end of a row of a catalog: how many cases the entry has, whether it is inactive, and the
- * buttons to deactivate or activate it and to delete it. An entry with cases cannot be deleted:
- * its trash is disabled, and says what to do instead.
+ * buttons to deactivate or activate it and to delete it, each named with the entry ("Desactivar
+ * Acme"): a list of them all said "Desactivar". An entry with cases cannot be deleted: its trash
+ * says what to do instead, and stays within reach of the keyboard to say it (aria-disabled, with
+ * the reason as its description; the help of the tab says it on screen). Pressed, it says it in a
+ * toast, as the API would have refused it: its title shows only under a mouse that stays on it.
  *
  * Kept together: on a narrow screen the whole group goes under the name, to the right.
  */
 @Component({
   selector: 'app-catalog-entry-actions',
-  imports: [Icon],
+  imports: [Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'ml-auto flex items-center gap-2' },
   template: `
@@ -87,21 +93,28 @@ export function catalogTab(): CatalogTab {
     @if (!e.active) {
       <span class="badge bg-elevated text-muted">{{ inactiveLabel() }}</span>
     }
-    <button type="button" class="btn btn-soft px-2 py-1 text-xs" [disabled]="busy()" (click)="toggled.emit()">{{ e.active ? 'Desactivar' : 'Activar' }}</button>
+    <button type="button" class="btn btn-soft px-2 py-1 text-xs" [appSoftDisabled]="busy()" [attr.aria-label]="(e.active ? 'Desactivar ' : 'Activar ') + name()" (click)="toggled.emit()">
+      {{ e.active ? 'Desactivar' : 'Activar' }}
+    </button>
     <button
       type="button"
-      class="btn btn-ghost px-2 py-1 text-danger disabled:text-muted"
-      [disabled]="busy() || e.tickets > 0"
+      class="btn btn-ghost btn-icon px-2 py-1 text-danger aria-disabled:text-muted"
+      [appSoftDisabled]="busy() || e.tickets > 0"
       [title]="e.tickets > 0 ? inUse() : 'Eliminar'"
       [attr.aria-label]="removeLabel()"
+      [attr.aria-describedby]="e.tickets > 0 ? inUseId : null"
       (click)="removed.emit()"
+      (refused)="sayInUse()"
     >
       <app-icon name="trash-can-outline" class="text-base leading-none" />
     </button>
+    <span hidden [id]="inUseId">{{ inUse() }}</span>
   `,
 })
 export class CatalogEntryActions {
   readonly entry = input.required<{ active: boolean; tickets: number }>();
+  /** The name of the entry, which names its buttons. */
+  readonly name = input.required<string>();
   readonly busy = input(false);
   /** The badge of an inactive entry, in the gender of its noun: "Inactiva", "Inactivo". */
   readonly inactiveLabel = input.required<string>();
@@ -111,4 +124,12 @@ export class CatalogEntryActions {
   readonly removeLabel = input.required<string>();
   readonly toggled = output<void>();
   readonly removed = output<void>();
+
+  protected readonly inUseId = `catalog-in-use-${++rows}`;
+  private readonly toast = inject(Toast);
+
+  /** The trash of an entry with cases was pressed: why it cannot be deleted, and what to do instead. Not while a write is on its way. */
+  protected sayInUse(): void {
+    if (this.entry().tickets > 0 && !this.busy()) this.toast.error(this.inUse());
+  }
 }

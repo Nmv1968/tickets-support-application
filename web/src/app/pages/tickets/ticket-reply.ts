@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input
 import { FormsModule } from '@angular/forms';
 import { Auth } from '../../core/auth';
 import { Icon } from '../../core/icon';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { Toast } from '../../core/toast';
 import { copyText } from '../../core/ui';
 
@@ -12,15 +13,25 @@ import { copyText } from '../../core/ui';
  */
 @Component({
   selector: 'app-ticket-reply',
-  imports: [FormsModule, Icon],
+  imports: [FormsModule, Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     <section class="rounded-card border border-line p-3">
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <h2 class="section-title mr-auto">Respuesta para el cliente</h2>
-        <!-- Not with unsaved changes: the AI writes from the stored case (see TicketPanel.generateReply). -->
-        <button type="button" class="btn btn-soft px-2 py-1 text-xs" [disabled]="replying() || !aiReady() || unsaved()" [title]="help()" (click)="generate.emit()">
+        <!--
+          Not with unsaved changes: the AI writes from the stored case (see TicketPanel.generateReply).
+          Reached by the keyboard while it cannot be used, and tied to the line under the box that says why.
+        -->
+        <button
+          type="button"
+          class="btn btn-soft px-2 py-1 text-xs"
+          [appSoftDisabled]="replying() || !aiReady() || unsaved()"
+          [attr.aria-describedby]="aiHint() ? 'reply-ai-hint' : null"
+          [title]="help()"
+          (click)="generate.emit()"
+        >
           <app-icon [name]="replying() ? 'loading' : 'creation-outline'" />
           {{ replying() ? 'Redactando…' : storedReply() ? 'Volver a generar' : 'Generar con IA' }}
         </button>
@@ -39,8 +50,8 @@ import { copyText } from '../../core/ui';
       ></textarea>
       <p class="mt-1 text-2xs text-muted">
         Revisa el mensaje antes de enviarlo. Puedes editarlo; se guarda con el caso al pulsar Actualizar.
-        @if (unsaved() && aiReady()) {
-          Para redactarlo con IA, actualiza o descarta antes los cambios: la IA lee el caso guardado.
+        @if (aiHint(); as hint) {
+          <span id="reply-ai-hint">{{ hint }}</span>
         }
       </p>
     </section>
@@ -67,6 +78,15 @@ export class TicketReply {
     // Configuración > IA is a tab of administrators: an agent is told who turns the AI on.
     if (!this.aiReady()) return this.auth.isAdmin() ? 'Activa un proveedor en Configuración > IA' : 'Un administrador debe activar un proveedor en Configuración > IA';
     return this.unsaved() ? 'Actualiza o descarta los cambios primero: la IA redacta con el caso guardado' : 'Redacta el mensaje con el caso y sus observaciones';
+  });
+  /** Why "Generar con IA" cannot be used, written under the box: a tooltip is out of reach of a keyboard and of a finger. */
+  protected readonly aiHint = computed(() => {
+    if (!this.aiReady()) {
+      return this.auth.isAdmin()
+        ? 'Para redactarlo con IA, activa un proveedor en Configuración > IA.'
+        : 'Para redactarlo con IA, un administrador debe activar un proveedor en Configuración > IA.';
+    }
+    return this.unsaved() ? 'Para redactarlo con IA, actualiza o descarta antes los cambios: la IA lee el caso guardado.' : '';
   });
   protected readonly copied = signal(false);
   /** Takes the "Copiado" of the button away again. */

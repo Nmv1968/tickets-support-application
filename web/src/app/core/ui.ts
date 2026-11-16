@@ -1,5 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import type { Priority, PromiseState, Role, TicketStatus } from './api';
+import type { IconName } from './icons';
 
 export const STATUSES: TicketStatus[] = ['UNRESOLVED', 'PENDING', 'RESOLVED'];
 
@@ -38,6 +39,18 @@ export const PRIORITY_CLASS: Record<Priority, string> = {
   MEDIUM: 'text-primary',
   HIGH: 'text-warning',
   CRITICAL: 'text-danger',
+};
+
+/**
+ * The icon of each priority: a shape of its own, and not only a colour of its own, so that the
+ * priority of a case can be told without telling the colours apart. From a hollow flag to the
+ * octagon of a stop.
+ */
+export const PRIORITY_ICON: Record<Priority, IconName> = {
+  LOW: 'flag-outline',
+  MEDIUM: 'flag',
+  HIGH: 'alert',
+  CRITICAL: 'alert-octagon',
 };
 
 /**
@@ -93,6 +106,14 @@ export const PROMISE_CLASS: Record<PromiseState, string> = {
   today: 'text-warning',
   soon: 'text-primary',
   later: 'text-muted',
+};
+
+/** The icon of each state of a delivery promise: past it, today, or still to come. As with the priority, not only a colour. */
+export const PROMISE_ICON: Record<PromiseState, IconName> = {
+  overdue: 'calendar-alert-outline',
+  today: 'calendar-today-outline',
+  soon: 'calendar-clock-outline',
+  later: 'calendar-clock-outline',
 };
 
 /** "venció hace 2 días", "vence hoy", "vence mañana", "vence en 3 días", from a `YYYY-MM-DD` promised date. */

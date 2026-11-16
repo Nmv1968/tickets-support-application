@@ -13,32 +13,61 @@
 }
 
 /*
- * Brand palette.
- * `static` keeps every variable in the output even when no class uses it: the charts read
- * the colours from script (see Theme.palette).
+ * Screens too low for the bars and the footers that stay in view: a phone on its side, a page
+ * zoomed to 400 % (200 px high). There they scroll away with the content instead of taking
+ * most of the screen.
  */
+@custom-variant short {
+  @media (max-height: 30rem) {
+    @slot;
+  }
+}
+
 @theme static {
+  /*
+   * `xs:` the narrowest screen where two fields side by side still show a value of some thirty
+   * letters (a responsible, a module) on three lines at most, without cutting a word in two. Below
+   * it, a select in half of a phone was some 55 px wide inside: "Contabil-idad gener…". The forms
+   * of two columns (the case, a new case, the AI draft, the filters) have one there.
+   */
+  --breakpoint-xs: 26rem;
   --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   /* One step below text-xs, for hints and captions. Size only: the line height is inherited. */
   --text-2xs: 0.6875rem;
-  --color-primary: #0c7beb;
-  --color-primary-strong: #0a5fc2;
-  --color-success: #12b76a;
-  --color-warning: #f5a524;
-  --color-danger: #e5484d;
   --radius-card: 14px;
   --radius-control: 10px;
   --shadow-card: 0 8px 24px -18px rgba(16, 24, 44, 0.25);
 }
 
-/* Surface colours switch with the theme, so templates need no `dark:` variants. */
+/*
+ * Every colour switches with the theme, so templates need no `dark:` variants. Each one is read
+ * as small text on the surfaces of the app (4.5:1 or more on the page, the surface and the
+ * elevated grey, in both themes; see styles.spec.ts):
+ *
+ * - `primary`, `success`, `warning`, `danger`: text, icons, borders and tints (`bg-danger/10`).
+ * - `primary-fill`, `danger-fill`: the background of white text (a primary button, the active
+ *   menu entry, the header of the table, a count badge), 4.5:1 or more with it. `primary-strong`
+ *   is the fill under the pointer.
+ * - `control-line`: the edge of a field, a select or a switch, which the person has to find
+ *   (3:1 or more against what is around it). `line` is the softer one of a divider.
+ *
+ * The charts have colours of their own (`--chart-*`), read from script (see Theme.palette).
+ */
 @theme inline {
   --color-page: var(--app-page);
   --color-surface: var(--app-surface);
   --color-elevated: var(--app-elevated);
   --color-line: var(--app-line);
+  --color-control-line: var(--app-control-line);
   --color-ink: var(--app-ink);
   --color-muted: var(--app-muted);
+  --color-primary: var(--app-primary);
+  --color-primary-fill: var(--app-primary-fill);
+  --color-primary-strong: var(--app-primary-strong);
+  --color-success: var(--app-success);
+  --color-warning: var(--app-warning);
+  --color-danger: var(--app-danger);
+  --color-danger-fill: var(--app-danger-fill);
 }
 
 :root {
@@ -47,8 +76,16 @@
   --app-surface: #ffffff;
   --app-elevated: #eef1f6;
   --app-line: #dbe4f3;
+  --app-control-line: #7c8597;
   --app-ink: #10182c;
   --app-muted: #5b6472;
+  --app-primary: #0a5fc2;
+  --app-primary-fill: #0a5fc2;
+  --app-primary-strong: #084a96;
+  --app-success: #0a6b3f;
+  --app-warning: #8a5a00;
+  --app-danger: #c42b31;
+  --app-danger-fill: #c42b31;
 
   --st-resolved-bg: #d9f3e6;
   --st-resolved-fg: #0a6b3f;
@@ -57,8 +94,16 @@
   --st-unresolved-bg: #fbdcdd;
   --st-unresolved-fg: #b4282d;
 
-  /* Chart slice for what has no value (cases without priority). The same grey in both themes, so .dark does not repeat it. */
-  --chart-neutral: #9b9b9f;
+  /*
+   * The charts: 3:1 or more against the card they are drawn on. The three statuses go from dark to
+   * light (unresolved, resolved, pending) in both themes, so their bars differ by more than their hue.
+   * `neutral` is for what has no value (cases without priority, without a type).
+   */
+  --chart-primary: #0a5fc2;
+  --chart-resolved: #0a7d4b;
+  --chart-pending: #b7791f;
+  --chart-unresolved: #9f1d23;
+  --chart-neutral: #868b95;
 }
 
 .dark {
@@ -67,8 +112,17 @@
   --app-surface: #1a1a1d;
   --app-elevated: #232326;
   --app-line: #313135;
+  --app-control-line: #74747a;
   --app-ink: #ededed;
   --app-muted: #9b9b9f;
+  --app-primary: #4ea1f7;
+  /* Lighter than the one of the light theme: a switch that is on keeps 3:1 against the dark surface. */
+  --app-primary-fill: #1f6fd1;
+  --app-primary-strong: #0a5fc2;
+  --app-success: #12b76a;
+  --app-warning: #f5a524;
+  --app-danger: #f28487;
+  --app-danger-fill: #c42b31;
 
   --st-resolved-bg: rgba(18, 183, 106, 0.16);
   --st-resolved-fg: #4cd89a;
@@ -76,6 +130,12 @@
   --st-pending-fg: #f7bd5c;
   --st-unresolved-bg: rgba(229, 72, 77, 0.18);
   --st-unresolved-fg: #f28487;
+
+  --chart-primary: #4ea1f7;
+  --chart-resolved: #2fb37a;
+  --chart-pending: #f7c260;
+  --chart-unresolved: #d33a40;
+  --chart-neutral: #747479;
 }
 
 @layer base {
@@ -84,8 +144,15 @@
     height: 100%;
   }
 
+  /*
+   * A word longer than its box (a company name with no spaces, a URL, an error code) breaks
+   * where it has to instead of running out of its cell, card or panel. `anywhere` and not
+   * `break-word`: it also lets the box shrink below the word, so a column of a table, a card
+   * of the board or a flex item is never as wide as the longest word in it.
+   */
   body {
     @apply bg-page font-sans text-sm text-ink antialiased;
+    overflow-wrap: anywhere;
   }
 
   button {
@@ -94,12 +161,34 @@
 }
 
 @layer components {
+  /*
+   * A button that cannot be used now looks the same whether it is `disabled` or only
+   * `aria-disabled` (see SoftDisabled): the second keeps the focus while its action runs.
+   */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-control px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-control px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50;
+  }
+
+  /*
+   * A file picker drawn as a button: <label class="btn"><input type="file" class="sr-only"></label>.
+   * The focus is on the hidden input, so the button shows it.
+   */
+  .btn:has(> input:focus-visible) {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  /*
+   * The hidden input of a label (a file picker, a switch) is placed against the label: out of the
+   * flow, it was placed against the panel or the dialog, and the focus scrolled to where it was
+   * not, leaving the control it belongs to under the footer.
+   */
+  label:has(> input.sr-only) {
+    position: relative;
   }
 
   .btn-primary {
-    @apply bg-primary text-white hover:bg-primary-strong;
+    @apply bg-primary-fill text-white hover:bg-primary-strong;
   }
 
   .btn-soft {
@@ -111,11 +200,42 @@
   }
 
   .btn-danger {
-    @apply bg-danger/10 text-danger hover:bg-danger hover:text-white;
+    @apply bg-danger/10 text-danger hover:bg-danger-fill hover:text-white;
   }
 
+  /*
+   * A button that shows only its icon, on every screen or on a phone alone (Importar, Filtros): a
+   * target a finger can hit. Never less than 24 px a side (WCAG 2.5.8), and 44 px below `md`, where
+   * the app is laid out for a phone (the bar of tabs, the cards of the list). A size only: with `.btn`
+   * and its look (`btn-ghost px-2`), or alone on a bare one (the "×" of a notice). Every button of an
+   * icon has it; the "×" of a chip in a select keeps its 24 px, as high as the line of the chip.
+   */
+  .btn-icon {
+    @apply min-h-6 min-w-6 max-md:min-h-11 max-md:min-w-11;
+  }
+
+  /*
+   * Its edge is what tells the field from the card it is on, which has its colour: in
+   * `control-line`. The focus is a solid ring, which stands out from that edge.
+   */
   .input {
-    @apply w-full rounded-control border border-line bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-muted/70 focus:border-primary focus:ring-2 focus:ring-primary/20;
+    @apply w-full rounded-control border border-control-line bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-muted;
+  }
+
+  /*
+   * While the focus is anywhere in the field: a date or a time field also takes it on the button of
+   * its calendar or its clock, its last stop of the Tab key, where the field itself is not `:focus`
+   * and only the thin ring of the browser was drawn.
+   */
+  .input:focus-within {
+    border-color: var(--color-primary);
+    outline: 2px solid var(--color-primary);
+    outline-offset: -1px;
+  }
+
+  /* A field that cannot be used now looks as a select does then (.ng-select-disabled), its text still readable. */
+  .input:disabled {
+    @apply cursor-not-allowed bg-elevated text-muted;
   }
 
   .label {
@@ -135,12 +255,15 @@
   }
 
   .nav-link.active {
-    @apply bg-primary text-white hover:bg-primary hover:text-white;
+    @apply bg-primary-fill text-white hover:bg-primary-fill hover:text-white;
   }
 
-  /* Switch drawn next to a visually hidden checkbox: <input class="sr-only"> <span class="toggle">. */
+  /*
+   * Switch drawn next to a visually hidden checkbox: <input class="sr-only"> <span class="toggle">.
+   * Its track and its knob stand 3:1 apart, and the track from the card, on and off.
+   */
   .toggle {
-    @apply relative inline-block h-5 w-9 shrink-0 rounded-full bg-line transition-colors;
+    @apply relative inline-block h-5 w-9 shrink-0 rounded-full bg-control-line transition-colors;
   }
 
   .toggle::after {
@@ -149,7 +272,7 @@
   }
 
   input:checked + .toggle {
-    @apply bg-primary;
+    @apply bg-primary-fill;
   }
 
   input:checked + .toggle::after {
@@ -161,12 +284,23 @@
     outline-offset: 2px;
   }
 
+  /* The label of a switch is what a finger presses: never lower than 24 px (WCAG 2.5.8), the switch is 20. */
+  label:has(> .toggle) {
+    @apply min-h-6;
+  }
+
   .tab-link {
     @apply flex flex-1 flex-col items-center gap-0.5 py-2 text-2xs text-muted;
   }
 
+  /*
+   * The tab of the screen on: a line along its top, besides the colour of its text. The primary and
+   * the muted of either theme are as light as each other (about 1:1), and told apart by their hue
+   * alone. A shadow and not a border: the bar keeps its height.
+   */
   .tab-link.active {
     @apply text-primary;
+    box-shadow: inset 0 2px 0 var(--color-primary);
   }
 
   /*
@@ -188,15 +322,47 @@
   }
 
   /*
+   * A side panel or a dialog as high as the screen at most: its header, a body that scrolls
+   * (`.overlay-body`) and its footer, both always in view. On a short screen they would leave the
+   * body a strip a few lines high, or none: there the whole panel scrolls instead, and its header,
+   * its notices and its footer go with the body, each reached in its turn.
+   */
+  .overlay {
+    @apply flex flex-col short:overflow-y-auto;
+  }
+
+  /*
+   * `relative`: what is placed out of the flow inside it (the hidden box of a switch, of a file
+   * field) scrolls with it, and the focus on it brings it into view.
+   */
+  .overlay-body {
+    @apply relative min-h-0 flex-1 overflow-auto short:flex-none short:overflow-visible;
+  }
+
+  /*
+   * A box that scrolls sideways (a wide table) shows that there is more on the right: a shadow
+   * on that edge, which the end of the content covers once it is reached. The cover moves with
+   * the content (`local`), the shadow stays on the edge (`scroll`).
+   */
+  .scroll-cue-x {
+    background:
+      linear-gradient(to left, var(--color-surface) 40%, transparent) right / 2.5rem 100% no-repeat local,
+      linear-gradient(to left, color-mix(in srgb, var(--color-ink) 18%, transparent), transparent) right / 0.875rem 100% no-repeat scroll,
+      var(--color-surface);
+  }
+
+  /*
    * One option of a segmented control: <button class="segment" [attr.aria-pressed]="…">.
    * The selected look hangs on aria-pressed, so what is drawn and what is announced cannot differ.
+   * Its line underneath tells it, not only its background and the colour of its text, which are
+   * too close to the others'.
    */
   .segment {
-    @apply rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted;
+    @apply rounded-lg border-b-2 border-transparent px-2.5 py-1.5 text-xs font-medium text-muted;
   }
 
   .segment[aria-pressed="true"] {
-    @apply bg-surface text-ink;
+    @apply border-primary bg-surface text-ink;
   }
 
   /* Small uppercase heading of a section inside a panel. */
@@ -218,9 +384,18 @@
     @apply mt-1 text-xs text-ink;
   }
 
-  /* Inline-editable cell controls: look like text until hovered or focused. */
+  /*
+   * Inline-editable cell controls: text with the line of a field under it, which tells that it can
+   * be edited. The whole edge under the pointer, and the ring of the fields with the focus.
+   */
   .cell-control {
-    @apply w-full cursor-pointer rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm text-ink outline-none hover:border-line focus:border-primary focus:bg-surface;
+    @apply w-full cursor-pointer rounded-md border border-transparent border-b-control-line bg-transparent px-1.5 py-1 text-sm text-ink outline-none hover:border-control-line focus:bg-surface;
+  }
+
+  .cell-control:focus {
+    border-color: var(--color-primary);
+    outline: 2px solid var(--color-primary);
+    outline-offset: -1px;
   }
 
   /* Status colours follow the team's spreadsheet: green, yellow, red. */
@@ -250,7 +425,7 @@
  */
 .ng-select .ng-select-container {
   /* The height of `.input`: a line of text, its padding and its border. */
-  @apply min-h-[2.375rem] items-center rounded-control border border-line bg-surface text-sm text-ink;
+  @apply min-h-[2.375rem] items-center rounded-control border border-control-line bg-surface text-sm text-ink;
 }
 
 .ng-select.ng-select-opened > .ng-select-container {
@@ -258,8 +433,16 @@
   z-index: auto;
 }
 
+/* The ring of `.input` with the focus. */
 .ng-select.ng-select-focused > .ng-select-container {
-  @apply border-primary ring-2 ring-primary/20;
+  border-color: var(--color-primary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+/* A select the form was sent without (CompanySelect `invalid`): marked as `.input` is. */
+.ng-select:has(input[aria-invalid="true"]) > .ng-select-container {
+  border-color: var(--color-danger);
 }
 
 .ng-select.ng-select-disabled > .ng-select-container {
@@ -271,12 +454,33 @@
 }
 
 .ng-select .ng-select-container .ng-value-container .ng-placeholder {
-  @apply text-muted/70;
+  @apply text-muted;
+}
+
+/* A placeholder longer than its select is cut with an ellipsis, on its one line. */
+.ng-select .ng-select-container .ng-value-container .ng-placeholder.ng-placeholder {
+  @apply truncate;
 }
 
 /* The placeholder is always in the page: it gives way to the value. */
 .ng-select .ng-has-value .ng-placeholder {
   display: none;
+}
+
+/*
+ * The value of a single select is written whole, on as many lines as it takes: some seventy
+ * letters fill three on a phone. The library cut it at the end of one line, and later three lines
+ * cut a longer one too: two companies of a group, two modules of one parent looked the same, and
+ * nothing but the list of options told which one the case had. The list of options still fits
+ * on the screen beside a select grown higher (see SelectDefaults).
+ */
+.ng-select.ng-select.ng-select-single .ng-select-container .ng-value-container,
+.ng-select.ng-select.ng-select-single .ng-select-container .ng-value-container .ng-value {
+  white-space: normal;
+}
+
+.ng-select.ng-select-single .ng-select-container .ng-value-container {
+  @apply py-1.5;
 }
 
 /* The search box of a single select lies over the value, which it replaces while the person types. */
@@ -291,29 +495,33 @@
 /*
  * A chosen value of a multiple select, as a chip. The colour is on its two parts and not on the
  * chip, so a chip drawn by a template (a support type in its own colour) is not put inside another.
+ * Each part is rounded on its own side, and the chip clips nothing: the "×" of a chip drawn by a
+ * template is a target larger than the chip.
  */
 .ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-value {
-  @apply inline-flex items-center overflow-hidden rounded-full text-xs font-medium;
+  @apply inline-flex items-center text-xs font-medium;
 }
 
 .ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-value .ng-value-icon {
-  @apply bg-elevated py-0.5 pr-1 pl-2 text-muted hover:bg-line hover:text-danger;
+  @apply rounded-l-full bg-elevated py-0.5 pr-1 pl-2 text-muted hover:bg-line hover:text-danger;
 }
 
 .ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-value .ng-value-label {
-  @apply bg-elevated py-0.5 pr-2 pl-0.5;
+  @apply rounded-r-full bg-elevated py-0.5 pr-2 pl-0.5;
 }
 
 .ng-select.ng-select-multiple.ng-select-disabled > .ng-select-container .ng-value-container .ng-value .ng-value-label {
-  @apply pl-2;
+  @apply rounded-l-full pl-2;
 }
 
+/* Out of the flow (the library places it so): kept off the arrow. */
 .ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-placeholder {
-  @apply pl-1;
+  @apply max-w-[calc(100%-2.75rem)] pl-1;
 }
 
+/* Apart from the last chip of a multiple select: a press beside its "×" does not take every chip out. */
 .ng-select .ng-select-container .ng-clear-wrapper {
-  @apply flex w-6 items-center justify-center self-stretch text-muted hover:text-danger;
+  @apply ml-1 flex w-6 items-center justify-center self-stretch text-muted hover:text-danger;
 }
 
 .ng-select .ng-select-container .ng-clear-wrapper:focus-visible {
@@ -348,18 +556,49 @@
 /*
  * The list of options. Also styled when it hangs from the body (`appendTo="body"`), where it is
  * no longer inside its select. Above the dialogs (50) and below the toasts (100).
+ *
+ * As wide as its longest option, between the width of its select (which the library sets on it,
+ * hung from the body) and a width that fits the screen: past that its options go on to more
+ * lines. SelectDefaults keeps it inside the screen on the right.
+ *
+ * What is drawn is the box of its options. The list itself is a transparent frame, whose padding
+ * is the gap to the select: the library measures the frame to choose whether the list opens
+ * above or below, and a margin would have been left out of that.
  */
 .ng-dropdown-panel.ng-dropdown-panel {
-  @apply left-0 z-60 overflow-hidden rounded-control border border-line bg-surface text-sm text-ink;
-  box-shadow: 0 12px 28px -12px rgba(16, 24, 44, 0.45);
+  @apply left-0 z-60 py-1 text-sm text-ink;
+  min-width: 100%;
+  width: max-content !important;
+  max-width: min(24rem, calc(100vw - 1.5rem)) !important;
 }
 
 .ng-dropdown-panel.ng-select-bottom {
-  @apply top-full mt-1;
+  @apply top-full;
 }
 
 .ng-dropdown-panel.ng-select-top {
-  @apply bottom-full mb-1;
+  @apply bottom-full;
+}
+
+/*
+ * The library's 240 px at most. On a short screen SelectDefaults makes it as high as the side of
+ * its select with more room allows (one option at least), and moves it over the select when not
+ * even that fits: a cap of half the screen still left a select of several lines no room on
+ * either side, and the list went past the top of a screen 200 px high.
+ */
+.ng-dropdown-panel.ng-dropdown-panel .ng-dropdown-panel-items {
+  @apply rounded-control border border-control-line bg-surface;
+  max-height: 15rem;
+  box-shadow: 0 12px 28px -12px rgba(16, 24, 44, 0.45);
+}
+
+/*
+ * Every option written whole, on as many lines as it takes: long names that start the same
+ * (two companies of one group) could not be told apart once cut with an ellipsis.
+ */
+.ng-dropdown-panel.ng-dropdown-panel .ng-dropdown-panel-items .ng-option,
+.ng-dropdown-panel.ng-dropdown-panel .ng-dropdown-panel-items .ng-optgroup {
+  white-space: normal;
 }
 
 .ng-dropdown-panel .ng-dropdown-header {
@@ -431,14 +670,21 @@
 
 @media (prefers-reduced-motion: reduce) {
   /*
-   * Pseudo-elements too: the knob of a switch slides on ::after. A single iteration, because an
-   * endless animation made this short (an icon that spins) would flicker instead of stopping.
+   * Nothing slides or fades: no transition at all. A short one was a transition of every property
+   * (the first value of `transition-property` is `all`), so a change of place or of size took a
+   * frame: the list of a select was still past the right edge of a phone when the tap that opened
+   * it ended (see SelectDefaults), which closed it. Nothing in the app waits for the end of a
+   * transition; the drag and drop of the board puts a card down at once without one.
+   *
+   * Pseudo-elements too: the knob of a switch slides on ::after. Animations run once, and short,
+   * because an endless animation made this short (an icon that spins) would flicker instead of
+   * stopping. What a stopped spinner said is then written beside it or in its button.
    */
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition: none !important;
   }
 }

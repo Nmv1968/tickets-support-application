@@ -2,13 +2,14 @@ import type { HttpTestingController } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { SAID_MS } from '../../core/announcer';
 import type { User } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { Catalogs } from '../../core/catalogs';
 import { answerCatalogs } from '../../testing/catalogs';
 import { httpTestBed } from '../../testing/http';
 import { chooseOption, ngSelect, optionTexts, openSelect, selectedTexts } from '../../testing/ng-select';
-import { buttonIn, toasts } from '../../testing/screen';
+import { buttonIn, heardOnFocus, isDisabled, said, toasts } from '../../testing/screen';
 import { textOf } from '../../testing/text';
 import { UsersTab } from './users-tab';
 
@@ -82,6 +83,15 @@ describe('UsersTab, the users in Configuración', () => {
     expect(el.textContent).toContain('Quienes atienden los casos se administran aparte, en la pestaña Responsables.');
   }));
 
+  // What "Sin contraseña" means, and what to do about it, was only in the title of the badge.
+  it('says on screen what "Sin contraseña" means and how to give one', fakeAsync(() => {
+    open();
+
+    const badge = [...el.querySelectorAll<HTMLElement>('tbody .badge')].find((element) => textOf(element) === 'Sin contraseña')!;
+    expect(badge.title).toBe('Asígnale una contraseña para que pueda ingresar.');
+    expect(textOf(el)).toContain('Un usuario inactivo no puede ingresar, ni uno «Sin contraseña» hasta que le asignes una con «Contraseña».');
+  }));
+
   // Nobody locks themselves out by accident, or takes away their own power to undo it. Their own
   // password is changed in Mi cuenta: reset from here, it would end the session that resets it.
   it('lets an administrator change the password, the role and the state of the others, not their own', fakeAsync(() => {
@@ -90,6 +100,34 @@ describe('UsersTab, the users in Configuración', () => {
     const actions = rows().map((row) => [...row.querySelectorAll('button')].map((button) => button.textContent?.trim()));
     expect(actions).toEqual([[], ['Contraseña', 'Hacer administrador', 'Desactivar'], ['Contraseña', 'Hacer administrador', 'Activar']]);
     expect(cells(rows()[0])[3]).toBe('Tu contraseña, en Mi cuenta');
+  }));
+
+  // "Desactivar", "Contraseña" and the role were said the same on every row; an inactive row was
+  // drawn at 60 %, under the contrast its text needs.
+  it('names the buttons of a row with its user, and draws an inactive one as readable as the others', fakeAsync(() => {
+    open();
+    const names = [...rows()[2].querySelectorAll('button')].map((button) => button.getAttribute('aria-label'));
+
+    expect(names).toEqual(['Contraseña de Zoe', 'Hacer administrador a Zoe', 'Activar a Zoe']);
+    expect(getComputedStyle(rows()[2]).opacity).toBe('1');
+    expect(rows()[2].querySelector('input')!.classList).toContain('text-muted');
+    expect(rows()[1].querySelector('input')!.classList).not.toContain('text-muted');
+  }));
+
+  // Its buttons gave way to the field, or the field to its buttons, and the browser put the focus nowhere.
+  it('takes the focus to the field of the new password, and back to "Contraseña" when it is cancelled', fakeAsync(() => {
+    open();
+    const ask = buttonIn(rows()[1], 'Contraseña');
+    ask.focus();
+    ask.click();
+    render();
+    const field = rows()[1].querySelector<HTMLInputElement>('input[type=password]')!;
+    expect(document.activeElement).toBe(field);
+
+    buttonIn(rows()[1], 'Cancelar').focus();
+    buttonIn(rows()[1], 'Cancelar').click();
+    render();
+    expect(document.activeElement).toBe(buttonIn(rows()[1], 'Contraseña'));
   }));
 
   // The API ends them: a token signed before is refused, and that person is back at the login screen.
@@ -140,20 +178,61 @@ describe('UsersTab, the users in Configuración', () => {
     const created: User = { id: 9, username: 'luis', name: 'Luis', active: true, canLogin: true, role: 'AGENT' };
     const submit = (): HTMLButtonElement => el.querySelector<HTMLButtonElement>('form button[type="submit"]')!;
 
-    it('needs a name, a user name of three characters and a password of six', fakeAsync(() => {
+    /** What a field says under it, and whether it is marked: its error, tied to it. */
+    function problemOf(id: string): string | null {
+      const field = el.querySelector<HTMLInputElement>(`#${id}`)!;
+      if (field.getAttribute('aria-invalid') !== 'true') return null;
+      return textOf(el.querySelector(`#${field.getAttribute('aria-describedby')}`));
+    }
+
+    // The button was disabled until all three were right, with nothing to say which one was not:
+    // it could not even be reached with Tab. The user name never said how long it had to be.
+    it('needs a name, a user name of three characters and a password of six: pressed without them, it says which, by its field', fakeAsync(() => {
       open();
-      expect(submit().disabled).toBeTrue();
+      expect(textOf(el.querySelector('label[for="user-username"]'))).toBe('Usuario (mínimo 3)');
+      expect(textOf(el.querySelector('label[for="user-password"]'))).toBe('Contraseña (mínimo 6)');
+      expect(isDisabled(submit())).toBeFalse();
+      // Nothing is said before it is pressed.
+      expect(['user-name', 'user-username', 'user-password'].map(problemOf)).toEqual([null, null, null]);
+
+      fill('user-username', 'lu');
+      submit().focus();
+      submit().click();
+      render();
+
+      expect(problemOf('user-name')).toBe('Escribe el nombre.');
+      expect(problemOf('user-username')).toBe('El usuario necesita al menos 3 caracteres.');
+      expect(problemOf('user-password')).toBe('La contraseña necesita al menos 6 caracteres.');
+      // To the first one, which says what it needs.
+      expect(document.activeElement?.id).toBe('user-name');
 
       fill('user-name', 'Luis');
-      fill('user-username', 'lu');
-      fill('user-password', 'secreto1');
-      expect(submit().disabled).toBeTrue();
-
       fill('user-username', 'luis');
-      expect(submit().disabled).toBeFalse();
+      expect(problemOf('user-name')).toBeNull();
+      expect(problemOf('user-username')).toBeNull();
+      submit().click();
+      render();
+      expect(document.activeElement?.id).toBe('user-password');
+      // Nothing was sent: http.verify() after each test.
+    }));
 
-      fill('user-password', 'corta');
-      expect(submit().disabled).toBeTrue();
+    // The focus went to the field before its message was drawn; with the focus already there, nothing was said.
+    it('gives the focus to the first field with its message already tied to it, and says the message when the focus is there', fakeAsync(() => {
+      open();
+      const name = el.querySelector<HTMLInputElement>('#user-name')!;
+      const heard = heardOnFocus(name);
+      submit().focus();
+      submit().click();
+      render();
+      expect(document.activeElement).toBe(name);
+      expect(heard).toEqual(['Escribe el nombre.']);
+      expect(said()).toEqual([]);
+
+      submit().click();
+      render();
+      expect(document.activeElement).toBe(name);
+      expect(said()).toEqual(['Escribe el nombre.']);
+      tick(SAID_MS);
     }));
 
     // Registering cases, or attending them, is not something a user is created with.

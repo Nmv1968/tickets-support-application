@@ -30,6 +30,6 @@ export class AppLogo {
   protected readonly icon = computed(() => ICON[this.size()]);
   /** A logo brings its own colours and shape: the brand-coloured square is only for the default icon. */
   protected readonly box = computed(
-    () => `grid shrink-0 place-items-center overflow-hidden rounded-control ${BOX[this.size()]} ${this.branding.logoUrl() ? '' : 'bg-primary text-white'}`,
+    () => `grid shrink-0 place-items-center overflow-hidden rounded-control ${BOX[this.size()]} ${this.branding.logoUrl() ? '' : 'bg-primary-fill text-white'}`,
   );
 }

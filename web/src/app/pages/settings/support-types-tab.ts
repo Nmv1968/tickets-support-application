@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, linkedSignal, model, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Say } from '../../core/announcer';
 import { Api } from '../../core/api';
 import type { SupportType } from '../../core/api';
 import { Catalogs, NAME_MAX } from '../../core/catalogs';
 import { Icon } from '../../core/icon';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { HEX_COLOR, TypeChip } from '../../core/type-chip';
 import { CatalogEntryActions, catalogTab } from './catalog-tab';
 
@@ -19,14 +21,14 @@ let fields = 0;
  */
 @Component({
   selector: 'app-color-field',
-  imports: [Icon],
+  imports: [Icon, Say],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     <div class="flex items-center gap-1.5">
       <input
         type="color"
-        class="h-[2.375rem] w-11 shrink-0 cursor-pointer rounded-control border border-line bg-surface p-1"
+        class="h-[2.375rem] w-11 shrink-0 cursor-pointer rounded-control border border-control-line bg-surface p-1"
         [attr.aria-label]="label()"
         [value]="color()"
         (input)="pick($event)"
@@ -50,8 +52,9 @@ let fields = 0;
       <!--
         In the colour of the text: the danger colour alone is too faint for small text. It stays in the icon and in the border.
         As wide as the two controls and no wider (w-0 min-w-full): the message wraps under them instead of pushing its neighbours aside.
+        Said at once as it comes (see Say): an alert that comes with its words may not be read.
       -->
-      <p class="mt-1 w-0 min-w-full text-xs" role="alert" [id]="errorId">
+      <p class="mt-1 w-0 min-w-full text-xs" appSay sayAs="assertive" [id]="errorId">
         <app-icon name="alert-circle-outline" class="text-danger" /> El color debe ser un código hexadecimal como #1a2b3c
       </p>
     }
@@ -113,7 +116,7 @@ export class ColorField {
 /** "Tipos de soporte": the labels a case can carry, each with a name and a colour of its own. */
 @Component({
   selector: 'app-support-types-tab',
-  imports: [FormsModule, TypeChip, ColorField, CatalogEntryActions, Icon],
+  imports: [FormsModule, TypeChip, ColorField, CatalogEntryActions, Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4">
@@ -127,7 +130,8 @@ export class ColorField {
           <span class="label">Color</span>
           <app-color-field #newColor label="Color del tipo nuevo" [(color)]="color" />
         </div>
-        <button type="submit" class="btn btn-primary sm:mt-5" [disabled]="!canCreate()"><app-icon name="plus" /> Agregar</button>
+        <!-- Keeps the focus once the type is added and the field is empty again. -->
+        <button type="submit" class="btn btn-primary sm:mt-5" [appSoftDisabled]="!canCreate()"><app-icon name="plus" /> Agregar</button>
         <p class="flex flex-wrap items-center gap-2 text-xs text-muted sm:col-span-3">
           Así se verá en los casos:
           <app-type-chip [type]="preview()" />
@@ -136,10 +140,12 @@ export class ColorField {
 
       <div class="card divide-y divide-line">
         @for (type of catalogs.supportTypes(); track type.id) {
-          <div class="flex flex-wrap items-center gap-2 px-3 py-1.5" [class.opacity-60]="!type.active">
+          <!-- An inactive type says so in its badge, and its name is in the softer colour: still readable, as the rest of the row. -->
+          <div class="flex flex-wrap items-center gap-2 px-3 py-1.5">
             <app-type-chip [type]="type" />
             <input
               class="cell-control min-w-40 flex-1 cursor-text font-medium"
+              [class.text-muted]="!type.active"
               [attr.maxlength]="nameMax"
               [value]="type.name"
               [attr.aria-label]="'Nombre del tipo ' + type.name"
@@ -148,6 +154,7 @@ export class ColorField {
             <app-color-field #field [color]="type.color" [label]="'Color de ' + type.name" (chosen)="recolor(type, $event, field)" />
             <app-catalog-entry-actions
               [entry]="type"
+              [name]="type.name"
               [busy]="tab.busy()"
               inactiveLabel="Inactivo"
               inUse="Está en casos: desactívalo o quítalo de esos casos"

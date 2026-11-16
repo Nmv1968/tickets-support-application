@@ -5,7 +5,8 @@ import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing
 import { provideRouter } from '@angular/router';
 import type { Role } from '../../core/api';
 import { Auth } from '../../core/auth';
-import { screenOf, toasts } from '../../testing/screen';
+import { isDisabled, screenOf, toasts } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { TicketReply } from './ticket-reply';
 
 interface State {
@@ -74,13 +75,13 @@ describe('TicketReply', () => {
       expect(told).toEqual(['generate']);
 
       give('storedReply', 'Ya puede imprimir.');
-      expect(button('Volver a generar').disabled).toBeFalse();
+      expect(isDisabled(button('Volver a generar'))).toBeFalse();
     }));
 
     it('says it is writing, and cannot be pressed again meanwhile', fakeAsync(() => {
       create({ replying: true });
 
-      expect(button('Redactando…').disabled).toBeTrue();
+      expect(isDisabled(button('Redactando…'))).toBeTrue();
       expect(find('button app-icon').getAttribute('data-icon')).toBe('loading');
     }));
 
@@ -89,33 +90,41 @@ describe('TicketReply', () => {
 
       expect(button('Generar con IA').title).toBe('Redacta el mensaje con el caso y sus observaciones');
       expect(el.textContent).not.toContain('Para redactarlo con IA');
+      expect(button('Generar con IA').getAttribute('aria-describedby')).toBeNull();
     }));
+
+    /** What the button says why it cannot be used: the line under the box it points at, which is on screen. */
+    const reason = (): string => textOf(el.querySelector(`#${button('Generar con IA').getAttribute('aria-describedby')}`));
 
     // The AI writes from the stored case: it would leave out what the person is changing.
     it('waits for unsaved changes to be saved or discarded, and says why', fakeAsync(() => {
       create({ unsaved: true });
 
-      expect(button('Generar con IA').disabled).toBeTrue();
+      expect(isDisabled(button('Generar con IA'))).toBeTrue();
       expect(button('Generar con IA').title).toBe('Actualiza o descarta los cambios primero: la IA redacta con el caso guardado');
-      expect(el.textContent).toContain('Para redactarlo con IA, actualiza o descarta antes los cambios: la IA lee el caso guardado.');
+      expect(reason()).toBe('Para redactarlo con IA, actualiza o descarta antes los cambios: la IA lee el caso guardado.');
     }));
 
-    it('tells an administrator where to turn it on when no AI provider is active, and nothing about the changes', fakeAsync(() => {
+    // The reason was only in the tooltip of a disabled button: a keyboard could not reach the button, nor a finger the tooltip.
+    it('tells an administrator where to turn it on when no AI provider is active, on screen and tied to the button, and nothing about the changes', fakeAsync(() => {
       signIn('ADMIN');
       create({ aiReady: false, unsaved: true });
 
-      expect(button('Generar con IA').disabled).toBeTrue();
+      expect(isDisabled(button('Generar con IA'))).toBeTrue();
+      // Within reach of the Tab key, to hear why.
+      expect(button('Generar con IA').disabled).toBeFalse();
       expect(button('Generar con IA').title).toBe('Activa un proveedor en Configuración > IA');
-      expect(el.textContent).not.toContain('Para redactarlo con IA');
+      expect(reason()).toBe('Para redactarlo con IA, activa un proveedor en Configuración > IA.');
+      expect(el.textContent).not.toContain('actualiza o descarta');
     }));
 
     // Configuración > IA is not among the tabs of an agent: they would look for it in vain.
     it('tells an agent that an administrator has to turn it on', fakeAsync(() => {
       create({ aiReady: false, unsaved: true });
 
-      expect(button('Generar con IA').disabled).toBeTrue();
+      expect(isDisabled(button('Generar con IA'))).toBeTrue();
       expect(button('Generar con IA').title).toBe('Un administrador debe activar un proveedor en Configuración > IA');
-      expect(el.textContent).not.toContain('Para redactarlo con IA');
+      expect(reason()).toBe('Para redactarlo con IA, un administrador debe activar un proveedor en Configuración > IA.');
     }));
 
     it('follows the role of the session when it changes on screen', fakeAsync(() => {
@@ -133,7 +142,7 @@ describe('TicketReply', () => {
     it('has nothing to copy while the box holds only spaces', fakeAsync(() => {
       create({ reply: '   ' });
 
-      expect(button('Copiar').disabled).toBeTrue();
+      expect(isDisabled(button('Copiar'))).toBeTrue();
     }));
 
     it('copies the reply as it is in its box, spaces around it aside, and says so for two seconds', fakeAsync(() => {

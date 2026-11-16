@@ -83,7 +83,7 @@ describe('Branding, the company logo', () => {
 
       expect(logo.querySelector('app-icon[data-icon=lifebuoy]')).not.toBeNull();
       expect(logo.querySelector('img')).toBeNull();
-      expect(logo.classList).toContain('bg-primary');
+      expect(logo.classList).toContain('bg-primary-fill');
       expect(logo.classList).toContain('size-11');
 
       branding.use('abc123');

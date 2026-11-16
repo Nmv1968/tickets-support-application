@@ -16,8 +16,8 @@ import { ReminderCard } from './reminder-card';
   host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
     <div class="panel-backdrop" (click)="closed.emit()" aria-hidden="true"></div>
-    <aside
-      class="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-line bg-surface shadow-2xl"
+    <div
+      class="overlay fixed inset-y-0 right-0 z-40 w-full max-w-md border-l border-line bg-surface shadow-2xl"
       role="dialog"
       aria-modal="true"
       aria-label="Avisos"
@@ -27,12 +27,12 @@ import { ReminderCard } from './reminder-card';
       <header class="flex items-center gap-2 border-b border-line px-4 py-3">
         <app-icon name="bell-outline" class="text-xl text-primary" />
         <h2 class="font-semibold">Avisos</h2>
-        <button type="button" class="btn btn-ghost ml-auto px-2" (click)="closed.emit()" aria-label="Cerrar" cdkFocusInitial>
+        <button type="button" class="btn btn-ghost btn-icon ml-auto px-2" (click)="closed.emit()" aria-label="Cerrar" cdkFocusInitial>
           <app-icon name="close" class="text-lg" />
         </button>
       </header>
 
-      <div class="min-h-0 flex-1 space-y-5 overflow-auto p-4">
+      <div class="overlay-body space-y-5 p-4">
         <section>
           <h3 class="section-title flex items-center gap-1.5">
             <app-icon name="calendar-clock-outline" class="text-base text-danger" />
@@ -102,20 +102,21 @@ import { ReminderCard } from './reminder-card';
       </div>
 
       @if (reminders.promises().length || reminders.stale().length) {
+        <!-- On a short screen side by side, their text on more lines: one on top of the other, they took a third of it. -->
         <footer class="flex flex-wrap gap-2 border-t border-line px-4 py-3">
           @if (reminders.promises().length) {
-            <button type="button" class="btn btn-soft flex-1" (click)="openList({ promesa: 'due' })">
+            <button type="button" class="btn btn-soft flex-1 short:whitespace-normal" (click)="openList({ promesa: 'due' })">
               <app-icon name="calendar-clock-outline" /> Ver promesas en la lista
             </button>
           }
           @if (reminders.stale().length) {
-            <button type="button" class="btn btn-soft flex-1" (click)="openList({ olvidados: 1 })">
+            <button type="button" class="btn btn-soft flex-1 short:whitespace-normal" (click)="openList({ olvidados: 1 })">
               <app-icon name="format-list-bulleted" /> Ver olvidados en la lista
             </button>
           }
         </footer>
       }
-    </aside>
+    </div>
   `,
 })
 export class RemindersPanel {

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { buttonIn } from '../testing/screen';
+import { buttonIn, said } from '../testing/screen';
 import { DialogPending } from './dialog-pending';
 
 @Component({
@@ -21,12 +21,15 @@ describe('DialogPending', () => {
     return { root: fixture.nativeElement as HTMLElement, host: fixture.componentInstance, update: () => fixture.detectChanges() };
   }
 
-  it('says that the dialog is opening, as a status read out once', () => {
+  // It was a status that came with its words: a screen reader may say nothing of one.
+  it('says that the dialog is opening, through the Announcer, as it comes', () => {
     const { root } = render();
-    const status = root.querySelector('[role=status]');
+    const card = root.querySelector('.card');
 
-    expect(status?.textContent?.trim()).toBe('Abriendo…');
-    expect(status?.querySelector('app-icon')?.getAttribute('data-icon')).toBe('loading');
+    expect(card?.textContent?.trim()).toBe('Abriendo…');
+    expect(card?.querySelector('app-icon')?.getAttribute('data-icon')).toBe('loading');
+    expect(said()).toEqual(['Abriendo…']);
+    expect(root.querySelector('[role=status], [role=alert], [aria-live]')).toBeNull();
     expect(root.querySelector('[role=alertdialog]')).toBeNull();
   });
 
@@ -38,7 +41,7 @@ describe('DialogPending', () => {
     root.querySelector<HTMLElement>('.modal-backdrop')!.click();
     expect(host.closes()).toBe(2);
 
-    root.querySelector<HTMLElement>('[role=status]')!.click();
+    root.querySelector<HTMLElement>('.card')!.click();
     expect(host.closes()).toBe(2);
   });
 
@@ -46,7 +49,8 @@ describe('DialogPending', () => {
     const { root, host } = render(true);
     const dialog = root.querySelector('[role=alertdialog]')!;
 
-    expect(root.querySelector('[role=status]')).toBeNull();
+    expect(root.textContent).not.toContain('Abriendo…');
+    expect(said()).toEqual([]);
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(root.querySelector(`#${dialog.getAttribute('aria-labelledby')}`)?.textContent?.trim()).toBe('No se pudo abrir');
     expect(root.querySelector(`#${dialog.getAttribute('aria-describedby')}`)?.textContent?.trim()).toBe(
@@ -62,7 +66,9 @@ describe('DialogPending', () => {
     host.failed.set(true);
     update();
 
-    expect(root.querySelector('[role=status]')).toBeNull();
+    // "Abriendo…" goes with what it said.
+    expect(root.textContent).not.toContain('Abriendo…');
+    expect(said()).toEqual([]);
     expect(root.querySelector('[role=alertdialog]')).not.toBeNull();
   });
 });

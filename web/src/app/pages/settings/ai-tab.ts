@@ -1,11 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Say } from '../../core/announcer';
 import { Api } from '../../core/api';
 import type { AiModel, AiProviderConfig } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
 import { Icon } from '../../core/icon';
 import { SELECT } from '../../core/select';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { Toast } from '../../core/toast';
 import { errorMessage } from '../../core/ui';
 
@@ -16,7 +18,7 @@ import { errorMessage } from '../../core/ui';
  */
 @Component({
   selector: 'app-ai-tab',
-  imports: [FormsModule, ...SELECT, Icon],
+  imports: [FormsModule, ...SELECT, Icon, Say, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="card max-w-2xl space-y-4 p-4">
@@ -69,8 +71,9 @@ import { errorMessage } from '../../core/ui';
               [placeholder]="p.hasKey && !urlChanged() ? 'Guardada ' + p.keyHint + ' — escribe otra para reemplazarla' : 'Pega aquí la API key'"
               [(ngModel)]="apiKey"
             />
+            <!-- Said as it comes (see Say), as the result of a test below: a status that comes with its words may not be read. -->
             @if (urlChanged() && !apiKey().trim()) {
-              <p class="mt-1 rounded-control bg-warning/10 px-3 py-2 text-xs" role="status">
+              <p class="mt-1 rounded-control bg-warning/10 px-3 py-2 text-xs" appSay>
                 <app-icon name="alert-outline" class="text-warning" />
                 Cambiaste la URL del servidor. La API key guardada es de la URL anterior y no se envía a otra: escríbela de nuevo. Si guardas sin
                 escribirla, la guardada se borra.
@@ -98,28 +101,28 @@ import { errorMessage } from '../../core/ui';
                   <input id="ai-model" class="input" placeholder="Carga los modelos o escribe el identificador" autocomplete="off" [(ngModel)]="model" />
                 }
               </div>
-              <button type="button" class="btn btn-soft" [disabled]="busy() !== ''" (click)="loadModels()">
+              <button type="button" class="btn btn-soft" [appSoftDisabled]="busy() !== ''" (click)="loadModels()">
                 <app-icon [name]="busy() === 'models' ? 'loading' : 'refresh'" />
-                Cargar modelos
+                {{ busy() === 'models' ? 'Cargando modelos…' : 'Cargar modelos' }}
               </button>
             </div>
             <p class="mt-1 text-2xs text-muted">La lista sale del proveedor con tu API key. Para crear casos desde fotos el modelo debe leer imágenes; "Probar" lo verifica.</p>
           </div>
 
           @if (result(); as r) {
-            <p class="rounded-control px-3 py-2" [class]="r.ok ? 'st-RESOLVED' : 'st-UNRESOLVED'" role="status">{{ r.message }}</p>
+            <p class="rounded-control px-3 py-2" [class]="r.ok ? 'st-RESOLVED' : 'st-UNRESOLVED'" [appSay]="r">{{ r.message }}</p>
           }
 
           <div class="flex flex-wrap gap-2">
-            <button type="button" class="btn btn-primary" [disabled]="busy() !== '' || !model().trim()" (click)="save(true)">
+            <button type="button" class="btn btn-primary" [appSoftDisabled]="busy() !== '' || !model().trim()" (click)="save(true)">
               {{ busy() === 'save' ? 'Guardando…' : 'Guardar y activar' }}
             </button>
-            <button type="button" class="btn btn-soft" [disabled]="busy() !== '' || !model().trim()" (click)="test()">
+            <button type="button" class="btn btn-soft" [appSoftDisabled]="busy() !== '' || !model().trim()" (click)="test()">
               <app-icon [name]="busy() === 'test' ? 'loading' : 'connection'" />
               {{ busy() === 'test' ? 'Probando…' : 'Guardar y probar' }}
             </button>
             @if (p.hasKey) {
-              <button type="button" class="btn btn-ghost ml-auto" [disabled]="busy() !== ''" (click)="removeKey()">Quitar API key</button>
+              <button type="button" class="btn btn-ghost ml-auto" [appSoftDisabled]="busy() !== ''" (click)="removeKey()">Quitar API key</button>
             }
           </div>
         </div>

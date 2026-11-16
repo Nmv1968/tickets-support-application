@@ -1,7 +1,9 @@
-import { ChangeDetectionStrategy, Component, ElementRef, input, model, output, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, Injector, computed, effect, inject, input, model, output, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Ticket } from '../../core/api';
+import { focusAfterRender } from '../../core/focus';
 import { Icon } from '../../core/icon';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { formatDateTime, formatMinutes } from '../../core/ui';
 import { NO_NOT_NUMBER } from './ticket-form';
 import type { NotNumber, Problems } from './ticket-form';
@@ -13,7 +15,7 @@ import type { NotNumber, Problems } from './ticket-form';
  */
 @Component({
   selector: 'app-ticket-times',
-  imports: [FormsModule, Icon],
+  imports: [FormsModule, Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -69,7 +71,15 @@ import type { NotNumber, Problems } from './ticket-form';
       <!-- The timer runs on the stored case and acts at once, whatever the draft holds (see TicketPanel.timer). -->
       <div class="mt-3 flex flex-wrap items-center gap-2">
         @if (t.timerStartedAt) {
-          <button type="button" class="btn btn-danger" [disabled]="spentUnsaved()" (click)="timer.emit('stop')">
+          <!-- Reached by the keyboard while it cannot be used, to hear why. -->
+          <button
+            #timerButton
+            type="button"
+            class="btn btn-danger"
+            [appSoftDisabled]="spentUnsaved()"
+            [attr.aria-describedby]="spentUnsaved() ? 'tp-timer-hint' : null"
+            (click)="timer.emit('stop')"
+          >
             <app-icon name="stop" /> Detener cronómetro
           </button>
           @if (spentUnsaved()) {
@@ -78,7 +88,7 @@ import type { NotNumber, Problems } from './ticket-form';
             <span class="text-xs text-muted">En marcha desde {{ formatDateTime(t.timerStartedAt) }}</span>
           }
         } @else {
-          <button type="button" class="btn btn-soft" [disabled]="t.status === 'RESOLVED'" (click)="timer.emit('start')">
+          <button #timerButton type="button" class="btn btn-soft" [disabled]="t.status === 'RESOLVED'" (click)="timer.emit('start')">
             <app-icon name="play" /> Iniciar cronómetro
           </button>
           <span class="text-xs text-muted">Acumulado: {{ formatMinutes(t.spentMinutes) }}</span>
@@ -115,9 +125,24 @@ export class TicketTimes {
 
   private readonly estimatedBox = viewChild.required<ElementRef<HTMLInputElement>>('estimatedBox');
   private readonly spentBox = viewChild.required<ElementRef<HTMLInputElement>>('spentBox');
+  /** "Iniciar cronómetro" or "Detener cronómetro": one takes the place of the other. */
+  private readonly timerButton = viewChild<ElementRef<HTMLButtonElement>>('timerButton');
+  private readonly running = computed(() => !!this.ticket().timerStartedAt);
 
   protected readonly formatDateTime = formatDateTime;
   protected readonly formatMinutes = formatMinutes;
+
+  constructor() {
+    // The button pressed is replaced by the other one once the timer starts or stops: the focus
+    // goes to the one that takes its place.
+    const injector = inject(Injector);
+    let before: boolean | undefined;
+    effect(() => {
+      const running = this.running();
+      if (before !== undefined && running !== before) untracked(() => focusAfterRender(injector, () => this.timerButton()?.nativeElement));
+      before = running;
+    });
+  }
 
   /**
    * Called with what the person does in the two fields, to tell whether one holds a text that is

@@ -5,10 +5,12 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
 
 /**
- * From this width on, a screen is wide: Tailwind's `md`, which styles.css leaves as it comes
- * (48rem, 768 px at the browser's usual text size). The classes `md:` of the page switch there too.
+ * From this width on, a screen is wide: Tailwind's `lg`, which styles.css leaves as it comes
+ * (64rem, 1024 px at the browser's usual text size). The classes `lg:` of the page switch there too.
+ * Not `md` (768 px), where the menu of the app moves to the side: a tablet held upright, less
+ * that menu, showed a third of the table of cases.
  */
-export const WIDE_SCREEN = '(min-width: 48rem)';
+export const WIDE_SCREEN = '(min-width: 64rem)';
 
 /**
  * Whether the screen is wide (see WIDE_SCREEN), as it is now and as it changes: a window resized,

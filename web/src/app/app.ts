@@ -1,16 +1,19 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { Announcements } from './core/announcer';
 import { Branding } from './core/branding';
 import { Theme } from './core/theme';
 import { Toasts } from './core/toast';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, Toasts],
+  imports: [RouterOutlet, Toasts, Announcements],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <router-outlet />
     <app-toasts />
+    <!-- What is said to who uses a screen reader without anything on screen (see Announcer): on every page, from the start. -->
+    <app-announcements />
   `,
 })
 export class App {

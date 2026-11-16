@@ -2,12 +2,13 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
+import { Announcer, SAID_MS } from '../../core/announcer';
 import type { AiProviderConfig } from '../../core/api';
 import { Confirm } from '../../core/confirm';
 import { Toast } from '../../core/toast';
 import { httpTestBed } from '../../testing/http';
 import { chooseOption, clearSelect, ngSelect, optionTexts, selectedTexts } from '../../testing/ng-select';
-import { buttonIn } from '../../testing/screen';
+import { buttonIn, isDisabled, said } from '../../testing/screen';
 import { textOf } from '../../testing/text';
 import { AiTab } from './ai-tab';
 
@@ -55,7 +56,7 @@ describe('AiTab, the server URL of a provider that has a stored key', () => {
     render();
   }
 
-  const warning = (): HTMLElement | null => el.querySelector('p[role=status]');
+  const warning = (): HTMLElement | null => Array.from(el.querySelectorAll<HTMLElement>('p')).find((p) => p.textContent?.includes('Cambiaste la URL del servidor')) ?? null;
 
   it('says nothing while the URL is the one the key was stored with', fakeAsync(() => {
     open();
@@ -73,9 +74,15 @@ describe('AiTab, the server URL of a provider that has a stored key', () => {
     write('#ai-url', 'https://api.groq.com/openai/v1');
 
     const notice = warning()!;
-    expect(textOf(notice)).toBe(
-      'Cambiaste la URL del servidor. La API key guardada es de la URL anterior y no se envía a otra: escríbela de nuevo. Si guardas sin escribirla, la guardada se borra.',
-    );
+    const words =
+      'Cambiaste la URL del servidor. La API key guardada es de la URL anterior y no se envía a otra: escríbela de nuevo. Si guardas sin escribirla, la guardada se borra.';
+    expect(textOf(notice)).toBe(words);
+    // Said as it comes: it was a status that came with its words, which a screen reader may not read.
+    expect(said()).toEqual([words]);
+    expect(notice.closest('[role=status], [role=alert], [aria-live]')).toBeNull();
+    // Typing on in the URL says nothing more.
+    write('#ai-url', 'https://api.groq.com/openai/v2');
+    expect(said()).toEqual([words]);
     // As the other notices: the text in the colour and size of the text around it, the warning
     // colour only in the background and in the icon.
     const style = getComputedStyle(notice);
@@ -86,6 +93,7 @@ describe('AiTab, the server URL of a provider that has a stored key', () => {
 
     write('#ai-key', 'sk-otra');
     expect(warning()).toBeNull();
+    expect(said()).toEqual([]);
   }));
 });
 
@@ -156,6 +164,37 @@ describe('AiTab, the model of a provider', () => {
     tick(3000);
   }));
 
+  // The result was a status that came with its words, which a screen reader may not read.
+  it('says what loading the models found as it comes, and again for each new try', fakeAsync(() => {
+    open();
+    const say = spyOn(TestBed.inject(Announcer), 'say').and.callThrough();
+    loadModels([{ id: 'vision-1', name: 'Visión 1', vision: true }]);
+    const result = Array.from(el.querySelectorAll<HTMLElement>('p')).find((p) => p.textContent?.includes('La API key es válida'))!;
+    expect(result.closest('[role=status], [role=alert], [aria-live]')).toBeNull();
+    expect(said()).toEqual(['La API key es válida. 1 modelos disponibles.']);
+
+    // The same words again, for another try: said again, and the ones before are gone.
+    loadModels([{ id: 'vision-1', name: 'Visión 1', vision: true }]);
+    expect(said()).toEqual(['La API key es válida. 1 modelos disponibles.']);
+    expect(say).toHaveBeenCalledTimes(2);
+    tick(SAID_MS);
+    expect(said()).toEqual([]);
+  }));
+
+  // Its icon that turns was all that said it, and it stands still with less motion asked for.
+  it('says in words that it is loading the models, until they arrive', fakeAsync(() => {
+    open();
+    button('Cargar modelos').click();
+    render();
+    expect(isDisabled(button('Cargando modelos…'))).toBeTrue();
+    expect(() => button('Cargar modelos')).toThrowError();
+
+    http.expectOne({ method: 'POST', url: '/api/ai/models' }).flush([{ id: 'vision-1', name: 'Visión 1', vision: true }]);
+    tick();
+    render();
+    expect(isDisabled(button('Cargar modelos'))).toBeFalse();
+  }));
+
   // A model has to be chosen: the select cannot be left empty once it has one.
   it('has none chosen when the one saved is not among the models loaded, and cannot be saved until one is', fakeAsync(() => {
     open();
@@ -164,11 +203,11 @@ describe('AiTab, the model of a provider', () => {
 
     expect(selectedTexts(select)).toEqual([]);
     expect(select.textContent).toContain('Elige un modelo');
-    expect(button('Guardar y activar').disabled).toBeTrue();
+    expect(isDisabled(button('Guardar y activar'))).toBeTrue();
 
     chooseOption(select, 'Visión 1 · lee imágenes');
     render();
-    expect(button('Guardar y activar').disabled).toBeFalse();
+    expect(isDisabled(button('Guardar y activar'))).toBeFalse();
     expect(() => clearSelect(select)).toThrowError();
   }));
 });

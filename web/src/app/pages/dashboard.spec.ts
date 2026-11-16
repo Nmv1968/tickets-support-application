@@ -2,12 +2,17 @@ import type { HttpTestingController, TestRequest } from '@angular/common/http/te
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed } from '@angular/core/testing';
 import { Chart } from 'chart.js';
+import type { CartesianScaleOptions, FontSpec } from 'chart.js';
+import { toFont } from 'chart.js/helpers';
+import { Announcer } from '../core/announcer';
 import type { Dashboard } from '../core/api';
+import { STATUS_DELAY_MS } from '../core/status';
 import { Theme } from '../core/theme';
 import { TicketEvents } from '../core/ticket-events';
 import { todayIso } from '../core/ui';
 import { httpTestBed } from '../testing/http';
-import { buttonIn, nextTask, toasts } from '../testing/screen';
+import { buttonIn, isDisabled, nextTask, said, toasts } from '../testing/screen';
+import { resizeScreen } from '../testing/viewport';
 import { DashboardPage } from './dashboard';
 
 const DATA: Dashboard = {
@@ -94,21 +99,45 @@ describe('DashboardPage', () => {
     fixture.detectChanges();
   }
 
+  // Which date was "Desde" and which "Hasta" was only in their titles, and what each report holds only in the titles of its buttons.
+  it('writes the word of each date of the period beside it, and what each report holds behind a "?"', async () => {
+    await open();
+    for (const field of ['Desde', 'Hasta']) {
+      const input = el.querySelector<HTMLInputElement>(`input[aria-label="${field}"]`)!;
+      expect(input.labels?.length).toBe(1);
+      expect(input.labels![0].textContent?.trim()).toBe(field);
+    }
+    const group = el.querySelector<HTMLElement>('[role=group][aria-label="Descargar el reporte"]')!;
+    const help = group.querySelector<HTMLButtonElement>('button[aria-label="Ayuda sobre Descargar el reporte"]')!;
+    const text = el.querySelector<HTMLElement>(`#${group.getAttribute('aria-describedby')}`)!;
+    expect(help.getAttribute('aria-describedby')).toBe(text.id);
+    expect(text.textContent?.trim()).toBe('Excel: el reporte con una hoja de datos para tablas dinámicas o Power BI. PDF: el reporte para leer o imprimir.');
+  });
+
   describe('"Casos por prioridad"', () => {
     /** The colour of each slice of the chart on screen. */
     const slices = (): unknown => chart('Casos por prioridad')?.data.datasets[0].backgroundColor;
 
     // It was drawn in the grey of the secondary text, which is dark slate in the light theme: the
-    // slice that says the least stood out the most.
-    it('draws the slice of the cases without priority in the same light grey in both themes', async () => {
+    // slice that says the least stood out the most. The light grey that took its place was 2.8:1
+    // against the card: now a grey of the charts, softer than any slice and 3:1 against the card.
+    it('draws the slice of the cases without priority in the neutral grey of the charts, in each theme', async () => {
       await open();
       expect(theme.palette().muted).toBe('#5b6472');
-      expect(slices()).toEqual(['#f5a524', '#9b9b9f']);
+      expect(slices()).toEqual(['#b7791f', '#868b95']);
 
       theme.toggle();
       fixture.detectChanges();
       expect(theme.palette().muted).toBe('#9b9b9f');
-      expect(slices()).toEqual(['#f5a524', '#9b9b9f']);
+      expect(slices()).toEqual(['#f7c260', '#747479']);
+    });
+
+    // The slices touched: told apart by their colours alone.
+    it('separates the slices with a line in the colour of the card', async () => {
+      await open();
+      const dataset = chart('Casos por prioridad')?.data.datasets[0];
+      expect(dataset?.borderColor).toBe('#ffffff');
+      expect(dataset?.borderWidth).toBe(2);
     });
   });
 
@@ -125,7 +154,7 @@ describe('DashboardPage', () => {
 
       expect(types()?.data.labels).toEqual(['Falla del sistema', 'Capacitación', 'Sin tipo']);
       expect(types()?.data.datasets[0].data).toEqual([3, 2, 1]);
-      expect(types()?.data.datasets[0].backgroundColor).toEqual(['#b91c1c', '#12b76a', '#9b9b9f']);
+      expect(types()?.data.datasets[0].backgroundColor).toEqual(['#b91c1c', '#12b76a', '#868b95']);
       // A case with two types is in two bars: the chart says so, since its bars add up to more than the total.
       expect(el.textContent).toContain('Un caso con varios tipos cuenta en cada uno.');
     });
@@ -138,7 +167,7 @@ describe('DashboardPage', () => {
 
       theme.toggle();
       fixture.detectChanges();
-      expect(types()?.data.datasets[0].backgroundColor).toEqual(['#b91c1c', '#12b76a', '#9b9b9f']);
+      expect(types()?.data.datasets[0].backgroundColor).toEqual(['#b91c1c', '#12b76a', '#747479']);
       expect(types()?.data.datasets[0].borderColor).toBe('#9b9b9f');
       expect(types()?.data.datasets[0].borderWidth).toBe(1);
     });
@@ -229,6 +258,23 @@ describe('DashboardPage', () => {
       again.flush(DATA);
       await show();
       expect(indicator('Total')).toBe('5');
+    });
+
+    // What the box counts was only in the title of its label.
+    it('says what the box counts with its "?", which the box is described by', async () => {
+      create();
+      read().flush(DATA);
+      await show();
+      const help = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[aria-label="Ayuda sobre Incluir archivados"]')!;
+      const text = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(`#${help.getAttribute('aria-describedby')}`)!;
+
+      expect(text.textContent?.trim()).toBe('Cuenta también los casos archivados. Sin marcar, solo los que siguen en las listas');
+      expect(archivedBox().getAttribute('aria-describedby')).toBe(text.id);
+      help.click();
+      await show();
+      expect(text.hidden).toBeFalse();
+      help.click();
+      await show();
     });
 
     it('are left out of the reads that follow a change of the period, while the box is unchecked', async () => {
@@ -325,9 +371,9 @@ describe('DashboardPage', () => {
       fixture.detectChanges();
 
       const generating = button('Generando…');
-      expect(generating.disabled).toBeTrue();
+      expect(isDisabled(generating)).toBeTrue();
       expect(generating.querySelector('app-icon[data-icon=loading]')).not.toBeNull();
-      expect(button('PDF').disabled).toBeTrue();
+      expect(isDisabled(button('PDF'))).toBeTrue();
       // Pressed meanwhile, neither asks for another file.
       generating.click();
       button('PDF').click();
@@ -335,8 +381,8 @@ describe('DashboardPage', () => {
       download('xlsx').flush(new Blob(['xlsx']));
       await nextTask();
       fixture.detectChanges();
-      expect(button('Excel').disabled).toBeFalse();
-      expect(button('PDF').disabled).toBeFalse();
+      expect(isDisabled(button('Excel'))).toBeFalse();
+      expect(isDisabled(button('PDF'))).toBeFalse();
       expect(saved.length).toBe(1);
     });
 
@@ -352,8 +398,138 @@ describe('DashboardPage', () => {
 
       expect(toasts()).toEqual([refusal]);
       expect(saved).toEqual([]);
-      expect(button('Excel').disabled).toBeFalse();
-      expect(button('PDF').disabled).toBeFalse();
+      expect(isDisabled(button('Excel'))).toBeFalse();
+      expect(isDisabled(button('PDF'))).toBeFalse();
     });
+
+    // The pressed button disabled itself, and the browser put the focus nowhere.
+    it('keeps the focus on the button pressed while the file is generated, and after', async () => {
+      await open();
+      button('Excel').focus();
+      button('Excel').click();
+      fixture.detectChanges();
+
+      expect(document.activeElement).toBe(button('Generando…'));
+      download('xlsx').flush(new Blob(['xlsx']));
+      await nextTask();
+      fixture.detectChanges();
+      expect(document.activeElement).toBe(button('Excel'));
+    });
+  });
+
+  // "Desde" after "Hasta" said "No hay casos en este periodo.", with nothing about the dates.
+  describe('a period that ends before it starts', () => {
+    const until = (): HTMLInputElement => el.querySelector<HTMLInputElement>('input[aria-label="Hasta"]')!;
+
+    it('is said under "Hasta", tied to it, and the numbers of the period before stay', async () => {
+      await open();
+      pick('Desde', '2026-06-01');
+      read().flush(DATA);
+      await show();
+      pick('Hasta', '2026-01-31');
+      await show();
+
+      expect(until().getAttribute('aria-invalid')).toBe('true');
+      const message = el.querySelector(`#${until().getAttribute('aria-describedby')}`)!;
+      expect(message.textContent).toContain('La fecha final es anterior a la inicial.');
+      // Said at once as it comes: it was an alert that came with its words, which a screen reader may not read.
+      expect(message.closest('[role=alert], [role=status], [aria-live]')).toBeNull();
+      const words = 'La fecha final es anterior a la inicial. Se siguen mostrando los números del periodo anterior.';
+      expect(said()).toEqual([words]);
+      expect(TestBed.inject(Announcer).said()[0].politeness).toBe('assertive');
+      // Nothing is asked for it (http.verify after each test), and the numbers on screen stay.
+      expect(el.textContent).not.toContain('No hay casos en este periodo.');
+      expect(indicator('Total')).toBe('5');
+
+      pick('Hasta', '2026-06-30');
+      expect(until().hasAttribute('aria-invalid')).toBeFalse();
+      expect(said()).toEqual([]);
+      const asked = read();
+      expect(asked.request.params.get('from')).toBe('2026-06-01');
+      expect(asked.request.params.get('to')).toBe('2026-06-30');
+      asked.flush(DATA);
+      await show();
+    });
+  });
+
+  // Nothing told a screen reader that the numbers were on their way. Then "Cargando…" came with its
+  // status, which a screen reader may not read, and "Actualizando…" was said for every case anyone saved.
+  it('says it is reading the numbers where a screen reader hears it, the first time and with each period, and not for a change someone else made', async () => {
+    create();
+    const statuses = (): string[] => Array.from(el.querySelectorAll('app-status'), (status) => (status.textContent ?? '').trim());
+    // On screen before what they say: "Cargando…" comes into a status already there.
+    expect(statuses()).toEqual(['', '']);
+    await new Promise((resolve) => setTimeout(resolve, STATUS_DELAY_MS));
+    fixture.detectChanges();
+    expect(statuses()).toEqual(['', 'Cargando…']);
+    read().flush(DATA);
+    await show();
+    expect(statuses()).toEqual(['', '']);
+
+    pick('Desde', '2026-01-01');
+    expect(statuses()).toEqual(['Actualizando los números…', '']);
+    read().flush(DATA);
+    await show();
+    expect(statuses()).toEqual(['', '']);
+
+    TestBed.inject(TicketEvents).outdated(null);
+    fixture.detectChanges();
+    expect(statuses()).toEqual(['', '']);
+    read().flush(DATA);
+    await show();
+    expect(statuses()).toEqual(['', '']);
+  });
+
+  // Drawn for real on a screen of the size of each test.
+  describe('on the screen', () => {
+    /** Names as long as the catalogs of the team have them; twelve responsibles, ten companies. */
+    const LONG: Dashboard = {
+      ...DATA,
+      byAssignee: Array.from({ length: 12 }, (_, index) => ({ name: `Responsable ${index + 1} de la Mesa de Ayuda`, unresolved: 1, pending: 1, resolved: index, total: index + 2 })),
+      byCompany: Array.from({ length: 10 }, (_, index) => ({ name: `Laboratorios Farmacéuticos Número ${index + 1} de la Sierra y la Amazonía Cía. Ltda.`, total: 10 - index })),
+      byModule: [{ name: 'Contabilidad general > Cierre de periodo', total: 4 }],
+    };
+
+    /** What the axis of the rows of a chart writes, as it is drawn: none of the rows left out. */
+    const rowNames = (label: string): string[] => chart(label)!.scales['y'].ticks.map((tick) => String(tick.label));
+
+    // At 320 px the cards were 334 px wide, and the page scrolled sideways.
+    it('on a small phone keeps every chart inside the screen', async () => {
+      resizeScreen(320, 568);
+      await open(LONG);
+
+      const cards = Array.from(el.querySelectorAll<HTMLElement>('section.card'));
+      expect(cards.length).toBeGreaterThan(3);
+      for (const card of cards) {
+        expect(card.getBoundingClientRect().right).withContext(card.textContent ?? '').toBeLessThanOrEqual(320 - 12);
+        expect(card.querySelector('canvas')!.getBoundingClientRect().right).toBeLessThanOrEqual(card.getBoundingClientRect().right);
+      }
+    });
+
+    // On a phone "Casos por responsable" named 6 of its 12 rows, and the names of the companies
+    // lost their start, the part that tells them apart, at every width.
+    for (const [width, height] of [
+      [390, 844],
+      [1920, 1080],
+    ]) {
+      it(`at ${width} px names every row of its lying bars, each from its start`, async () => {
+        resizeScreen(width, height);
+        await open(LONG);
+
+        expect(rowNames('Casos por responsable y estado').length).toBe(12);
+        const companies = rowNames('Las diez empresas con más casos');
+        expect(companies.length).toBe(10);
+        for (const [index, name] of companies.entries()) {
+          const whole = LONG.byCompany[index].name;
+          expect(whole.startsWith(name.replace(/…$/, ''))).withContext(name).toBeTrue();
+          expect(name === whole || name.endsWith('…')).withContext(name).toBeTrue();
+        }
+        // Each name fits the axis that writes it: Chart.js cut what did not, from the start.
+        const drawn = chart('Las diez empresas con más casos')!;
+        const scale = drawn.scales['y'];
+        drawn.ctx.font = toFont((scale.options as CartesianScaleOptions).ticks.font as Partial<FontSpec>).string;
+        for (const name of companies) expect(drawn.ctx.measureText(name).width).withContext(name).toBeLessThanOrEqual(scale.width);
+      });
+    }
   });
 });

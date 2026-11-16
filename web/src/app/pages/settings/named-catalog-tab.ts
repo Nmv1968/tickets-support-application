@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import { Catalogs, NAME_MAX } from '../../core/catalogs';
 import { Icon } from '../../core/icon';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { CatalogEntryActions, catalogTab } from './catalog-tab';
 
 /** An entry of a catalog that is a list of names. */
@@ -90,7 +91,7 @@ export const ASSIGNEES: NamedCatalog = {
  */
 @Component({
   selector: 'app-named-catalog-tab',
-  imports: [FormsModule, CatalogEntryActions, Icon],
+  imports: [FormsModule, CatalogEntryActions, Icon, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let c = catalog();
@@ -100,14 +101,17 @@ export const ASSIGNEES: NamedCatalog = {
           <label class="label" [for]="c.fieldId">{{ c.nameLabel }}</label>
           <input [id]="c.fieldId" class="input" name="name" [placeholder]="c.placeholder" [maxlength]="c.maxLength" autocomplete="off" [(ngModel)]="name" />
         </div>
-        <button type="submit" class="btn btn-primary" [disabled]="!name().trim() || tab.busy()"><app-icon name="plus" /> Agregar</button>
+        <!-- Keeps the focus once the entry is added and the field is empty again. -->
+        <button type="submit" class="btn btn-primary" [appSoftDisabled]="!name().trim() || tab.busy()"><app-icon name="plus" /> Agregar</button>
       </form>
 
       <div class="card divide-y divide-line">
         @for (entry of entries(); track entry.id) {
-          <div class="flex flex-wrap items-center gap-2 px-3 py-1.5" [class.opacity-60]="!entry.active">
+          <!-- An inactive entry says so in its badge, and its name is in the softer colour: still readable, as the rest of the row. -->
+          <div class="flex flex-wrap items-center gap-2 px-3 py-1.5">
             <input
               class="cell-control min-w-40 flex-1 cursor-text font-medium"
+              [class.text-muted]="!entry.active"
               [attr.maxlength]="c.maxLength"
               [value]="entry.name"
               [attr.aria-label]="c.nameLabel + ' ' + entry.name"
@@ -115,6 +119,7 @@ export const ASSIGNEES: NamedCatalog = {
             />
             <app-catalog-entry-actions
               [entry]="entry"
+              [name]="entry.name"
               [busy]="tab.busy()"
               [inactiveLabel]="c.inactive"
               [inUse]="c.inUse"

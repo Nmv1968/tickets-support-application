@@ -318,6 +318,108 @@ describe('liveResource', () => {
     expect(live.value()).toBe('casos de enero, leídos otra vez');
   });
 
+  // "Actualizando…" was said for every read, also the ones made for a case anyone else saved.
+  describe('tells the reads the person asked for', () => {
+    it('the first one, one for other params and one of refresh(); not one of reread()', async () => {
+      const live = create();
+      expect(live.asked()).toBeTrue();
+      reads[0].answer('casos de enero');
+      await settle();
+      expect(live.asked()).toBeFalse();
+
+      live.reread();
+      TestBed.tick();
+      expect(live.loading()).toBeTrue();
+      expect(live.asked()).toBeFalse();
+      reads[1].answer('casos de enero, otra vez');
+      await settle();
+      expect(live.value()).toBe('casos de enero, otra vez');
+
+      params.set('febrero');
+      TestBed.tick();
+      expect(live.asked()).toBeTrue();
+      reads[2].answer('casos de febrero');
+      await settle();
+      expect(live.asked()).toBeFalse();
+
+      live.refresh();
+      TestBed.tick();
+      expect(live.asked()).toBeTrue();
+      reads[3].fail(new Error('Error interno'));
+      await settle();
+      expect(live.asked()).toBeFalse();
+      expect(live.loading()).toBeFalse();
+    });
+
+    it('still while a reread takes the place of a read the person asked for, until it is answered', async () => {
+      const live = create();
+      reads[0].answer('casos de enero');
+      await settle();
+
+      params.set('febrero');
+      TestBed.tick();
+      live.reread();
+      TestBed.tick();
+      expect(reads[1].abort.aborted).toBeTrue();
+      expect(live.asked()).toBeTrue();
+      reads[2].answer('casos de febrero');
+      await settle();
+      expect(live.asked()).toBeFalse();
+
+      // And a read asked for by the person takes the place of a reread, said.
+      live.reread();
+      TestBed.tick();
+      expect(live.asked()).toBeFalse();
+      params.set('marzo');
+      TestBed.tick();
+      expect(live.asked()).toBeTrue();
+      reads[4].answer('casos de marzo');
+      await settle();
+      expect(live.asked()).toBeFalse();
+    });
+
+    // The list of cases goes to the last page there is when its page is past the end: after a reread too.
+    it('reads other params that its load moved to by itself as the read it moved from was', async () => {
+      const page = signal(3);
+      const live = TestBed.runInInjectionContext(() =>
+        liveResource({
+          params: page,
+          load: async (asked: number, abort: AbortSignal, current: () => boolean) => {
+            const answer = await new Promise<string>((resolve, reject) => reads.push({ params: String(asked), abort, answer: resolve, fail: reject }));
+            if (!answer && current()) page.set(asked - 1);
+            return answer;
+          },
+          failed: (error) => failures.push(error),
+        }),
+      );
+      TestBed.tick();
+      reads[0].answer('casos de la página 3');
+      await settle();
+
+      live.reread();
+      TestBed.tick();
+      reads[1].answer('');
+      await settle();
+      expect(reads.map((read) => read.params)).toEqual(['3', '3', '2']);
+      expect(live.loading()).toBeTrue();
+      expect(live.asked()).toBeFalse();
+      reads[2].answer('casos de la página 2');
+      await settle();
+
+      // The person asked for a page past the end: the page it moves to is theirs too.
+      page.set(5);
+      TestBed.tick();
+      reads[3].answer('');
+      await settle();
+      expect(reads.map((read) => read.params)).toEqual(['3', '3', '2', '5', '4']);
+      expect(live.asked()).toBeTrue();
+      reads[4].answer('casos de la página 4');
+      await settle();
+      expect(live.asked()).toBeFalse();
+      expect(failures).toEqual([]);
+    });
+  });
+
   it('cancels the read on its way when the screen goes away', () => {
     const screen = createEnvironmentInjector([], TestBed.inject(EnvironmentInjector));
     runInInjectionContext(screen, () => liveResource({ load: unanswered, failed: () => undefined }));

@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, linkedSignal, signal, untracked, viewChild } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, Injector, computed, effect, inject, linkedSignal, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -6,12 +7,17 @@ import { Api } from '../../core/api';
 import type { Ticket, TicketFilters, TicketPage } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
 import { DialogPending } from '../../core/dialog-pending';
+import { focusAfterRender } from '../../core/focus';
+import { Hint } from '../../core/hint';
 import { Icon } from '../../core/icon';
 import { liveResource } from '../../core/loading';
+import { popoverSide } from '../../core/popover-side';
+import { SoftDisabled } from '../../core/soft-disabled';
+import { Status } from '../../core/status';
 import { StatusBadge } from '../../core/status-badge';
 import { TicketEvents } from '../../core/ticket-events';
 import type { TicketEvent } from '../../core/ticket-events';
-import { TicketFlags } from '../../core/ticket-flags';
+import { TicketFlags, TicketFlagsLegend } from '../../core/ticket-flags';
 import { Toast } from '../../core/toast';
 import { TypeChip } from '../../core/type-chip';
 import { downloadBlob, pastedImages, todayIso } from '../../core/ui';
@@ -28,6 +34,8 @@ import type { ListFilters } from './ticket-filters';
 import { TicketPanel } from './ticket-panel';
 
 const PAGE_SIZE = 50;
+/** Width of the export menu, in rem: its class `w-48`. */
+const EXPORT_MENU_REM = 12;
 
 /**
  * The columns a phone card writes as a line of their own ("Módulo: Ventas"). The others it
@@ -47,15 +55,34 @@ function sameQuery(a: TicketFilters, b: TicketFilters): boolean {
  */
 @Component({
   selector: 'app-tickets',
-  imports: [FormsModule, StatusBadge, TicketFlags, TypeChip, TicketPanel, AiDraftDialog, ImportDialog, NewTicketForm, TicketFiltersPanel, TicketColumnsMenu, Icon, DialogPending],
+  imports: [
+    FormsModule,
+    NgTemplateOutlet,
+    StatusBadge,
+    TicketFlags,
+    TicketFlagsLegend,
+    TypeChip,
+    TicketPanel,
+    AiDraftDialog,
+    ImportDialog,
+    NewTicketForm,
+    TicketFiltersPanel,
+    TicketColumnsMenu,
+    Hint,
+    Icon,
+    DialogPending,
+    SoftDisabled,
+    Status,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './tickets.html',
-  host: { '(document:paste)': 'onPaste($event)', '(document:pointerdown)': 'onPointerDown($event)', '(document:keydown.escape)': 'onEscape()' },
+  host: { '(document:paste)': 'onPaste($event)', '(document:pointerdown)': 'onPointerDown($event)', '(document:keydown.escape)': 'onEscape($event)' },
 })
 export class TicketsPage {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
   private readonly router = inject(Router);
+  private readonly injector = inject(Injector);
   private readonly query = toSignal(inject(ActivatedRoute).queryParamMap);
   protected readonly catalogs = inject(Catalogs);
   /** A wide screen shows the list as a table, a narrow one (a phone) as cards. Only one of them is drawn. */
@@ -126,12 +153,26 @@ export class TicketsPage {
     },
   });
   protected readonly loading = this.list.loading;
+  /** A read the person asked for is on its way: a search, a filter, a page, the order (see liveResource). */
+  protected readonly asked = this.list.asked;
   /** The cases of the page, as their rows and cards show them (see CaseRow). */
   protected readonly rows = computed(() => {
     const names = this.userNames();
     return (this.list.value()?.items ?? []).map((ticket) => caseRow(ticket, names));
   });
   protected readonly total = computed(() => this.list.value()?.total ?? 0);
+  /** How many cases there are is known: the first read was answered. Before, the list has not 0 of them, it is "Cargando…". */
+  protected readonly counted = computed(() => this.list.value() !== undefined);
+  /**
+   * The count said to a screen reader (see the footer): `total` as the last read the person asked
+   * for left it, once it is answered (see `asked`). Not as a read made in silence leaves it, for a
+   * case registered, deleted or archived elsewhere: an idle screen-reader user heard the new count
+   * each time. Null until the first answer.
+   */
+  protected readonly spokenTotal = linkedSignal<boolean, number | null>({
+    source: this.asked,
+    computation: (asking, previous) => (asking ? (previous?.value ?? null) : untracked(() => (this.counted() ? this.total() : null))),
+  });
   protected readonly pageCount = computed(() => Math.max(1, Math.ceil(this.total() / PAGE_SIZE)));
 
   // Overlays
@@ -142,9 +183,15 @@ export class TicketsPage {
   protected readonly aiImages = signal<File[]>([]);
   protected readonly importOpen = signal(false);
   protected readonly exportOpen = signal(false);
+  /** The edge of its button the export menu lines up with, chosen each time it opens (see toggleExport). */
+  protected readonly exportSide = signal<'left' | 'right'>('right');
   protected readonly exporting = signal(false);
   /** The export button together with its menu. */
   private readonly exportMenu = viewChild<ElementRef<HTMLElement>>('exportMenu');
+  private readonly exportButton = viewChild<ElementRef<HTMLButtonElement>>('exportButton');
+  private readonly newCaseButton = viewChild.required<ElementRef<HTMLButtonElement>>('newCaseButton');
+  /** Where the focus goes when what had it leaves the screen and nothing closer is left. */
+  private readonly searchBox = viewChild.required<ElementRef<HTMLInputElement>>('searchBox');
 
   /** A case was registered with the form above the table: the next page that arrives takes the list to it (see pageAfter). */
   private toNewCase = false;
@@ -189,8 +236,11 @@ export class TicketsPage {
       // A list already on its way may have been read before this edit and would undo it.
       if (!event.archiving && !this.loading()) return;
     }
-    // A new or deleted case, or cases changed elsewhere: the page is read again.
-    this.list.refresh();
+    // A deleted case leaves its row at once, before the page read again comes: the panel that
+    // deleted it closes now, and gives the focus to the row of its case while there is one.
+    if (event.kind === 'removed') this.drop(event.id);
+    // A new or deleted case, or cases changed elsewhere: the page is read again, in silence.
+    this.list.reread();
   }
 
   /**
@@ -224,12 +274,23 @@ export class TicketsPage {
     this.searchTimer = setTimeout(() => this.q.set(text.trim()), 300);
   }
 
-  /** "Limpiar filtros": the list goes back to every case that is not archived. The search box is emptied too. */
+  /**
+   * "Limpiar filtros": the list goes back to every case that is not archived. The search box is
+   * emptied too. The one of the empty list goes away with what it said: the focus goes to the
+   * search box, where the list starts.
+   */
   protected clearFilters(): void {
     clearTimeout(this.searchTimer);
     this.searchText.set('');
     this.q.set('');
     this.panelFilters.set(NO_FILTERS);
+    focusAfterRender(this.injector, this.searchBox().nativeElement);
+  }
+
+  /** The "×" of "Nuevo caso": the form goes, and the focus to the button that opens it. */
+  protected closeNewTicket(): void {
+    this.newOpen.set(false);
+    focusAfterRender(this.injector, this.newCaseButton().nativeElement);
   }
 
   /** The "Filtros" button. The person opening or closing the panel is what is kept for them. */
@@ -252,7 +313,14 @@ export class TicketsPage {
     this.openId.set(ticket.id);
   }
 
+  /**
+   * The panel took the focus back to what opened it. That may be gone: the row of a case that
+   * was archived or deleted, a list read again. Then the focus goes to the case on the page (its
+   * code, its card), or else to the search box, and not to nowhere.
+   */
   protected closePanel(): void {
+    const id = this.openId();
+    focusAfterRender(this.injector, () => document.querySelector(`[data-case-id="${id}"]`), this.searchBox().nativeElement);
     this.openId.set(null);
     if (this.query()?.has('caso')) {
       void this.router.navigate([], { queryParams: { caso: null }, queryParamsHandling: 'merge', replaceUrl: true });
@@ -266,6 +334,10 @@ export class TicketsPage {
    */
   protected onRegistered(): void {
     this.toNewCase = true;
+  }
+
+  private drop(id: number): void {
+    this.list.value.update((data) => data && (data.items.some((item) => item.id === id) ? { ...data, items: data.items.filter((item) => item.id !== id), total: data.total - 1 } : data));
   }
 
   private replace(updated: Ticket): void {
@@ -298,6 +370,17 @@ export class TicketsPage {
   }
 
   /**
+   * The "Exportar" button opens its menu, or closes it. Under the right edge of the button, unless
+   * that takes the menu off the screen: on a narrow screen the row of buttons wraps, and the button
+   * can start a line of its own at the left edge (see popoverSide).
+   */
+  protected toggleExport(): void {
+    const menu = this.exportMenu()?.nativeElement;
+    if (!this.exportOpen() && menu) this.exportSide.set(popoverSide(menu, EXPORT_MENU_REM));
+    this.exportOpen.update((open) => !open);
+  }
+
+  /**
    * Pressing anywhere else closes the export menu. It listens to the press and not to the
    * click: Safari on iOS sends no click for a tap on plain content.
    */
@@ -305,15 +388,32 @@ export class TicketsPage {
     if (this.exportOpen() && !this.exportMenu()?.nativeElement.contains(event.target as Node)) this.exportOpen.set(false);
   }
 
-  /** Escape closes the export menu. The focus goes back to its button: on a menu item it would be lost with the menu. */
-  protected onEscape(): void {
+  /**
+   * The focus left the export menu and its button: the menu closes, and leaves in view what it
+   * covered ("Filtros", "Columnas"). Not when the focus goes nowhere: Safari gives a pressed button
+   * no focus, and the menu has to be there for the press on one of its choices.
+   */
+  protected onExportFocusOut(event: FocusEvent): void {
+    const next = event.relatedTarget;
+    if (this.exportOpen() && next instanceof Node && !this.exportMenu()?.nativeElement.contains(next)) this.exportOpen.set(false);
+  }
+
+  /**
+   * Escape closes the export menu, and takes the key (stopped): an error toast waits for the next
+   * one (see Toasts). The focus goes back to its button: on a menu item it would be lost with the menu.
+   */
+  protected onEscape(event: Event): void {
     if (!this.exportOpen()) return;
+    event.stopPropagation();
+    event.preventDefault();
     this.exportOpen.set(false);
     this.exportMenu()?.nativeElement.querySelector('button')?.focus();
   }
 
+  /** A choice of the export menu. The menu goes with it, and the focus back to "Exportar", which waits for the file. */
   protected async export(format: 'xlsx' | 'pdf'): Promise<void> {
     this.exportOpen.set(false);
+    focusAfterRender(this.injector, this.exportButton()?.nativeElement);
     this.exporting.set(true);
     try {
       downloadBlob(await this.api.exportFile(format, { ...this.filters(), dir: this.sortDir() }), `casos-soporte-${todayIso()}.${format}`);

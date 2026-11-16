@@ -2,7 +2,7 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
 import type { TicketNote } from '../../core/api';
 import { formatDateTime } from '../../core/ui';
-import { screenOf } from '../../testing/screen';
+import { isDisabled, screenOf } from '../../testing/screen';
 import { textOf } from '../../testing/text';
 import { TicketNotes } from './ticket-notes';
 
@@ -62,12 +62,12 @@ describe('TicketNotes', () => {
 
   it('gives back what is typed in the box, and "Agregar" can be pressed once it is more than spaces', fakeAsync(() => {
     create();
-    expect(button('Agregar').disabled).toBeTrue();
+    expect(isDisabled(button('Agregar'))).toBeTrue();
 
     type(box(), '  ');
-    expect(button('Agregar').disabled).toBeTrue();
+    expect(isDisabled(button('Agregar'))).toBeTrue();
     type(box(), 'Se llamó al cliente');
-    expect(button('Agregar').disabled).toBeFalse();
+    expect(isDisabled(button('Agregar'))).toBeFalse();
     expect(told).toEqual(['text   ', 'text Se llamó al cliente']);
   }));
 
@@ -78,7 +78,7 @@ describe('TicketNotes', () => {
     fixture.componentRef.setInput('text', '');
     render();
     expect(box().value).toBe('');
-    expect(button('Agregar').disabled).toBeTrue();
+    expect(isDisabled(button('Agregar'))).toBeTrue();
   }));
 
   it('asks to add what is typed with "Agregar", and with Ctrl+Enter in the box', fakeAsync(() => {
@@ -98,5 +98,48 @@ describe('TicketNotes', () => {
     click(el.querySelectorAll<HTMLButtonElement>('button[aria-label="Eliminar observación"]')[1]);
 
     expect(told).toEqual(['remove 2']);
+  }));
+  // The trash goes with its observation, and the browser put the focus nowhere.
+  describe('the focus, once an observation is deleted', () => {
+    const trashes = (): HTMLButtonElement[] => Array.from(el.querySelectorAll<HTMLButtonElement>('button[aria-label="Eliminar observación"]'));
+    const THIRD: TicketNote = { ...IMPORTED, id: 3, text: 'Otra' };
+
+    /** The trash at `index` is pressed, and the panel deletes its observation: the list comes again without it. */
+    function remove(notes: TicketNote[], index: number): void {
+      create(notes);
+      trashes()[index].focus();
+      click(trashes()[index]);
+      expect(told).toEqual([`remove ${notes[index].id}`]);
+      fixture.componentRef.setInput('notes', notes.filter((_, at) => at !== index));
+      render();
+    }
+
+    it('goes to the trash of the one that took its place', fakeAsync(() => {
+      remove([CALLED, IMPORTED, THIRD], 0);
+      expect(document.activeElement).toBe(trashes()[0]);
+      expect(trashes().length).toBe(2);
+    }));
+
+    it('goes to the trash of the one before, for the last one', fakeAsync(() => {
+      remove([CALLED, IMPORTED], 1);
+      expect(document.activeElement).toBe(trashes()[0]);
+    }));
+
+    it('goes to the box of a new one when none is left', fakeAsync(() => {
+      remove([CALLED], 0);
+      expect(document.activeElement).toBe(box());
+    }));
+  });
+
+  it('keeps the focus on "Agregar" once the observation is added and the box is empty again', fakeAsync(() => {
+    create([], 'Se llamó');
+    button('Agregar').focus();
+    click(button('Agregar'));
+    fixture.componentRef.setInput('text', '');
+    render();
+
+    expect(told).toEqual(['add']);
+    expect(isDisabled(button('Agregar'))).toBeTrue();
+    expect(document.activeElement).toBe(button('Agregar'));
   }));
 });

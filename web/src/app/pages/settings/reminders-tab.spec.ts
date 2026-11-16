@@ -6,6 +6,7 @@ import { Auth } from '../../core/auth';
 import { httpTestBed } from '../../testing/http';
 import { chooseOption, closeSelect, ngSelect, optionTexts, selectedTexts } from '../../testing/ng-select';
 import { RemindersTab } from './reminders-tab';
+import { isDisabled } from '../../testing/screen';
 
 describe('RemindersTab, the time after which an open case counts as forgotten', () => {
   let http: HttpTestingController;
@@ -83,8 +84,23 @@ describe('RemindersTab, the time after which an open case counts as forgotten', 
   it('cannot be changed while the reminder is off', fakeAsync(() => {
     open(0);
 
-    expect(amount().disabled).toBeTrue();
+    expect(isDisabled(amount())).toBeTrue();
     expect(unit().classList).toContain('ng-select-disabled');
-    expect(unit().querySelector('input')!.disabled).toBeTrue();
+    expect(isDisabled(unit().querySelector('input')!)).toBeTrue();
+  }));
+
+  // Dimmed to half, the labels and the unit of the fields that are off read at 2.1:1 (WCAG 1.4.3).
+  it('leaves the fields of a reminder that is off readable: the fields say they are off, nothing is dimmed', fakeAsync(() => {
+    // Both reminders off: no forgotten cases, and no notice before the promised day.
+    open(0);
+    expect(isDisabled(el.querySelector<HTMLInputElement>('#promise-days')!)).toBeTrue();
+
+    const texts = [...el.querySelectorAll<HTMLElement>('label.label, span')].filter((text) => ['Tiempo sin movimiento', 'Unidad', 'Días de anticipación', 'día(s) antes'].includes(text.textContent!.trim()));
+    expect(texts.length).toBe(4);
+    for (const text of texts) {
+      for (let box: HTMLElement | null = text; box && box !== el; box = box.parentElement) {
+        expect(getComputedStyle(box).opacity).withContext(`${text.textContent!.trim()}: ${box.className}`).toBe('1');
+      }
+    }
   }));
 });

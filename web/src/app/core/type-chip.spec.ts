@@ -46,6 +46,8 @@ class Host {
       </tbody>
     </table>
     <div id="chosen" class="w-28"><app-type-chip [type]="long" removable /></div>
+    <div id="chosen-short" class="w-28"><app-type-chip [type]="short" removable /></div>
+    <div id="plain" class="w-28"><app-type-chip [type]="short" /></div>
     <div id="columns" class="flex w-64">
       <section class="flex-1"><app-type-chip [type]="long" /></section>
       <section class="flex-1"></section>
@@ -126,6 +128,36 @@ describe('TypeChip, a support type in its own colour', () => {
     }
   });
 
+  // A chip in the colour of the card it was on (white on white, black on the dark surface) lost its
+  // shape: 1.0:1 against it (WCAG 1.4.11).
+  describe('its edge', () => {
+    afterEach(() => document.documentElement.classList.remove('dark'));
+
+    /** The colour of the line around the chip, as the browser draws it: `rgb(…)`, or `color(srgb …)` for a mix. */
+    function edge(style: CSSStyleDeclaration): string {
+      const shadow = style.boxShadow;
+      const srgb = /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/.exec(shadow);
+      if (srgb) return `rgb(${srgb.slice(1).map((part) => Math.round(Number(part) * 255)).join(', ')})`;
+      return /rgba?\([^)]*\)/.exec(shadow)![0];
+    }
+
+    for (const theme of ['light', 'dark']) {
+      it(`stands 3:1 or more from the surface in the ${theme} theme, whatever the colour of the chip`, () => {
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+        const surface = getComputedStyle(document.body).getPropertyValue('--app-surface').trim();
+        const surfaceRgb = `rgb(${[1, 3, 5].map((at) => parseInt(surface.slice(at, at + 2), 16)).join(', ')})`;
+        const steps = ['00', '55', 'aa', 'ff'];
+        const faint: string[] = [];
+        for (const color of [...steps.flatMap((r) => steps.flatMap((g) => steps.map((b) => `#${r}${g}${b}`))), '#ffffff', '#1a1a1d', '#f3f3f3', '#111113']) {
+          const style = show(color);
+          expect(style.boxShadow).withContext(color).toContain('inset');
+          if (contrast(edge(style), surfaceRgb) < 3) faint.push(color);
+        }
+        expect(faint).toEqual([]);
+      });
+    }
+  });
+
   // In a select of several types, each chosen one is a chip that can be taken out.
   describe('that can be removed', () => {
     let remove: HTMLButtonElement;
@@ -188,42 +220,61 @@ describe('TypeChip, a support type in its own colour', () => {
     const chips = (within: string): HTMLElement[] => [...narrow.querySelectorAll<HTMLElement>(`#${within} app-type-chip`)];
     const right = (element: Element): number => element.getBoundingClientRect().right;
     const nameOf = (chip: HTMLElement): HTMLElement => chip.querySelector('span')!;
-    const shortened = (chip: HTMLElement): boolean => nameOf(chip).scrollWidth > nameOf(chip).clientWidth;
+    const shortened = (chip: HTMLElement): boolean => nameOf(chip).scrollWidth > nameOf(chip).clientWidth || nameOf(chip).scrollHeight > nameOf(chip).clientHeight;
+    /** The lines its name takes. */
+    const lines = (chip: HTMLElement): number => Math.round(nameOf(chip).getBoundingClientRect().height / parseFloat(getComputedStyle(nameOf(chip)).lineHeight));
 
-    it('stays inside it: the name is shortened with an ellipsis, and the whole of it is the title', () => {
+    // Shortened with an ellipsis, the rest of the name was only in its title: out of reach of a keyboard and of a finger.
+    it('stays inside it, and writes the whole name on more lines; the title is a copy of it', () => {
       const [long] = chips('cell');
 
       expect(right(long)).toBeLessThanOrEqual(right(narrow.querySelector('#cell')!));
-      expect(shortened(long)).toBeTrue();
-      expect(getComputedStyle(nameOf(long)).textOverflow).toBe('ellipsis');
+      expect(shortened(long)).toBeFalse();
+      expect(getComputedStyle(nameOf(long)).textOverflow).not.toBe('ellipsis');
+      expect(lines(long)).toBeGreaterThan(1);
+      expect(nameOf(long).textContent!.trim()).toBe('El usuario no sabía cómo usar la funcionalidad del sistema');
       expect(long.title).toBe('El usuario no sabía cómo usar la funcionalidad del sistema');
     });
 
     // As seen in the case list: the chip of a long type was drawn over the next column.
-    it('stays inside its column of a table, and off the column that follows', () => {
+    it('stays inside its column of a table, and off the column that follows, with its whole name', () => {
       const [long] = chips('table');
       const [own, next] = [...narrow.querySelectorAll<HTMLElement>('#table td')];
 
       expect(own.offsetWidth).toBe(128);
       expect(right(long)).toBeLessThanOrEqual(next.getBoundingClientRect().left - 8);
-      expect(shortened(long)).toBeTrue();
+      expect(shortened(long)).toBeFalse();
     });
 
-    it('is still only as wide as its name when the name fits', () => {
+    it('is still only as wide as its name, and a pill on one line, when the name fits', () => {
       const [, short] = chips('cell');
 
       expect(shortened(short)).toBeFalse();
+      expect(lines(short)).toBe(1);
       expect(short.offsetWidth).toBeLessThan(narrow.querySelector<HTMLElement>('#cell')!.offsetWidth);
       expect(short.title).toBe('Capacitación');
+      // Its ends round: a radius at least half its height.
+      expect(parseFloat(getComputedStyle(short).borderTopLeftRadius)).toBeGreaterThanOrEqual(short.offsetHeight / 2);
     });
 
-    it('keeps its "×" in view next to the shortened name', () => {
+    it('keeps its "×" in view next to the lines of a long name', () => {
       const [long] = chips('chosen');
       const remove = long.querySelector('button')!;
 
-      expect(shortened(long)).toBeTrue();
+      expect(shortened(long)).toBeFalse();
+      expect(lines(long)).toBeGreaterThan(1);
       expect(remove.offsetWidth).toBeGreaterThan(0);
       expect(right(remove)).toBeLessThanOrEqual(right(narrow.querySelector('#chosen')!));
+    });
+
+    // Its "×" was 20 × 20 px, next to the "×" of the select that takes every type out (WCAG 2.5.8).
+    it('gives its "×" 24 px a side for a finger, and stays as high as a chip without one', () => {
+      const [chosen] = chips('chosen-short');
+      const remove = chosen.querySelector('button')!.getBoundingClientRect();
+
+      expect(remove.width).toBeGreaterThanOrEqual(24);
+      expect(remove.height).toBeGreaterThanOrEqual(24);
+      expect(chosen.offsetHeight).toBe(chips('plain')[0].offsetHeight);
     });
 
     // The columns of the board share the screen: a long type on a card must not take from the others.

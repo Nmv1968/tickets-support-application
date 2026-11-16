@@ -4,10 +4,11 @@ import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing
 import { provideRouter } from '@angular/router';
 import type { User } from '../../core/api';
 import { Confirm } from '../../core/confirm';
+import { TOAST_MS, Toast } from '../../core/toast';
 import { answerCatalogs } from '../../testing/catalogs';
 import type { CatalogsAnswer } from '../../testing/catalogs';
 import { httpTestBed } from '../../testing/http';
-import { screenOf, toasts } from '../../testing/screen';
+import { buttonIn, isDisabled, screenOf, toasts } from '../../testing/screen';
 import { textOf } from '../../testing/text';
 import { ASSIGNEES, COMPANIES, NamedCatalogTab } from './named-catalog-tab';
 import type { NamedCatalog, NamedEntry } from './named-catalog-tab';
@@ -181,7 +182,7 @@ for (const c of CASES) {
 
       expect(rows().map((row) => nameOf(row).value)).toEqual(c.entries.map((entry) => entry.name));
       // What each row says after the name: cases, state and what can be done.
-      const said = (row: HTMLElement): string[] => [...row.querySelectorAll('span, button')].map((item) => textOf(item)).filter(Boolean);
+      const said = (row: HTMLElement): string[] => [...row.querySelectorAll('span:not([hidden]), button')].map((item) => textOf(item)).filter(Boolean);
       expect(rows().map(said)).toEqual([
         ['3 casos', 'Desactivar'],
         ['0 casos', 'Desactivar'],
@@ -189,6 +190,19 @@ for (const c of CASES) {
       ]);
       expect(el.querySelector(`label[for=${c.fieldId}]`)!.textContent!.trim()).toBe(c.nameLabel);
       expect(nameOf(rows()[0]).getAttribute('aria-label')).toBe(`${c.nameLabel} ${first.name}`);
+    }));
+
+    // An inactive row was drawn at 60 % opacity: its badge, its count and its enabled "Activar" fell
+    // under the contrast text needs. It says so in its badge, with its name in the softer colour.
+    it('draws an inactive entry as readable as the others, and names each button with its entry', fakeAsync(() => {
+      open();
+      const inactive = rows()[2];
+
+      expect(getComputedStyle(inactive).opacity).toBe('1');
+      expect(nameOf(inactive).classList).toContain('text-muted');
+      expect(nameOf(rows()[0]).classList).not.toContain('text-muted');
+      const toggles = rows().map((row) => buttonIn(row, row === inactive ? 'Activar' : 'Desactivar').getAttribute('aria-label'));
+      expect(toggles).toEqual(c.entries.map((entry) => `${entry.active ? 'Desactivar' : 'Activar'} ${entry.name}`));
     }));
 
     it('explains what renaming, deactivating and deleting do', fakeAsync(() => {
@@ -208,11 +222,11 @@ for (const c of CASES) {
       it('needs a name', fakeAsync(() => {
         open();
 
-        expect(add().disabled).toBeTrue();
+        expect(isDisabled(add())).toBeTrue();
         type(newName(), '   ');
-        expect(add().disabled).toBeTrue();
+        expect(isDisabled(add())).toBeTrue();
         type(newName(), c.sent);
-        expect(add().disabled).toBeFalse();
+        expect(isDisabled(add())).toBeFalse();
       }));
 
       it('takes names as long as the server stores', fakeAsync(() => {
@@ -259,7 +273,7 @@ for (const c of CASES) {
         type(newName(), c.sent);
         click(add());
 
-        expect(add().disabled).toBeTrue();
+        expect(isDisabled(add())).toBeTrue();
         newName().form!.dispatchEvent(new Event('submit'));
         render();
 
@@ -340,11 +354,42 @@ for (const c of CASES) {
       it('is not offered for an entry with cases, and says what to do instead', fakeAsync(() => {
         open();
 
-        expect(trash(rows()[0]).disabled).toBeTrue();
+        expect(isDisabled(trash(rows()[0]))).toBeTrue();
         expect(trash(rows()[0]).title).toBe(c.inUse);
-        expect(trash(rows()[2]).disabled).toBeTrue();
-        expect(trash(rows()[1]).disabled).toBeFalse();
+        expect(isDisabled(trash(rows()[2]))).toBeTrue();
+        expect(isDisabled(trash(rows()[1]))).toBeFalse();
         expect(trash(rows()[1]).getAttribute('aria-label')).toBe(c.removeLabel);
+      }));
+
+      // The reason was only the tooltip of a disabled button, which neither a keyboard nor a finger reaches.
+      it('stays within reach of the keyboard where it cannot be used, and says why to who hears it', fakeAsync(() => {
+        open();
+        const inUse = trash(rows()[0]);
+
+        expect(inUse.disabled).toBeFalse();
+        expect(textOf(el.querySelector(`#${inUse.getAttribute('aria-describedby')}`))).toBe(c.inUse);
+        expect(trash(rows()[1]).getAttribute('aria-describedby')).toBeNull();
+        // Pressed all the same, it asks nothing and sends nothing (http.verify after each test).
+        inUse.click();
+        render();
+        expect(document.querySelector('[role=alertdialog]')).toBeNull();
+        tick(TOAST_MS.error);
+      }));
+
+      // Pressed, it did nothing: why was only in its title, under a mouse that stays on it, and in its description, for who hears it.
+      it('says why in a toast when it is pressed where it cannot be used, as the API would refuse it', fakeAsync(() => {
+        open();
+        trash(rows()[0]).click();
+        render();
+        expect(toasts()).toEqual([c.inUse]);
+        expect(TestBed.inject(Toast).items()[0].kind).toBe('error');
+
+        // An entry without cases asks first, and says nothing of the kind.
+        click(trash(rows()[1]));
+        expect(asked()).toBeTruthy();
+        answer(false);
+        expect(toasts()).toEqual([c.inUse]);
+        tick(TOAST_MS.error);
       }));
 
       // The trash is next to "Desactivar", and what it does cannot be undone.
@@ -393,7 +438,7 @@ for (const c of CASES) {
         catalogs([first, { ...second, tickets: 1 }, third]);
 
         expect(toasts()).toEqual([c.removeRefused]);
-        expect(trash(rows()[1]).disabled).toBeTrue();
+        expect(isDisabled(trash(rows()[1]))).toBeTrue();
         tick(6000);
       }));
     });

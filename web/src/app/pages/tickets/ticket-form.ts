@@ -176,11 +176,27 @@ export function isDirty(draft: Draft, base: Draft, unreadable: Unreadable): bool
   return changed(draft, base).length > 0 || draft.promiseOn !== base.promiseOn || timeHalfTyped || notNumber.estimatedMinutes || notNumber.spentMinutes;
 }
 
-/** What keeps the draft from being saved as it stands. Each is said next to its field. */
-export function problemsOf(draft: Draft, unreadable: Unreadable): Problems {
+/** What a field that a new case needs says when the form was sent without it ("Nuevo caso", the case the AI drafted). */
+export const MISSING_COMPANY = 'Elige una empresa.';
+export const MISSING_DESCRIPTION = 'Escribe la descripción.';
+
+/** What the API answers to a case dated after today: said next to the date before it is sent. */
+export const FUTURE_DATE = 'La fecha del caso no puede ser posterior a hoy';
+
+/**
+ * What is wrong with the date of a case, `YYYY-MM-DD`, on `today`: a problem cannot be reported in
+ * the future, and the `max` of a date field does not stop a date typed in it. Undefined when nothing is.
+ */
+export function futureDate(date: string, today: string): string | undefined {
+  return date > today ? FUTURE_DATE : undefined;
+}
+
+/** What keeps the draft from being saved as it stands, on `today`. Each is said next to its field. */
+export function problemsOf(draft: Draft, unreadable: Unreadable, today: string): Problems {
   const problems: Problems = {};
   // Empty while a day is being typed, before 1900 while it is the year.
   if (draft.date < OLDEST_DATE) problems.date = 'Escribe la fecha completa.';
+  else if (futureDate(draft.date, today)) problems.date = FUTURE_DATE;
   if (unreadable.timeHalfTyped) problems.time = 'Completa la hora o quítala.';
   if (!draft.description.trim()) problems.description = 'La descripción no puede quedar vacía.';
   if (draft.promiseOn && draft.promisedDate < OLDEST_DATE) problems.promisedDate = 'Elige la fecha prometida';

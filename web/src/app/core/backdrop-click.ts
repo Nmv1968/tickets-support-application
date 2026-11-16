@@ -1,6 +1,13 @@
 import { Directive, output } from '@angular/core';
 
 /**
+ * The dimmed area behind a dialog or a side panel, which closes it when clicked. Known by its
+ * class (see styles.css): what puts something small away with a press (the list of a select, the
+ * text of a "?") stops the click that follows when it lands here, or the dialog would close too.
+ */
+export const BACKDROP = '.modal-backdrop, .panel-backdrop';
+
+/**
  * A click on the dimmed area behind a dialog itself, not on the dialog it holds:
  * `<div class="modal-backdrop" (appBackdropClick)="closed.emit()">`.
  *

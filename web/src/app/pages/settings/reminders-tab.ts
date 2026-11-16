@@ -33,7 +33,8 @@ const UNITS: { id: Unit; label: string }[] = [
           Avisar de casos olvidados
         </label>
 
-        <div class="flex items-end gap-2" [class.opacity-50]="!enabled()">
+        <!-- Off, the fields say so themselves (disabled): their labels are not dimmed, which left them unreadable. -->
+        <div class="flex items-end gap-2">
           <div>
             <label class="label" for="reminder-amount">Tiempo sin movimiento</label>
             <input id="reminder-amount" class="input w-28" type="number" min="1" name="amount" [disabled]="!enabled()" [(ngModel)]="amount" />
@@ -77,7 +78,7 @@ const UNITS: { id: Unit; label: string }[] = [
           Avisar también antes de la fecha prometida
         </label>
 
-        <div class="flex items-end gap-2" [class.opacity-50]="!soonEnabled()">
+        <div class="flex items-end gap-2">
           <div>
             <label class="label" for="promise-days">Días de anticipación</label>
             <input id="promise-days" class="input w-28" type="number" min="1" max="60" name="soonDays" [disabled]="!soonEnabled()" [(ngModel)]="soonDays" />

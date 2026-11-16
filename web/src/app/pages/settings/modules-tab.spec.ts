@@ -102,6 +102,18 @@ describe('ModulesTab, where a new module goes', () => {
     render();
     expect(add('Compras')).toEqual({ name: 'Compras', parentId: null });
   }));
+
+  // Every row said "Desactivar"; an inactive one was drawn at 60 %, under the contrast its text needs.
+  it('names the button of each row with its module, and draws an inactive one as readable as the others', fakeAsync(() => {
+    open();
+    const rows = Array.from(el.querySelectorAll<HTMLElement>('.divide-y > div'));
+    const toggles = rows.map((row) => row.querySelector('button')!.getAttribute('aria-label'));
+
+    expect(toggles).toEqual(['Desactivar Ventas', 'Desactivar Facturas', 'Desactivar Inventario', 'Activar Bodega vieja']);
+    expect(getComputedStyle(rows[3]).opacity).toBe('1');
+    expect(rows[3].querySelector('input')!.classList).toContain('text-muted');
+    expect(rows[3].textContent).toContain('Inactivo');
+  }));
 });
 
 describe('ModulesTab, a name edited in the list', () => {

@@ -192,8 +192,10 @@ test.describe('con la sesión desde la pantalla de ingreso', () => {
       // The thumbnail and the enlarged view are object URLs (blob:).
       await panel.getByLabel('Adjuntar').setInputFiles({ name: 'captura.png', mimeType: 'image/png', buffer: PNG });
       await panel.getByRole('img', { name: 'captura.png' }).click();
-      await expect(page.getByRole('img', { name: 'Adjunto ampliado' })).toBeVisible();
-      await page.getByRole('button', { name: 'Cerrar imagen' }).click();
+      const enlarged = page.getByRole('dialog', { name: 'Imagen: captura.png' });
+      await expect(enlarged.getByRole('img', { name: 'captura.png' })).toBeVisible();
+      await enlarged.getByRole('button', { name: 'Cerrar' }).click();
+      await expect(enlarged).toBeHidden();
       await panel.getByRole('button', { name: 'Cerrar', exact: true }).click();
       await expect(panel).toBeHidden();
       await clean('panel del caso');

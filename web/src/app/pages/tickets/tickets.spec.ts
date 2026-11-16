@@ -5,17 +5,21 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { DeferBlockBehavior, DeferBlockState, TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import type { DeferBlockFixture } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { SAID_MS } from '../../core/announcer';
 import type { Company, Ticket, TicketDetail, User } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { Catalogs } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
+import { STATUS_DELAY_MS } from '../../core/status';
 import { TicketEvents } from '../../core/ticket-events';
 import { todayIso } from '../../core/ui';
 import { ASSIGNEES, COMPANIES, FAILURE, MODULES, SUPPORT_TYPES, TRAINING, ticket, ticketPage } from '../../testing/fixtures';
 import { httpTestBed } from '../../testing/http';
 import { clearSelect, closeSelect, ngSelect, optionTexts, typeInSelect } from '../../testing/ng-select';
-import { paste, screenOf, toasts } from '../../testing/screen';
+import { heardOnFocus, isDisabled, paste, said, screenOf, toasts } from '../../testing/screen';
 import { DESKTOP, PHONE, ScreenWidth, provideScreenWidth } from '../../testing/screen-width';
+import { textOf } from '../../testing/text';
+import { resizeScreen } from '../../testing/viewport';
 import { TicketsPage } from './tickets';
 
 const OTHER = ticket({ id: 8, code: 'SOP-00008', companyId: 5, company: 'Bodega Sur', description: 'No abre la caja' });
@@ -98,10 +102,15 @@ describe('TicketsPage', () => {
     render();
   }
 
-  /** Creates the list with its first reads still on their way: the cases, and the two preferences of the person. */
+  /**
+   * Creates the list with its first reads still on their way: the cases, and the two preferences of
+   * the person. A moment after it is drawn, as its status shows what it says (see Status).
+   */
   function create(): void {
     fixture = TestBed.createComponent(TicketsPage);
     el = fixture.nativeElement as HTMLElement;
+    render();
+    tick(STATUS_DELAY_MS);
     render();
   }
 
@@ -122,7 +131,8 @@ describe('TicketsPage', () => {
   const { find, button, click, type, pressEscape, select, chosen, offers, pick } = screenOf(() => el, render);
 
   // The table: its headers, its rows, and the cell of a row under a header.
-  const headers = (): string[] => Array.from(el.querySelectorAll('thead th'), (header) => header.textContent?.trim() ?? '');
+  // Named as who hears the table hears it: a header with a "?" is named by its label alone (see Hint).
+  const headers = (): string[] => Array.from(el.querySelectorAll('thead th'), (header) => header.getAttribute('aria-label') ?? textOf(header));
   const rows = (): HTMLTableRowElement[] => Array.from(el.querySelectorAll<HTMLTableRowElement>('tbody tr'));
 
   function cell(header: string, row: HTMLTableRowElement = rows()[0]): HTMLElement {
@@ -500,15 +510,30 @@ describe('TicketsPage', () => {
       expect(el.querySelector('table')).toBeNull();
     }));
 
-    // Where the classes `md:` of the page switch too.
-    it('switches at 768 px, also when the window is resized, without reading the list again', fakeAsync(() => {
+    // Beside "Registro: …", the first date of a card said what it is only in its title.
+    it('says on a card which date is the date of the case, not only in a title', fakeAsync(() => {
+      TestBed.inject(ScreenWidth).set(PHONE);
+      open([ticket()]);
+
+      const date = el.querySelector('[id$="-date"]')!;
+      expect(date.querySelector('.sr-only')?.textContent).toBe('Fecha del caso: ');
+      expect(date.textContent).toMatch(/^Fecha del caso: \d{2}\/\d{2}\/\d{4}/);
+    }));
+
+    // Where the classes `lg:` of the page switch too. A tablet held upright (768, 820) has the menu
+    // of the app at its side: it showed a third of the table, and gets the cards.
+    it('switches at 1024 px, also when the window is resized, without reading the list again', fakeAsync(() => {
       const screen = TestBed.inject(ScreenWidth);
-      screen.set(767);
+      screen.set(768);
       open();
       expect(el.querySelector('table')).toBeNull();
       expect(codes()).toEqual(['SOP-00007']);
 
-      screen.set(768);
+      screen.set(1023);
+      render();
+      expect(el.querySelector('table')).toBeNull();
+
+      screen.set(1024);
       render();
       expect(cards()).toEqual([]);
       expect(cell('Código').textContent).toContain('SOP-00007');
@@ -540,9 +565,155 @@ describe('TicketsPage', () => {
 
       listRead().flush(ticketPage([], 50));
       settle();
-      expect(el.textContent).toContain('No hay casos para mostrar.');
+      expect(el.textContent).toContain('Todavía no hay casos.');
       expect(el.textContent).not.toContain('Cargando…');
     }));
+
+    // The table offered it, the cards did not: on a phone the filters could not be cleared from there.
+    it('on a phone: offers "Limpiar filtros" when no case matches them, as the table does', fakeAsync(() => {
+      TestBed.inject(ScreenWidth).set(PHONE);
+      open();
+      type(find('input[type=search]'), 'zzzz-sin-resultados');
+      tick(300);
+      listRead().flush(ticketPage([], 50));
+      settle();
+      expect(el.textContent).toContain('Ningún caso coincide con los filtros.');
+
+      click(button('Limpiar filtros'));
+      expect(find<HTMLInputElement>('input[type=search]').value).toBe('');
+      listRead().flush(ticketPage([ticket()], 50));
+      settle();
+      expect(codes()).toEqual(['SOP-00007']);
+    }));
+  });
+
+  // Drawn for real, with the stylesheet of the app, on a screen of the size of each test.
+  describe('drawn on the screen', () => {
+    const cards = (): HTMLElement[] => Array.from(el.querySelectorAll<HTMLElement>('button.card'));
+
+    /** Opens the list on a screen this big, the BreakpointObserver of the app told the same width. */
+    function openOn(width: number, height: number, items: Ticket[]): void {
+      resizeScreen(width, height);
+      TestBed.inject(ScreenWidth).set(width);
+      open(items);
+    }
+
+    const UNBROKEN = 'UnidadEducativaParticularJaguarDelValleDeLosChillosYSusAlrededores'.repeat(3);
+
+    // A company of 200 letters and no space ran 743 px past its column, over four others, and
+    // widened the table to 1652 px on a laptop where the columns fit.
+    it('on a laptop: a long name stays in its column, three lines at most, and the table fits the screen', fakeAsync(() => {
+      openOn(1280, 800, [ticket({ company: UNBROKEN, assigneeName: 'FernandaGisellaVillavicencioQuiñónez'.repeat(2) })]);
+      const scroller = find('table').parentElement!;
+      const company = cell('Empresa');
+      const lines = company.querySelector<HTMLElement>('.line-clamp-3')!;
+
+      expect(company.scrollWidth).toBeLessThanOrEqual(company.clientWidth);
+      expect(cell('Responsable').scrollWidth).toBeLessThanOrEqual(cell('Responsable').clientWidth);
+      expect(getComputedStyle(lines).webkitLineClamp).toBe('3');
+      expect(lines.scrollHeight).toBeGreaterThan(lines.clientHeight);
+      // The table of a laptop with the menu at its side, as the app has it: 1280 less 224 and the padding.
+      scroller.style.width = `${1280 - 224 - 2 * 20}px`;
+      expect(scroller.scrollWidth).toBe(scroller.clientWidth);
+    }));
+
+    // WCAG 1.4.12: with wider letters and words, dates and the status ran into the next column.
+    it('with the text spacing of WCAG 1.4.12, keeps every cell inside its column', fakeAsync(() => {
+      openOn(1280, 800, [ticket({ status: 'UNRESOLVED', time: '14:35', supportTypes: [FAILURE] })]);
+      const spacing = document.head.appendChild(document.createElement('style'));
+      spacing.textContent = '* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }';
+      try {
+        for (const [index, td] of Array.from(rows()[0].cells).entries()) {
+          expect(td.scrollWidth).withContext(headers()[index]).toBeLessThanOrEqual(td.clientWidth);
+        }
+      } finally {
+        spacing.remove();
+      }
+    }));
+
+    // Scrolled sideways on a tablet, the code says which case each row is.
+    it('keeps the column of codes in view when the table scrolls sideways', fakeAsync(() => {
+      openOn(1024, 768, [ticket()]);
+      const code = find('tbody td');
+      const header = find('thead th');
+      const scroller = find('table').parentElement!;
+      scroller.style.width = '600px';
+      const left = code.getBoundingClientRect().left;
+
+      scroller.scrollLeft = 300;
+      expect(scroller.scrollLeft).toBe(300);
+      expect(code.getBoundingClientRect().left).toBe(left);
+      expect(header.getBoundingClientRect().left).toBe(left);
+      // Opaque: the cells that pass under it do not show through.
+      expect(getComputedStyle(code).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+      expect(getComputedStyle(header).backgroundColor).toBe(getComputedStyle(find('thead')).backgroundColor);
+    }));
+
+    // Shift+Tab up the table: the browser brought the code to the top edge, under the header.
+    it('stops a code the focus goes to below the header that stays on top', fakeAsync(() => {
+      openOn(1280, 800, Array.from({ length: 30 }, (_, index) => ticket({ id: index + 1, code: `SOP-${String(index + 1).padStart(5, '0')}` })));
+      // As high as the screen leaves it in the app, which this page outside the app does not limit.
+      const scroller = find('table').parentElement!;
+      scroller.style.flex = '0 0 400px';
+
+      // The row above the one with the focus, scrolled up under the header: inside the box that
+      // scrolls, and so "in view" for a browser that knows nothing of the header.
+      const code = rows()[14].querySelector('button')!;
+      const top = code.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTop = top - 10;
+      expect(code.getBoundingClientRect().top).toBeLessThan(find('thead').getBoundingClientRect().bottom);
+
+      code.focus();
+      expect(code.getBoundingClientRect().top).toBeGreaterThanOrEqual(find('thead').getBoundingClientRect().bottom);
+    }));
+
+    // Beside "Código" there is no room for it: under it, it covered the bottom of the sort button (WCAG 2.5.8, axe target-size).
+    it('keeps the "?" of the legend and the sort button apart, each a target of 24 px', fakeAsync(() => {
+      openOn(1280, 800, [ticket()]);
+      const code = Array.from(el.querySelectorAll<HTMLElement>('thead th')).find((th) => th.getAttribute('aria-label') === 'Código')!;
+      const sort = code.querySelector('button')!.getBoundingClientRect();
+      const help = code.querySelector('app-ticket-flags-legend button')!.getBoundingClientRect();
+
+      expect(Math.min(sort.height, help.width, help.height)).toBeGreaterThanOrEqual(24);
+      expect(help.top).toBeGreaterThanOrEqual(sort.bottom - 0.5);
+      expect(help.bottom).toBeLessThanOrEqual(code.getBoundingClientRect().bottom + 0.5);
+    }));
+
+    // The list had a scroll of its own inside the page's, lower than one card on a small phone.
+    it('on a phone: the cards go on down the page, which scrolls, with the pager after them', fakeAsync(() => {
+      openOn(320, 568, [ticket(), OTHER]);
+      const list = cards()[0].parentElement!;
+
+      expect(getComputedStyle(list).overflowY).toBe('visible');
+      expect(list.scrollHeight).toBe(list.clientHeight);
+    }));
+
+    // Below 340 px, and between 640 and 659, the row of buttons wraps and "Exportar" starts a line
+    // of its own at the left edge: its menu, lined up with the right of the button, went off the screen.
+    for (const width of [320, 640]) {
+      it(`at ${width} px opens the export menu inside the screen, right after its button`, fakeAsync(() => {
+        openOn(width, 568, [ticket()]);
+        // The button at the start of a line of its own, as the row wraps on those screens.
+        const button = find<HTMLButtonElement>('button[aria-controls=export-menu]');
+        const row = button.parentElement!.parentElement!;
+        row.style.width = `${button.parentElement!.offsetWidth + 4}px`;
+        expect(button.getBoundingClientRect().right).toBeLessThan(192);
+
+        click(button);
+        const menu = find('#export-menu');
+        expect(menu.getBoundingClientRect().left).toBeGreaterThanOrEqual(0);
+        expect(menu.getBoundingClientRect().right).toBeLessThanOrEqual(width);
+        expect(menu.previousElementSibling).toBe(button);
+        pressEscape();
+
+        // With room on its left, the menu opens towards the middle of the screen, as before.
+        row.style.width = '';
+        row.style.justifyContent = 'flex-end';
+        click(button);
+        expect(find('#export-menu').getBoundingClientRect().right).toBeCloseTo(button.getBoundingClientRect().right, 0);
+        pressEscape();
+      }));
+    }
   });
 
   // The list is read again whenever its filters, its order or its page change, and when cases change.
@@ -782,8 +953,8 @@ describe('TicketsPage', () => {
       open();
 
       expect(box('Código').checked).toBeTrue();
-      expect(box('Código').disabled).toBeTrue();
-      expect(box('Empresa').disabled).toBeFalse();
+      expect(isDisabled(box('Código'))).toBeTrue();
+      expect(isDisabled(box('Empresa'))).toBeFalse();
     }));
 
     it('are, on opening the list, the ones the user saved', fakeAsync(() => {
@@ -892,7 +1063,7 @@ describe('TicketsPage', () => {
       open([ticket()], { columns: { visible: ['code', 'company'] } });
       openColumns();
       const reset = button('Restablecer', popover()!);
-      expect(reset.disabled).toBeFalse();
+      expect(isDisabled(reset)).toBeFalse();
 
       click(reset);
       expect(headers()).toEqual(STARTING_COLUMNS);
@@ -901,7 +1072,7 @@ describe('TicketsPage', () => {
       save.flush(null, STORED);
       settle();
       // Nothing left to go back to.
-      expect(button('Restablecer', popover()!).disabled).toBeTrue();
+      expect(isDisabled(button('Restablecer', popover()!))).toBeTrue();
     }));
 
     // The server answers with what was saved before: it must not undo what the person just chose.
@@ -1000,6 +1171,28 @@ describe('TicketsPage', () => {
       expect(document.activeElement).toBe(columnsButton());
     }));
 
+    // An error toast hears on the window an Escape that nothing took, and goes with it (see Toasts): it went with the one that closed the list.
+    it('"Columnas" keeps the Escape that closes it: it goes no further than the page', fakeAsync(() => {
+      let reached = 0;
+      const hear = (): void => void reached++;
+      window.addEventListener('keydown', hear);
+      try {
+        open();
+        const checkbox = box('Empresa');
+        checkbox.focus();
+        checkbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        render();
+        expect(popover()).toBeNull();
+        expect(reached).toBe(0);
+
+        // Closed, it leaves the key alone.
+        columnsButton().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        expect(reached).toBe(1);
+      } finally {
+        window.removeEventListener('keydown', hear);
+      }
+    }));
+
     it('"Columnas" closes with a press anywhere else, and stays open while its checkboxes are pressed', fakeAsync(() => {
       open();
       openColumns();
@@ -1051,9 +1244,14 @@ describe('TicketsPage', () => {
       expect(cell('Fecha límite').classList).toContain('text-danger');
       expect(cell('Tiempo estimado').textContent?.trim()).toBe('1 h 35 min');
       expect(cell('Tiempo real').textContent?.trim()).toBe('30 min');
-      // The last observation, and how many the case has.
+      // The last observation, and how many the case has. What the number is was only in its title:
+      // the eye reads it in the hint of the column, who hears the row in the word after it.
       expect(cell('Observación').textContent).toContain('Se llamó al cliente');
-      expect(cell('Observación').querySelector('.badge')!.textContent?.trim()).toBe('3');
+      const count = cell('Observación').querySelector('.badge')!;
+      expect(textOf(count)).toBe('3 observaciones');
+      expect(textOf(count.querySelector('.sr-only'))).toBe('observaciones');
+      const header = Array.from(el.querySelectorAll<HTMLElement>('thead th')).find((th) => th.getAttribute('aria-label') === 'Observación')!;
+      expect(textOf(el.querySelector(`#${header.getAttribute('aria-describedby')}`))).toBe('La última observación del caso, y a su lado cuántas tiene cuando son más de una');
       // The user who registered it, by name.
       expect(cell('Registrado por').textContent?.trim()).toBe('Luis');
       expect(cell('Última actividad').textContent?.trim()).not.toBe('');
@@ -1377,7 +1575,7 @@ describe('TicketsPage', () => {
       openWithFilters();
       const clear = (): HTMLButtonElement => button('Limpiar filtros', filters()!);
       // Nothing to clear yet.
-      expect(clear().disabled).toBeTrue();
+      expect(isDisabled(clear())).toBeTrue();
 
       pick('tf-status', 'Resuelto');
       filtered();
@@ -1397,7 +1595,7 @@ describe('TicketsPage', () => {
       expect(checkbox('Vencidos').checked).toBeFalse();
       expect(search().value).toBe('');
       expect(count()).toBe('');
-      expect(clear().disabled).toBeTrue();
+      expect(isDisabled(clear())).toBeTrue();
     }));
 
     it('with no case to show say so, and offer to be cleared right there', fakeAsync(() => {
@@ -1434,8 +1632,8 @@ describe('TicketsPage', () => {
       pick('tf-archived', 'Todos');
       filtered();
 
-      click(find('button[aria-haspopup=menu]'));
-      click(find('[role=menu] button'));
+      click(find('button[aria-controls=export-menu]'));
+      click(find('#export-menu button'));
       const download = http.expectOne((request) => request.url === '/api/export/xlsx');
       const params = download.request.params;
       expect(Object.fromEntries(params.keys().map((key) => [key, params.get(key)]))).toEqual({ companyId: '5', supportType: '1', archived: 'all', dir: 'desc' });
@@ -1504,30 +1702,104 @@ describe('TicketsPage', () => {
       expect(formHost()).toBeNull();
     }));
 
-    it('needs a company and a description: until it has both there is nothing to register', fakeAsync(() => {
+    // What the date and the time of a case are was only in the titles of their labels.
+    it('shows what its date and its time are with a "?" by each, which the field is described by', fakeAsync(() => {
+      open();
+      openForm();
+
+      for (const [label, field, hint] of [
+        ['Fecha del caso', caseDate(), 'Día en que el cliente reportó el problema'],
+        ['Hora', caseTime(), 'Hora en que el cliente lo reportó. Opcional'],
+      ] as const) {
+        const help = find<HTMLButtonElement>(`app-new-ticket button[aria-label="Ayuda sobre ${label}"]`);
+        const text = find(`#${help.getAttribute('aria-describedby')}`);
+        expect(textOf(text)).toBe(hint);
+        expect(field.getAttribute('aria-describedby')).toContain(text.id);
+        click(help);
+        expect(text.hidden).toBeFalse();
+        click(help);
+        expect(text.hidden).toBeTrue();
+      }
+    }));
+
+    // "Registrar" was disabled until both were filled in, with nothing to say so: it could not even
+    // be reached with Tab, and Ctrl+Enter did nothing. The red asterisks were explained nowhere.
+    it('needs a company and a description: pressed without them, it says which, by its field, and registers nothing', fakeAsync(() => {
       /** Enter in a field sends a form whatever its button looks like. */
       function pressEnter(): void {
         find<HTMLFormElement>('app-new-ticket form').dispatchEvent(new Event('submit'));
         render();
       }
+      /** What a field says under it, once it is marked: its error, which it points at. */
+      function problemOf(field: Element): string | null {
+        if (field.getAttribute('aria-invalid') !== 'true') return null;
+        return textOf(el.querySelector(`#${field.getAttribute('aria-describedby')}`));
+      }
+      const company = (): HTMLInputElement => find('#nt-company');
       open();
       openForm();
-      expect(register().disabled).toBeTrue();
+      expect(isDisabled(register())).toBeFalse();
+      expect(textOf(find('app-new-ticket form'))).toContain('* Obligatorio.');
+      // Nothing is said before it is pressed.
+      expect(problemOf(company())).toBeNull();
+      expect(problemOf(description())).toBeNull();
+
+      pressEnter();
+      expect(problemOf(company())).toBe('Elige una empresa.');
+      expect(problemOf(description())).toBe('Escribe la descripción.');
+      expect(document.activeElement).toBe(company());
 
       pick('nt-company', 'Acme');
-      expect(register().disabled).toBeTrue();
+      expect(problemOf(company())).toBeNull();
       // Spaces are not a description.
       type(description(), '   ');
-      expect(register().disabled).toBeTrue();
-      pressEnter();
+      description().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+      render();
+      expect(problemOf(description())).toBe('Escribe la descripción.');
+      expect(document.activeElement).toBe(description());
 
       type(description(), 'No imprime');
-      expect(register().disabled).toBeFalse();
+      expect(problemOf(description())).toBeNull();
 
       clearSelect(select('nt-company'));
       render();
-      expect(register().disabled).toBeTrue();
-      pressEnter();
+      click(register());
+      expect(problemOf(company())).toBe('Elige una empresa.');
+      http.expectNone({ method: 'POST', url: '/api/tickets' });
+    }));
+
+    // The focus went to the field before its message was drawn; with the focus already there (on the
+    // company, where the form opens), nothing was said.
+    it('says the message of the field that has the focus, and gives the next field the focus with its message tied to it', fakeAsync(() => {
+      open();
+      openForm();
+      const company = find<HTMLInputElement>('#nt-company');
+      expect(document.activeElement).toBe(company);
+      click(register());
+      expect(document.activeElement).toBe(company);
+      expect(said()).toEqual(['Elige una empresa.']);
+
+      pick('nt-company', 'Acme');
+      const heard = heardOnFocus(description());
+      click(register());
+      expect(document.activeElement).toBe(description());
+      expect(heard).toEqual(['Escribe la descripción.']);
+      expect(said()).toEqual(['Elige una empresa.']);
+      tick(SAID_MS);
+      http.expectNone({ method: 'POST', url: '/api/tickets' });
+    }));
+
+    it('does not register a case dated after today, which it says at once, by the field', fakeAsync(() => {
+      open();
+      openForm();
+      pick('nt-company', 'Acme');
+      type(description(), 'No imprime');
+      type(caseDate(), '2099-01-01');
+
+      expect(caseDate().getAttribute('aria-invalid')).toBe('true');
+      expect(textOf(find('#nt-date-error'))).toBe('La fecha del caso no puede ser posterior a hoy');
+      click(register());
+      expect(document.activeElement).toBe(caseDate());
       http.expectNone({ method: 'POST', url: '/api/tickets' });
     }));
 
@@ -1542,7 +1814,7 @@ describe('TicketsPage', () => {
       const save = caseSave();
       expect(sent(save)).toEqual({ date: today, companyId: 5, description: 'No abre la caja', status: 'PENDING', assigneeId: null });
       // While it is on its way a second press sends nothing, from the button or from the keyboard.
-      expect(register().disabled).toBeTrue();
+      expect(isDisabled(register())).toBeTrue();
       expect(register().textContent).toContain('Registrando…');
       description().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
       render();
@@ -1648,8 +1920,8 @@ describe('TicketsPage', () => {
       // Cases typed in a row are often of the same day, and taken by the same person.
       expect(caseDate().value).toBe('2026-11-03');
       expect(chosen('nt-assignee')).toEqual(['Luis']);
-      // Nothing to register until the next one is filled in, starting by its company.
-      expect(register().disabled).toBeTrue();
+      // Ready for the next one, starting by its company, which is not yet said to be missing.
+      expect(find('#nt-company').getAttribute('aria-invalid')).toBe('false');
       expect(document.activeElement).toBe(select('nt-company').querySelector('input'));
 
       // And the next one is registered the same way.
@@ -1689,7 +1961,7 @@ describe('TicketsPage', () => {
       expect(chosen('nt-company')).toEqual(['Acme']);
       expect(description().value).toBe('No imprime');
       expect(note().value).toBe('Urgente');
-      expect(register().disabled).toBeFalse();
+      expect(isDisabled(register())).toBeFalse();
       // No case was added: the list is not read again.
       http.expectNone((request) => request.url === '/api/tickets');
     }));
@@ -2052,7 +2324,7 @@ describe('TicketsPage', () => {
 
   // Below 640 px their text is hidden, and a hidden text names nothing.
   describe('the buttons that show only their icon on a phone', () => {
-    const exportButton = (): HTMLButtonElement => find('button[aria-haspopup=menu]');
+    const exportButton = (): HTMLButtonElement => find('button[aria-controls=export-menu]');
 
     it('have a name of their own', fakeAsync(() => {
       open();
@@ -2065,16 +2337,338 @@ describe('TicketsPage', () => {
     it('Exportar says so in its name while the file is being generated', fakeAsync(() => {
       open();
       click(exportButton());
-      click(find('[role=menu] button'));
+      click(find('#export-menu button'));
       const download = http.expectOne((request) => request.url === '/api/export/xlsx');
       expect(exportButton().getAttribute('aria-label')).toBe('Generando…');
-      expect(exportButton().disabled).toBeTrue();
+      expect(isDisabled(exportButton())).toBeTrue();
 
       // No connection: there is no file to hand to the browser.
       download.error(new ProgressEvent('error'));
       settle();
       expect(exportButton().getAttribute('aria-label')).toBe('Exportar');
-      expect(exportButton().disabled).toBeFalse();
+      expect(isDisabled(exportButton())).toBeFalse();
+    }));
+  });
+
+  // What had the focus left the screen, and the browser put it nowhere: the next Tab started again
+  // from the top of the page, and nothing was said.
+  describe('the focus and what is said', () => {
+    const exportButton = (): HTMLButtonElement => find('button[aria-controls=export-menu]');
+    const searchBox = (): HTMLInputElement => find('input[type=search]');
+
+    // It had the roles of a menu without its keys: Enter did not go into it, the arrows did nothing,
+    // and it stayed open over "Filtros" and "Columnas" once Tab had left it.
+    it('opens the choices of "Exportar" as a part of the page that shows and hides, and closes them as the focus leaves', fakeAsync(() => {
+      open();
+      expect(exportButton().hasAttribute('aria-haspopup')).toBeFalse();
+      click(exportButton());
+      const menu = find('#export-menu');
+      expect(exportButton().getAttribute('aria-expanded')).toBe('true');
+      expect(menu.getAttribute('role')).toBeNull();
+      expect(el.querySelector('[role=menuitem]')).toBeNull();
+
+      // From its last choice to the search box, as Tab goes.
+      const last = menu.querySelectorAll('button')[1];
+      last.focus();
+      last.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: searchBox() }));
+      render();
+      expect(el.querySelector('#export-menu')).toBeNull();
+      expect(exportButton().getAttribute('aria-expanded')).toBe('false');
+
+      // Between the button and its choices it stays open, and with the focus nowhere too: Safari gives a pressed button none.
+      click(exportButton());
+      exportButton().dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: find('#export-menu button') }));
+      exportButton().dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+      render();
+      expect(el.querySelector('#export-menu')).not.toBeNull();
+      pressEscape();
+    }));
+
+    // An error toast hears on the window an Escape that nothing took, and goes with it (see Toasts): it went with the one that closed the choices.
+    it('keeps the Escape that closes the choices of "Exportar", and goes back to it', fakeAsync(() => {
+      let reached = 0;
+      const hear = (): void => void reached++;
+      window.addEventListener('keydown', hear);
+      try {
+        open();
+        click(exportButton());
+        const choice = find<HTMLButtonElement>('#export-menu button');
+        choice.focus();
+        choice.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        render();
+        expect(el.querySelector('#export-menu')).toBeNull();
+        expect(document.activeElement).toBe(exportButton());
+        expect(reached).toBe(0);
+
+        // Closed, it leaves the key alone.
+        exportButton().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        expect(reached).toBe(1);
+      } finally {
+        window.removeEventListener('keydown', hear);
+      }
+    }));
+
+    it('goes back to "Exportar" once a choice is made, and stays there while the file is made', fakeAsync(() => {
+      open();
+      click(exportButton());
+      const excel = find<HTMLButtonElement>('#export-menu button');
+      excel.focus();
+      click(excel);
+      tick();
+      render();
+
+      expect(document.activeElement).toBe(exportButton());
+      expect(isDisabled(exportButton())).toBeTrue();
+      // Failed or not, the focus is where it was.
+      http.expectOne((request) => request.url.startsWith('/api/export')).error(new ProgressEvent('error'));
+      settle();
+      expect(isDisabled(exportButton())).toBeFalse();
+      expect(document.activeElement).toBe(exportButton());
+      expect(toasts()).toEqual(['No hay conexión con el servidor']);
+    }));
+
+    // Disabled once nothing was left to clear, it gave the focus away to nowhere.
+    it('stays on "Limpiar filtros" of the filters once there is nothing left to clear', fakeAsync(() => {
+      open([ticket()], { filtersOpen: true });
+      type(searchBox(), 'zzzz');
+      tick(300);
+      listRead().flush(ticketPage([], 50));
+      settle();
+      const clear = button('Limpiar filtros', find('app-ticket-filters'));
+      clear.focus();
+      click(clear);
+      tick();
+      render();
+
+      expect(isDisabled(clear)).toBeTrue();
+      expect(document.activeElement).toBe(clear);
+      listRead().flush(ticketPage([ticket()], 50));
+      settle();
+    }));
+
+    it('goes to "Nuevo caso" when the form is closed with its "×"', fakeAsync(() => {
+      open();
+      click(button('Nuevo caso'));
+      const close = find<HTMLButtonElement>('button[aria-label="Cerrar el formulario de caso nuevo"]');
+      close.focus();
+      click(close);
+      tick();
+      render();
+
+      expect(el.querySelector('app-new-ticket')).toBeNull();
+      expect(document.activeElement).toBe(button('Nuevo caso'));
+    }));
+
+    it('goes to the search box once "Limpiar filtros" of the empty list goes away with what it said', fakeAsync(() => {
+      open();
+      type(searchBox(), 'zzzz');
+      tick(300);
+      listRead().flush(ticketPage([], 50));
+      settle();
+      const clear = button('Limpiar filtros');
+      clear.focus();
+      click(clear);
+      tick();
+      render();
+
+      expect(document.activeElement).toBe(searchBox());
+      listRead().flush(ticketPage([ticket()], 50));
+      settle();
+    }));
+
+    // The panel gives the focus back to what opened it. A case deleted from it has no row left.
+    it('goes to the search box when the panel closes and the row that opened it is gone', fakeAsync(() => {
+      open();
+      const code = find<HTMLButtonElement>(`button[data-case-id="${ticket().id}"]`);
+      code.focus();
+      click(code);
+      http.expectOne({ method: 'GET', url: '/api/tickets/7' }).flush(ticket());
+      settle();
+      expect(panel()).not.toBeNull();
+
+      events.removed(7);
+      settle();
+      listRead().flush(ticketPage([], 50));
+      settle();
+      expect(panel()).toBeNull();
+      expect(document.activeElement).toBe(searchBox());
+    }));
+
+    /** What the foot of the list shows the eye, beside its status: hidden from a screen reader. */
+    const seen = (): string[] =>
+      Array.from(find('app-status').parentElement!.children)
+        .filter((child) => child.getAttribute('aria-hidden') === 'true')
+        .map((child) => textOf(child));
+
+    // Read again for every case anyone saved, the list said "Actualizando…" each time to a screen reader nobody was using it with.
+    it('shows that it is reading the cases again for a change someone else made, and says nothing of it', fakeAsync(() => {
+      open([ticket(), ticket({ id: 8, code: 'SOP-00008' })]);
+      const status = find('app-status');
+
+      events.outdated(null);
+      render();
+      // On screen, beside the count: not in the status.
+      expect(seen()).toEqual(['2 caso(s)', 'Actualizando…']);
+      expect(textOf(status)).toBe('2 caso(s)');
+
+      listRead().flush(ticketPage([ticket()], 50));
+      settle();
+      expect(seen()).toEqual(['1 caso(s)']);
+    }));
+
+    // A case registered, deleted or archived elsewhere changed the count in the status: an idle screen-reader user heard "112 caso(s)".
+    it('says the count only once a read the person asked for is answered: a change someone else made changes it on screen alone', fakeAsync(() => {
+      open([ticket(), ticket({ id: 8, code: 'SOP-00008' })]);
+      const status = find('app-status');
+      expect(seen()).toEqual(['2 caso(s)']);
+      expect(textOf(status)).toBe('2 caso(s)');
+
+      // A case deleted elsewhere, and one registered: the page read again, in silence.
+      events.outdated(null);
+      render();
+      listRead().flush(ticketPage([ticket()], 50));
+      settle();
+      expect(seen()).toEqual(['1 caso(s)']);
+      expect(textOf(status)).toBe('2 caso(s)');
+      events.outdated(null);
+      render();
+      listRead().flush(ticketPage([ticket(), ticket({ id: 8, code: 'SOP-00008' }), ticket({ id: 9, code: 'SOP-00009' })], 50));
+      settle();
+      expect(seen()).toEqual(['3 caso(s)']);
+      expect(textOf(status)).toBe('2 caso(s)');
+
+      // A search, the order, a page: said once its answer comes.
+      type(searchBox(), 'impresora');
+      tick(300);
+      render();
+      expect(textOf(status)).toBe('2 caso(s) Actualizando…');
+      listRead().flush(ticketPage([ticket()], 50));
+      settle();
+      expect(textOf(status)).toBe('1 caso(s)');
+      expect(seen()).toEqual(['1 caso(s)']);
+      click(button('Código', find('thead')));
+      expect(textOf(status)).toBe('1 caso(s) Actualizando…');
+      listRead().flush(ticketPage([ticket(), ticket({ id: 8, code: 'SOP-00008' })], 50));
+      settle();
+      expect(textOf(status)).toBe('2 caso(s)');
+    }));
+
+    // Its only part on screen is the count the eye already sees (see above): read twice, once from each, when the page is read in order.
+    it('is hidden from the eye, and what the eye sees is hidden from a screen reader', fakeAsync(() => {
+      open([ticket(), ticket({ id: 8, code: 'SOP-00008' })]);
+      expect(find('app-status').classList).toContain('sr-only');
+      expect(seen()).toEqual(['2 caso(s)']);
+    }));
+
+    // While its first read was on its way the list said, and showed, "0 caso(s) Actualizando…": it had not 0 cases, it did not know yet.
+    it('says no count before its first read is answered, only that it is reading', fakeAsync(() => {
+      create();
+      preferenceRead('tickets.columns').flush({ value: null });
+      preferenceRead('tickets.filters-open').flush({ value: null });
+      render();
+      const status = find('app-status');
+      expect(textOf(status)).toBe('Actualizando…');
+
+      listRead().flush(ticketPage([ticket(), ticket({ id: 8, code: 'SOP-00008' })], 50));
+      settle();
+      expect(textOf(status)).toBe('2 caso(s)');
+    }));
+
+    // Read whole, every time it changed, it would say nothing: in no live region, the count changed in silence.
+    it('says how many cases the list has, and that it is reading them, where a screen reader hears it', fakeAsync(() => {
+      open([ticket(), ticket({ id: 8, code: 'SOP-00008' })]);
+      const status = find('app-status');
+      expect(status.getAttribute('role')).toBe('status');
+      expect(textOf(status)).toBe('2 caso(s)');
+
+      type(searchBox(), 'zzzz');
+      tick(300);
+      render();
+      expect(textOf(status)).toBe('2 caso(s) Actualizando…');
+      // The rows being read again say so too.
+      expect(find('.card.overflow-auto').getAttribute('aria-busy')).toBe('true');
+      listRead().flush(ticketPage([], 50));
+      settle();
+      expect(textOf(status)).toBe('0 caso(s) Ninguno coincide con los filtros.');
+      expect(find('.card.overflow-auto').getAttribute('aria-busy')).toBe('false');
+    }));
+
+    it('writes the state of a case in words, not only in a colour: the deadline that passed, the promise of today', fakeAsync(() => {
+      open([ticket({ overdue: true, dueAt: '2026-11-06T15:00:00.000Z', promisedDate: todayIso(), promiseState: 'today' })], { columns: { visible: ['code', 'description', 'dueAt'] } });
+
+      expect(textOf(cell('Fecha límite'))).toContain('Vencido');
+      expect(cell('Fecha límite').title).toBe('');
+      expect(textOf(cell('Descripción'))).toContain('· vence hoy');
+      expect(cell('Descripción').querySelector('app-icon[data-icon=calendar-today-outline]')).not.toBeNull();
+    }));
+
+    it('tells who hears the table what the hint of a header says', fakeAsync(() => {
+      open();
+      const header = Array.from(el.querySelectorAll<HTMLElement>('thead th')).find((th) => th.getAttribute('aria-label') === 'Fecha del caso')!;
+      expect(textOf(el.querySelector(`#${header.getAttribute('aria-describedby')}`))).toBe('Día en que el cliente reportó el problema');
+    }));
+
+    // The hint of a header was only its title: under a mouse that stays on it, never for a keyboard or a finger.
+    it('shows the hint of a header with its "?", to the keyboard and to a finger', fakeAsync(() => {
+      open();
+      const header = Array.from(el.querySelectorAll<HTMLElement>('thead th')).find((th) => th.getAttribute('aria-label') === 'Registro')!;
+      const help = header.querySelector<HTMLButtonElement>('button')!;
+      const hint = el.querySelector<HTMLElement>(`#${header.getAttribute('aria-describedby')}`)!;
+
+      expect(help.getAttribute('aria-label')).toBe('Ayuda sobre Registro');
+      expect(help.getAttribute('aria-describedby')).toBe(hint.id);
+      expect(hint.hidden).toBeTrue();
+
+      help.click();
+      settle();
+
+      expect(hint.hidden).toBeFalse();
+      expect(textOf(hint)).toBe('Día en que se registró el ticket en este sistema. Automática');
+      expect(help.getAttribute('aria-expanded')).toBe('true');
+      // The headers without a hint have no "?" (the one of the codes has the legend of the flags, below).
+      const plain = Array.from(el.querySelectorAll<HTMLElement>('thead th')).filter((th) => !th.hasAttribute('aria-describedby') && th.getAttribute('aria-label') !== 'Código');
+      expect(plain.length).toBeGreaterThan(0);
+      for (const th of plain) expect(th.querySelector('[aria-expanded]')).toBeNull();
+      help.click();
+      settle();
+    }));
+
+    // What the icons under each code meant was only in their titles: under a mouse that stays on one, never for a keyboard or a finger.
+    it('has the legend of the flags behind a "?" in the header of the codes, which is named by its label alone', fakeAsync(() => {
+      open([ticket({ overdue: true, dueAt: '2026-11-06T15:00:00.000Z', priority: 'HIGH' })]);
+      const code = Array.from(el.querySelectorAll<HTMLElement>('thead th')).find((th) => th.getAttribute('aria-label') === 'Código')!;
+      const legend = code.querySelector<HTMLButtonElement>('app-ticket-flags-legend button')!;
+
+      expect(legend.getAttribute('aria-label')).toBe('Ayuda sobre Indicadores');
+      expect(textOf(el.querySelector(`#${legend.getAttribute('aria-describedby')}`))).toContain('Vencido: abierto y con la fecha límite de su prioridad ya pasada.');
+      // The sort button keeps its name.
+      expect(textOf(code.querySelector('button'))).toBe('Código');
+      // The table has no room for the words of the flags: their icons alone, named.
+      expect(textOf(find('tbody app-ticket-flags'))).toBe('');
+      expect(find('tbody app-ticket-flags app-icon').getAttribute('aria-label')).toMatch(/^Vencido: /);
+    }));
+
+    it('writes the words of each flag beside its icon in the card of a phone', fakeAsync(() => {
+      TestBed.inject(ScreenWidth).set(PHONE);
+      open([ticket({ overdue: true, dueAt: '2026-11-06T15:00:00.000Z', priority: 'HIGH' })]);
+      expect(Array.from(el.querySelectorAll('button.card app-ticket-flags app-icon + span'), (words) => textOf(words))).toEqual(['Vencido', 'Alta']);
+    }));
+
+    // On a phone a card was a button named by all its text, read out whole every time the focus reached it.
+    it('names a card of a phone by its code and its company, and describes it with the rest', fakeAsync(() => {
+      TestBed.inject(ScreenWidth).set(PHONE);
+      open();
+      const card = find<HTMLButtonElement>('button.card');
+      const names = (attribute: string): string =>
+        (card.getAttribute(attribute) ?? '')
+          .split(' ')
+          .map((id) => textOf(el.querySelector(`#${id}`)))
+          .filter(Boolean)
+          .join(' | ');
+
+      expect(names('aria-labelledby')).toBe(`${ticket().code} | ${ticket().company}`);
+      expect(names('aria-describedby')).toContain(ticket().description);
+      expect(card.getAttribute('data-case-id')).toBe(String(ticket().id));
     }));
   });
 });
@@ -2157,12 +2751,14 @@ describe('TicketsPage, with the code of its dialogs still on its way', () => {
     void blocks[1].render(DeferBlockState.Loading);
     flushMicrotasks();
     render();
-    expect(pending()?.querySelector('[role=status]')?.textContent?.trim()).toBe('Abriendo…');
+    expect(pending()?.querySelector('.card')?.textContent?.trim()).toBe('Abriendo…');
+    expect(said()).toContain('Abriendo…');
 
     void blocks[1].render(DeferBlockState.Error);
     flushMicrotasks();
     render();
-    expect(pending()?.querySelector('[role=status]')).toBeNull();
+    expect(pending()?.textContent).not.toContain('Abriendo…');
+    expect(said()).not.toContain('Abriendo…');
     expect(pending()?.querySelector('[role=alertdialog] h2')?.textContent?.trim()).toBe('No se pudo abrir');
     expect(el.querySelector('app-import-dialog')).toBeNull();
 

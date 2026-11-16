@@ -1,16 +1,21 @@
 import { CdkDrag, CdkDropList } from '@angular/cdk/drag-drop';
 import type { CdkDragDrop } from '@angular/cdk/drag-drop';
+import { ScrollDispatcher } from '@angular/cdk/scrolling';
 import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { SAID_MS } from '../core/announcer';
 import type { Ticket, TicketStatus } from '../core/api';
 import { Catalogs } from '../core/catalogs';
+import { STATUS_DELAY_MS } from '../core/status';
 import { TicketEvents } from '../core/ticket-events';
 import { ASSIGNEES, ticket, ticketPage } from '../testing/fixtures';
 import { httpTestBed } from '../testing/http';
 import { chooseOption, clearSelect, closeSelect, ngSelect, optionTexts, selectedTexts } from '../testing/ng-select';
-import { toasts } from '../testing/screen';
+import { reduceMotion } from '../testing/reduced-motion';
+import { said, toasts } from '../testing/screen';
+import { resizeScreen } from '../testing/viewport';
 import { BoardPage } from './board';
 
 /** One read of the board: the open cases and the latest resolved ones, asked for together. */
@@ -91,7 +96,7 @@ describe('BoardPage', () => {
   function column(label: string): string {
     const section = el.querySelector(`section[aria-label="${label}"]`);
     if (!section) throw new Error(`No "${label}" column on screen`);
-    return Array.from(section.querySelectorAll('article'), (card) => card.textContent).join('\n');
+    return Array.from(section.querySelectorAll('[data-case-id]'), (card) => card.textContent).join('\n');
   }
 
   /**
@@ -119,7 +124,7 @@ describe('BoardPage', () => {
   }
 
   /** The codes of the cards on the board, column after column. */
-  const cards = (): string[] => Array.from(el.querySelectorAll('article .font-mono'), (code) => code.textContent ?? '');
+  const cards = (): string[] => Array.from(el.querySelectorAll('[data-case-id] .font-mono'), (code) => code.textContent ?? '');
   const filter = (): HTMLElement => ngSelect(el, 'Filtrar por responsable');
 
   describe('answers that arrive out of order', () => {
@@ -180,6 +185,50 @@ describe('BoardPage', () => {
       answer(again, [ticket()]);
       settle();
       expect(turning()).toBeFalse();
+    }));
+  });
+
+  // The icon of "Actualizar" that turns was all the eye was shown of a read, and with less motion it stands still.
+  describe('a read, with less motion asked for', () => {
+    const words = (): HTMLElement | undefined => Array.from(el.querySelectorAll<HTMLElement>('span')).find((span) => span.textContent?.trim() === 'Actualizando…');
+    const seen = (): boolean => {
+      const shown = words();
+      return !!shown && getComputedStyle(shown).display !== 'none' && shown.getBoundingClientRect().width > 0;
+    };
+
+    it('is written beside "Actualizar" for the eye until its answer arrives, the read of a change made elsewhere too', fakeAsync(() => {
+      create();
+      reduceMotion();
+      const first = read();
+      settle();
+      expect(seen()).toBeTrue();
+      // Who hears the page is told by the status, and only of a read they asked for.
+      expect(words()!.getAttribute('aria-hidden')).toBe('true');
+      expect(words()!.previousElementSibling?.getAttribute('aria-label')).toBe('Actualizar');
+
+      answer(first, [ticket()]);
+      settle();
+      expect(words()).toBeUndefined();
+
+      // Someone else changed a case: read in silence, but in sight, as the icon would have turned.
+      events.outdated(null);
+      render();
+      const again = read();
+      settle();
+      expect(seen()).toBeTrue();
+      answer(again, [ticket()]);
+      settle();
+      expect(words()).toBeUndefined();
+    }));
+
+    it('is left to the icon that turns when motion is welcome', fakeAsync(() => {
+      create();
+      const first = read();
+      settle();
+      expect(words()).toBeDefined();
+      expect(seen()).toBeFalse();
+      answer(first, [ticket()]);
+      settle();
     }));
   });
 
@@ -286,7 +335,7 @@ describe('BoardPage', () => {
       ];
       open([ticket({ supportTypes: types }), OF_ANA]);
 
-      const [typed, plain] = Array.from(el.querySelectorAll('article'));
+      const [typed, plain] = Array.from(el.querySelectorAll('[data-case-id]'));
       const chips = Array.from(typed.querySelectorAll<HTMLElement>('app-type-chip'));
       expect(chips.map((chip) => chip.textContent?.trim())).toEqual(['Capacitación', 'Falla del sistema']);
       expect(chips.map((chip) => chip.style.backgroundColor)).toEqual(['rgb(18, 183, 106)', 'rgb(185, 28, 28)']);
@@ -300,7 +349,7 @@ describe('BoardPage', () => {
     ]) {
       it(`is a button that ${name} opens, without scrolling the column`, fakeAsync(() => {
         open();
-        const card = el.querySelector<HTMLElement>('article')!;
+        const card = el.querySelector<HTMLElement>('[data-case-id]')!;
         expect(card.getAttribute('role')).toBe('button');
         expect(card.tabIndex).toBe(0);
 
@@ -410,6 +459,189 @@ describe('BoardPage', () => {
       drop('SOP-00007', 'PENDING');
       http.expectNone((request) => request.method === 'PATCH');
       expect(column('Pendiente')).toContain('SOP-00007');
+    }));
+  });
+
+  // Drawn for real, with the stylesheet of the app, on a screen of the size of each test.
+  describe('drawn on the screen', () => {
+    /** A company registered with no spaces, and a description that is a link: words that do not break by themselves. */
+    const LONG = ticket({
+      company: 'UnidadEducativaParticularJaguarDelValleDeLosChillosYSusAlrededores'.repeat(3),
+      description: 'https://soporte.example.test/casos/abiertos?empresa=UnidadEducativaParticularJaguar&modulo=FacturacionElectronica',
+      assigneeName: 'FernandaGisellaVillavicencioQuiñónezDeLaTorre',
+      notesCount: 3,
+    });
+
+    const sections = (): HTMLElement[] => Array.from(el.querySelectorAll<HTMLElement>('section'));
+    const columns = (): HTMLElement => sections()[0].parentElement!;
+
+    // The column of a card with such a word took 4320 px, and pushed the other two off a screen of 2560.
+    for (const [width, height] of [
+      [768, 1024],
+      [1440, 900],
+      [2560, 1440],
+    ]) {
+      it(`at ${width} px shares the width between the three columns, whatever the cards say`, fakeAsync(() => {
+        resizeScreen(width, height);
+        open([LONG, ticket({ id: 9, code: 'SOP-00009', status: 'RESOLVED' })]);
+
+        expect(columns().scrollWidth).toBe(columns().clientWidth);
+        const [first, ...others] = sections().map((section) => section.offsetWidth);
+        for (const other of others) expect(other).toBeCloseTo(first, -1);
+        for (const card of Array.from(el.querySelectorAll<HTMLElement>('[data-case-id]'))) expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth);
+      }));
+    }
+
+    // A column was 320 px wide on a phone of 320: its cards were cut, and the next column out of sight.
+    it('on a small phone makes a column narrower than the screen, with the next one in sight at its edge', fakeAsync(() => {
+      resizeScreen(320, 568);
+      open([LONG]);
+
+      const [first, second] = sections();
+      expect(first.offsetWidth).toBeLessThanOrEqual(320 - 48);
+      expect(second.getBoundingClientRect().left).toBeLessThan(320);
+      expect(el.querySelector<HTMLElement>('[data-case-id]')!.scrollWidth).toBeLessThanOrEqual(el.querySelector<HTMLElement>('[data-case-id]')!.clientWidth);
+    }));
+
+    // The count of observations went on to a line of its own, under its icon, next to a long name.
+    it('keeps the count of observations of a card next to its icon, on one line', fakeAsync(() => {
+      resizeScreen(390, 844);
+      open([LONG]);
+
+      const count = Array.from(el.querySelectorAll<HTMLElement>('[data-case-id] span')).find((span) => span.textContent?.trim() === '3')!;
+      expect(count.getBoundingClientRect().height).toBeLessThanOrEqual(20);
+    }));
+
+    // Dragged near the edge of the screen, a card scrolls the columns: on a phone the last one is out of sight.
+    it('scrolls the columns while a card is dragged near their edge', fakeAsync(() => {
+      open();
+
+      const lists = el.querySelectorAll<HTMLElement>('[cdkdroplist], .cdk-drop-list');
+      expect(lists.length).toBe(3);
+      const scrollers = TestBed.inject(ScrollDispatcher).getAncestorScrollContainers(lists[0]);
+      expect(scrollers.map((scroller) => scroller.getElementRef().nativeElement)).toContain(columns());
+    }));
+
+    // At 400 % (320 × 200), what the bars of the app leave a page is 83 px: the columns had no height at all.
+    it('keeps the columns a few cards high in a page lower than that, which scrolls to them', fakeAsync(() => {
+      resizeScreen(320, 568);
+      open([LONG]);
+      el.style.display = 'block';
+      el.style.height = '83px';
+
+      expect(columns().offsetHeight).toBeGreaterThanOrEqual(256);
+    }));
+
+    // There the page itself scrolls, bars and all: the columns are as high as the screen at most, and each scrolls its cards.
+    it('on a screen as short as a page zoomed to 400 %, makes the columns as high as the screen at most', fakeAsync(() => {
+      resizeScreen(320, 200);
+      open(Array.from({ length: 8 }, (_, index) => ticket({ id: index + 1, code: `SOP-0000${index + 1}` })));
+
+      expect(columns().offsetHeight).toBeLessThanOrEqual(200);
+      const list = sections()[1].querySelector<HTMLElement>('.cdk-drop-list')!;
+      expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    }));
+  });
+
+  // A card was an <article> named by all its text, some 600 letters read out every time the focus
+  // reached it, and nothing on the board said how to move a case without dragging it.
+  describe('a card, to the keyboard and to who hears it', () => {
+    const card = (): HTMLElement => el.querySelector<HTMLElement>('[data-case-id]')!;
+    const texts = (ids: string | null): string[] => (ids ?? '').split(' ').map((id) => el.querySelector(`#${id}`)?.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+
+    it('is a button named by its code and its company, described by the rest and by how to move it', fakeAsync(() => {
+      open([ticket({ description: 'No imprime desde el lunes' })]);
+
+      expect(card().tagName).toBe('DIV');
+      expect(card().getAttribute('role')).toBe('button');
+      expect(card().tabIndex).toBe(0);
+      expect(texts(card().getAttribute('aria-labelledby'))).toEqual(['SOP-00007', 'Acme']);
+      const described = texts(card().getAttribute('aria-describedby'));
+      expect(described.join(' ')).toContain('No imprime desde el lunes');
+      expect(described.at(-1)).toBe('Arrastra una tarjeta a otra columna, o ábrela con Enter y cambia su Estado.');
+      // The hint is on screen too, under the title.
+      expect(el.querySelector('#board-hint')!.closest('[hidden], .sr-only')).toBeNull();
+    }));
+
+    // What the icons of a card meant was only in their titles: under a mouse that stays on one, never for a keyboard or a finger.
+    it('has the legend of its flags behind a "?" beside the hint, which the cards are not described by', fakeAsync(() => {
+      open([ticket({ overdue: true, dueAt: '2026-11-06T15:00:00.000Z' })]);
+      const legend = el.querySelector<HTMLButtonElement>('app-ticket-flags-legend button')!;
+
+      expect(legend.getAttribute('aria-label')).toBe('Ayuda sobre Indicadores');
+      expect(el.querySelector('#board-hint')!.contains(legend)).toBeFalse();
+      expect(texts(card().getAttribute('aria-describedby')).join(' ')).not.toContain('Indicadores');
+      expect(el.querySelector(`#${legend.getAttribute('aria-describedby')}`)!.textContent).toContain('Olvidado:');
+    }));
+
+    // The panel gave the focus back to the card that opened it, which a change of status had made again in another column.
+    it('gets the focus back when its panel closes, also once the case moved to another column', fakeAsync(() => {
+      open();
+      card().focus();
+      card().click();
+      render();
+      http.expectOne({ method: 'GET', url: '/api/tickets/7' }).flush(ticket());
+      settle();
+
+      // Saved from the panel as resolved: its card is made again, in "Resuelto".
+      events.saved(ticket({ status: 'RESOLVED' }));
+      settle();
+      events.removed(7);
+      settle();
+      expect(el.querySelector('app-ticket-panel')).toBeNull();
+      // Deleted: no card is left, and the focus goes to the search box.
+      expect(document.activeElement).toBe(el.querySelector('input[type=search]'));
+    }));
+
+    // Read again for every case anyone saved, the board said so each time to a screen reader nobody was using it with.
+    it('says the board is being read again when "Actualizar" is pressed, to who does not see the icon that turns; not when someone else changes a case', fakeAsync(() => {
+      open();
+      tick(STATUS_DELAY_MS);
+      render();
+      const status = (): string => el.querySelector('app-status')!.textContent!.trim();
+      const turning = (): boolean => el.querySelector('button[aria-label="Actualizar"] app-icon svg')!.classList.contains('spin');
+      expect(status()).toBe('');
+
+      events.outdated(null);
+      render();
+      expect(turning()).toBeTrue();
+      expect(status()).toBe('');
+      answer(read(), [ticket()]);
+      settle();
+
+      el.querySelector<HTMLButtonElement>('button[aria-label="Actualizar"]')!.click();
+      render();
+      expect(turning()).toBeTrue();
+      expect(status()).toBe('Actualizando el tablero…');
+      answer(read(), [ticket()]);
+      settle();
+      expect(turning()).toBeFalse();
+      expect(status()).toBe('');
+    }));
+
+    // It was a status that came with its words, which a screen reader may not read.
+    it('says that cases were left out as the notice comes, once: not again when a read made in silence changes its numbers', fakeAsync(() => {
+      create();
+      // 503 open cases, of which the board shows the latest 500 (one, here).
+      const first = read();
+      first.open.flush({ items: [ticket()], total: 503, page: 1, pageSize: 500 });
+      first.resolved.flush(ticketPage([], 500));
+      settle();
+      const notice = Array.from(el.querySelectorAll<HTMLElement>('p')).find((p) => p.textContent?.includes('más antiguos'))!;
+      const words = 'El tablero muestra solo los 500 casos abiertos más recientes. Faltan 502 más antiguos: búscalos en la lista de Casos.';
+      expect(notice.closest('[role=status], [role=alert], [aria-live]')).toBeNull();
+      expect(said()).toEqual([words]);
+
+      events.outdated(null);
+      render();
+      const again = read();
+      again.open.flush({ items: [ticket()], total: 504, page: 1, pageSize: 500 });
+      again.resolved.flush(ticketPage([], 500));
+      settle();
+      expect(notice.textContent).toContain('Faltan 503 más antiguos');
+      expect(said()).toEqual([words]);
+      tick(SAID_MS);
+      expect(said()).toEqual([]);
     }));
   });
 });

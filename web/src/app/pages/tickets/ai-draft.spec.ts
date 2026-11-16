@@ -2,11 +2,13 @@ import type { HttpTestingController, TestRequest } from '@angular/common/http/te
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { Announcer, SAID_MS } from '../../core/announcer';
 import type { Company, TicketDraft } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
 import { httpTestBed } from '../../testing/http';
 import { clearSelect, closeSelect, openSelect, typeInSelect } from '../../testing/ng-select';
-import { paste, screenOf, toasts } from '../../testing/screen';
+import { heardOnFocus, isDisabled, paste, said, screenOf, toasts } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { AiDraftDialog } from './ai-draft';
 
 const picture = new File(['png'], 'captura.png', { type: 'image/png' });
@@ -143,7 +145,7 @@ describe('AiDraftDialog, the case under review', () => {
   }
 
   const screen = screenOf(() => el, render);
-  const { button, click, select, chosen, offers, pick } = screen;
+  const { button, click, find, select, chosen, offers, pick } = screen;
   /** What the person types in the field with this id. */
   const type = (id: string, text: string): void => screen.type(screen.find(`#${id}`), text);
 
@@ -176,6 +178,20 @@ describe('AiDraftDialog, the case under review', () => {
   const companySave = (): TestRequest => http.expectOne({ method: 'POST', url: '/api/companies' });
   /** The body of a request as it travels: what was left undefined is not in it. */
   const sent = (request: TestRequest): Record<string, unknown> => JSON.parse(JSON.stringify(request.request.body)) as Record<string, unknown>;
+
+  // What the promise is was only in the title of its label.
+  it('says what the promise is with a "?" by its switch, which the switch is described by', fakeAsync(() => {
+    byHand();
+    const help = find<HTMLButtonElement>('button[aria-label="Ayuda sobre Promesa de entrega"]');
+    const text = find(`#${help.getAttribute('aria-describedby')}`);
+
+    expect(text.textContent?.trim()).toBe('Día en que se le promete al cliente tener el caso resuelto');
+    expect(find('input[role=switch]').getAttribute('aria-describedby')).toBe(text.id);
+    click(help);
+    expect(text.hidden).toBeFalse();
+    click(help);
+    expect(text.hidden).toBeTrue();
+  }));
 
   it('has no native list: what comes from a catalog is chosen in a select with its name, which offers what a new case takes', fakeAsync(() => {
     byHand();
@@ -215,18 +231,75 @@ describe('AiDraftDialog, the case under review', () => {
     expect(hint()).toBeNull();
   }));
 
-  it('cannot be saved without a company and a description', fakeAsync(() => {
-    byHand();
-    expect(button('Guardar caso').disabled).toBeTrue();
+  /** What a field says under it, once it is marked: its error, which it points at. */
+  function problemOf(field: Element): string | null {
+    if (field.getAttribute('aria-invalid') !== 'true') return null;
+    return textOf(el.querySelector(`#${field.getAttribute('aria-describedby')!.split(' ')[0]}`));
+  }
+  const companyBox = (): HTMLInputElement => find<HTMLInputElement>('#ai-company');
+  const descriptionBox = (): HTMLTextAreaElement => find<HTMLTextAreaElement>('#ai-description');
 
-    type('ai-description', 'No imprime');
-    expect(button('Guardar caso').disabled).toBeTrue();
+  // "Guardar caso" was disabled without a company, with nothing to say so: not even reachable with Tab.
+  it('cannot be saved without a company and a description: pressed without them, says which, by its field', fakeAsync(() => {
+    byHand();
+    expect(isDisabled(button('Guardar caso'))).toBeFalse();
+    expect(problemOf(companyBox())).toBeNull();
+    // The asterisk of a required field is explained once.
+    expect(el.textContent).toContain('* Obligatorio.');
+
+    click(button('Guardar caso'));
+    expect(problemOf(companyBox())).toBe('Elige una empresa.');
+    expect(problemOf(descriptionBox())).toBe('Escribe la descripción.');
+    expect(document.activeElement).toBe(companyBox());
+    http.expectNone({ method: 'POST', url: '/api/tickets' });
 
     pick('ai-company', 'Ferretería El Tornillo');
-    expect(button('Guardar caso').disabled).toBeFalse();
+    expect(problemOf(companyBox())).toBeNull();
+    click(button('Guardar caso'));
+    expect(document.activeElement).toBe(descriptionBox());
+    http.expectNone({ method: 'POST', url: '/api/tickets' });
 
+    type('ai-description', 'No imprime');
+    expect(problemOf(descriptionBox())).toBeNull();
     type('ai-description', '   ');
-    expect(button('Guardar caso').disabled).toBeTrue();
+    expect(problemOf(descriptionBox())).toBe('Escribe la descripción.');
+  }));
+
+  // The focus went to the field before its message was drawn; with the focus already there, nothing was said.
+  it('gives the focus to the first missing field with its message already tied to it, and says the message when the focus is there', fakeAsync(() => {
+    byHand();
+    pick('ai-company', 'Ferretería El Tornillo');
+    const heard = heardOnFocus(descriptionBox());
+    click(button('Guardar caso'));
+    expect(document.activeElement).toBe(descriptionBox());
+    expect(heard).toEqual(['Escribe la descripción.']);
+    expect(said()).toEqual([]);
+
+    click(button('Guardar caso'));
+    expect(document.activeElement).toBe(descriptionBox());
+    expect(said()).toEqual(['Escribe la descripción.']);
+    tick(SAID_MS);
+    http.expectNone({ method: 'POST', url: '/api/tickets' });
+  }));
+
+  // That the hour of the case is optional, and what it is, was only in the title of its field.
+  it('says on screen, under the date, that the hour of the case is optional, and ties the hour to it', fakeAsync(() => {
+    byHand();
+    const hint = find('#ai-date-hint');
+    expect(textOf(hint)).toBe('Día en que lo reportó el cliente, y la hora si se sabe (opcional). La fecha de registro será hoy, automática.');
+    expect(find('input[type=time]').getAttribute('aria-describedby')).toBe('ai-date-hint');
+  }));
+
+  it('cannot be saved with a date after today, which it says at once, by the field', fakeAsync(() => {
+    byHand();
+    pick('ai-company', 'Ferretería El Tornillo');
+    type('ai-description', 'No imprime');
+    type('ai-date', '2099-01-01');
+
+    expect(problemOf(find('#ai-date'))).toBe('La fecha del caso no puede ser posterior a hoy');
+    click(button('Guardar caso'));
+    expect(document.activeElement).toBe(find('#ai-date'));
+    http.expectNone({ method: 'POST', url: '/api/tickets' });
   }));
 
   it('filled in by hand, is saved for the company chosen, with no responsible, priority, module or support type', fakeAsync(() => {
@@ -328,7 +401,6 @@ describe('AiDraftDialog, the case under review', () => {
       expect(hint()?.textContent).toContain('La IA leyó «Acme del Sur», que no está registrada.');
       // Nothing was created by reading it, and the case waits for its company.
       http.expectNone({ method: 'POST', url: '/api/companies' });
-      expect(button('Guardar caso').disabled).toBeTrue();
 
       click(button('Crear empresa «Acme del Sur»'));
       const add = companySave();
@@ -349,15 +421,16 @@ describe('AiDraftDialog, the case under review', () => {
     it('the AI read and the server refuses to create: says why, chooses nothing and can be tried again', fakeAsync(() => {
       analyzed({ company: 'Acme del Sur' });
       click(button('Crear empresa «Acme del Sur»'));
-      // While it is being created, a second press asks for nothing.
-      expect(button('Crear empresa «Acme del Sur»').disabled).toBeTrue();
+      // While it is being created, a second press asks for nothing, and the button says it in words: its icon that
+      // turns stands still with less motion asked for.
+      expect(isDisabled(button('Creando empresa «Acme del Sur»…'))).toBeTrue();
       companySave().flush({ message: 'Ya existe una empresa con ese nombre' }, REFUSED);
       settle();
 
       expect(toasts()).toEqual(['Ya existe una empresa con ese nombre']);
       expect(chosen('ai-company')).toEqual([]);
-      expect(button('Crear empresa «Acme del Sur»').disabled).toBeFalse();
-      expect(button('Guardar caso').disabled).toBeTrue();
+      expect(isDisabled(button('Crear empresa «Acme del Sur»'))).toBeFalse();
+      expect(chosen('ai-company')).toEqual([]);
     }));
 
     // "Acme" in the capture may be the client the team has as "Ferretería El Tornillo".
@@ -370,6 +443,24 @@ describe('AiDraftDialog, the case under review', () => {
       render();
       expect(hint()?.textContent).toContain('La IA leyó «Acme del Sur»');
       http.expectNone({ method: 'POST', url: '/api/companies' });
+    }));
+
+    // It was a status that came with its words, which a screen reader may not read, and that held the button, read out with them.
+    it('the AI read that is not in the catalog is said as the review comes, with its button in no live region', fakeAsync(() => {
+      analyzed({ company: 'Acme del Sur' });
+
+      expect(said()).toEqual(['La IA leyó «Acme del Sur», que no está registrada.']);
+      expect(hint()!.closest('[role=status], [role=alert], [aria-live]')).toBeNull();
+      expect(hint()!.querySelector('[role=status], [role=alert], [aria-live]')).toBeNull();
+      expect(button('Crear empresa «Acme del Sur»').closest('[role=status], [role=alert], [aria-live]')).toBeNull();
+
+      // Chosen instead, and taken off: offered, and said, again.
+      pick('ai-company', 'Ferretería El Tornillo');
+      expect(said()).toEqual([]);
+      clearSelect(select('ai-company'));
+      render();
+      expect(said()).toEqual(['La IA leyó «Acme del Sur», que no está registrada.']);
+      tick(SAID_MS);
     }));
 
     // A deactivated company takes no new cases, and a second one with its name cannot be created.
@@ -420,4 +511,58 @@ describe('AiDraftDialog, the case under review', () => {
     click(el.querySelector<HTMLElement>('.modal-backdrop')!);
     expect(closed).toBe(1);
   }));
+
+  // The button pressed goes with its step, and the browser put the focus nowhere: the next Tab
+  // went to "Volver" at the bottom of the form instead of its first field.
+  describe('the focus, from one step to the other', () => {
+    const heading = (): HTMLElement => find('#ai-title');
+
+    it('goes to the heading of the step, which says which one it is', fakeAsync(() => {
+      open();
+      button('Llenar a mano').focus();
+      click(button('Llenar a mano'));
+      expect(heading().textContent?.trim()).toBe('Revisar el caso');
+      expect(document.activeElement).toBe(heading());
+
+      button('Volver').focus();
+      click(button('Volver'));
+      expect(heading().textContent?.trim()).toBe('Nuevo caso con IA');
+      expect(document.activeElement).toBe(heading());
+    }));
+
+    it('goes to the heading of the review once the AI answers, and stays on "Analizar con IA" while it waits and when it fails', fakeAsync(() => {
+      open();
+      type('ai-text', 'No puedo imprimir la factura');
+      button('Analizar con IA').focus();
+      click(button('Analizar con IA'));
+      expect(isDisabled(button('Analizando…'))).toBeTrue();
+      expect(document.activeElement).toBe(button('Analizando…'));
+      http.expectOne({ method: 'POST', url: '/api/ai/analyze' }).flush({ message: 'El proveedor de IA no respondió' }, { status: 502, statusText: 'Bad Gateway' });
+      settle();
+      expect(find('.alert-error').textContent).toContain('El proveedor de IA no respondió');
+      // Said at once as it comes: it was an alert that came with its words, which a screen reader may not read.
+      expect(find('.alert-error').closest('[role=alert], [role=status], [aria-live]')).toBeNull();
+      expect(said()).toEqual(['El proveedor de IA no respondió']);
+      expect(TestBed.inject(Announcer).said()[0].politeness).toBe('assertive');
+      expect(document.activeElement).toBe(button('Analizar con IA'));
+
+      click(button('Analizar con IA'));
+      http.expectOne({ method: 'POST', url: '/api/ai/analyze' }).flush(draft({}));
+      settle();
+      expect(document.activeElement).toBe(heading());
+    }));
+
+    it('stays on "Guardar caso" while the case is saved', fakeAsync(() => {
+      byHand();
+      pick('ai-company', 'Ferretería El Tornillo');
+      type('ai-description', 'No imprime');
+      button('Guardar caso').focus();
+      click(button('Guardar caso'));
+
+      expect(isDisabled(button('Guardando…'))).toBeTrue();
+      expect(document.activeElement).toBe(button('Guardando…'));
+      caseSave().flush({ id: 8, code: 'SOP-00008' });
+      settle();
+    }));
+  });
 });

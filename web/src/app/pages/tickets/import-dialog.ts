@@ -1,12 +1,15 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { ChangeDetectionStrategy, Component, computed, inject, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Say } from '../../core/announcer';
 import { Api } from '../../core/api';
 import type { ImportResult, ImportUnknown } from '../../core/api';
 import { BackdropClick } from '../../core/backdrop-click';
+import { Hint } from '../../core/hint';
 import { Icon } from '../../core/icon';
 import { latest } from '../../core/loading';
 import { SELECT } from '../../core/select';
+import { SoftDisabled } from '../../core/soft-disabled';
 import { Toast } from '../../core/toast';
 import { PRIORITY_LABEL, STATUS_LABEL, downloadBlob, errorMessage, formatCaseDate } from '../../core/ui';
 
@@ -91,21 +94,21 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
  */
 @Component({
   selector: 'app-import-dialog',
-  imports: [FormsModule, A11yModule, BackdropClick, ...SELECT, Icon],
+  imports: [FormsModule, A11yModule, BackdropClick, ...SELECT, Hint, Icon, Say, SoftDisabled],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
     <div class="modal-backdrop" (appBackdropClick)="closed.emit()">
-      <div class="card flex max-h-full w-full max-w-2xl flex-col" role="dialog" aria-modal="true" aria-labelledby="import-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
+      <div class="card overlay max-h-full w-full max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="import-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
         <header class="flex items-center gap-2 border-b border-line px-4 py-3">
           <app-icon name="file-import-outline" class="text-xl text-primary" />
           <h2 id="import-title" class="font-semibold">Importar hoja de casos</h2>
-          <button type="button" class="btn btn-ghost ml-auto px-2" (click)="closed.emit()" aria-label="Cerrar">
+          <button type="button" class="btn btn-ghost btn-icon ml-auto px-2" (click)="closed.emit()" aria-label="Cerrar">
             <app-icon name="close" class="text-lg" />
           </button>
         </header>
 
-        <div class="min-h-0 flex-1 space-y-4 overflow-auto p-4">
+        <div class="overlay-body space-y-4 p-4">
           <p class="text-muted">
             Archivo <strong>.xlsx</strong> o <strong>.csv</strong> con encabezados como: Fecha, Hora, Empresa, Descripción, Estado, Prioridad, Módulo, Responsable, Tipo de soporte, Observación.
             Solo Empresa y Descripción son obligatorias. La columna Fecha se toma como fecha del caso; la fecha de registro de todos será la de hoy.
@@ -118,9 +121,9 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
               <strong class="block text-sm text-ink">¿Vas a armar la hoja desde cero?</strong>
               Usa la plantilla: trae las columnas listas, la fecha como fecha y listas para elegir entre las empresas, los responsables, los módulos y los tipos de soporte registrados. Llénala y súbela aquí.
             </p>
-            <button type="button" class="btn btn-soft" [disabled]="downloading()" (click)="downloadTemplate()">
+            <button type="button" class="btn btn-soft" [appSoftDisabled]="downloading()" (click)="downloadTemplate()">
               <app-icon [name]="downloading() ? 'loading' : 'download'" />
-              Descargar plantilla
+              {{ downloading() ? 'Descargando plantilla…' : 'Descargar plantilla' }}
             </button>
           </div>
 
@@ -146,8 +149,9 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
             </div>
           </div>
 
+          <!-- Said at once as it comes (see Say): an alert that comes with its words may not be read. -->
           @if (error()) {
-            <p class="alert-error" role="alert">{{ error() }}</p>
+            <p class="alert-error" [appSay]="error()" sayAs="assertive">{{ error() }}</p>
           }
 
           @if (preview(); as p) {
@@ -172,9 +176,10 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
                 </div>
               </div>
 
+              <!-- On more lines when it has to: a sheet can name a column with several headers, longer than a phone is wide. -->
               <div class="flex flex-wrap gap-1.5 text-xs">
                 @for (column of columnKeys; track column) {
-                  <span class="badge" [class]="p.columns[column] ? 'st-RESOLVED' : 'bg-elevated text-muted'">
+                  <span class="badge whitespace-normal" [class]="p.columns[column] ? 'st-RESOLVED' : 'bg-elevated text-muted'">
                     {{ columnLabel[column] }}: {{ p.columns[column] ?? 'no encontrada' }}
                   </span>
                 }
@@ -183,11 +188,18 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
               @if (p.rejected > 0) {
                 <section aria-labelledby="import-rejected">
                   <h3 id="import-rejected" class="section-title mb-1.5">Filas rechazadas ({{ p.rejected }})</h3>
-                  <div class="overflow-auto rounded-control border border-line">
+                  <!--
+                    A box that scrolls, and the keyboard scrolls it too: it takes the focus, with its name and its ring,
+                    and is never higher than a part of the dialog, so that both stay in view.
+                  -->
+                  <div class="max-h-80 overflow-auto rounded-control border border-line focus-visible:outline-2 focus-visible:outline-primary" tabindex="0" role="region" aria-label="Filas rechazadas">
                     <table class="w-full text-left text-xs">
                       <thead class="bg-elevated text-muted">
                         <tr>
-                          <th class="px-2 py-1.5" title="Número de la fila en la hoja">Fila</th>
+                          <!-- Named "Fila" alone: its "?" is not part of the header (see Hint). -->
+                          <th class="px-2 py-1.5" title="Número de la fila en la hoja" aria-label="Fila" aria-describedby="import-row-hint">
+                            Fila <app-hint textId="import-row-hint" about="Fila" text="Número de la fila en la hoja" />
+                          </th>
                           <th class="px-2 py-1.5">Por qué no se importa</th>
                         </tr>
                       </thead>
@@ -252,7 +264,8 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
 
               @if (p.sample.length) {
                 <div>
-                  <div class="overflow-auto rounded-control border border-line">
+                  <!-- Scrolled by the keyboard too, as the one of the rejected rows. -->
+                  <div class="max-h-80 overflow-auto rounded-control border border-line focus-visible:outline-2 focus-visible:outline-primary" tabindex="0" role="region" aria-label="Primeras filas que se importan">
                     <table class="w-full text-left text-xs">
                       <thead class="bg-elevated text-muted">
                         <tr>
@@ -305,7 +318,7 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
         <footer class="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
           <button type="button" class="btn btn-ghost" (click)="closed.emit()">Cancelar</button>
           <!-- Says how many cases come in: the rejected rows and the ones that already exist are not among them. -->
-          <button type="button" class="btn btn-primary" [disabled]="busy() || !preview()?.toCreate" (click)="run()">
+          <button type="button" class="btn btn-primary" [appSoftDisabled]="busy() || !preview()?.toCreate" (click)="run()">
             {{ busy() ? 'Procesando…' : confirmLabel() }}
           </button>
         </footer>

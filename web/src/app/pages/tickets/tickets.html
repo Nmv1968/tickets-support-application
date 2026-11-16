@@ -1,9 +1,10 @@
-<div class="flex h-full flex-col gap-3 p-3 md:p-5">
+<!-- As high as the screen with the table, which scrolls inside; with the cards, as long as they are, and the page scrolls. -->
+<div class="flex flex-col gap-3 p-3 md:p-5" [class.h-full]="wide()" [class.min-h-full]="!wide()">
   <!-- Title and actions -->
   <div class="flex flex-wrap items-center gap-2">
     <h1 class="mr-auto basis-full text-lg font-semibold sm:basis-auto">Casos de soporte</h1>
 
-    <button type="button" class="btn btn-primary" aria-controls="new-ticket" [attr.aria-expanded]="newOpen()" (click)="newOpen.set(!newOpen())">
+    <button #newCaseButton type="button" class="btn btn-primary" aria-controls="new-ticket" [attr.aria-expanded]="newOpen()" (click)="newOpen.set(!newOpen())">
       <app-icon name="plus" class="text-base" />
       Nuevo caso
     </button>
@@ -14,23 +15,34 @@
       <span class="hidden sm:inline">Nuevo con IA</span>
     </button>
     <!-- On phones these two show only their icon, so each carries its name apart from the text. -->
-    <button type="button" class="btn btn-soft" (click)="importOpen.set(true)" aria-label="Importar">
+    <button type="button" class="btn btn-soft btn-icon" (click)="importOpen.set(true)" aria-label="Importar">
       <app-icon name="file-import-outline" class="text-base" />
       <span class="hidden sm:inline">Importar</span>
     </button>
-    <div #exportMenu class="relative">
+    <!-- A button that shows and hides its two choices: they close as the focus leaves them, or with Escape. -->
+    <div #exportMenu class="relative" (focusout)="onExportFocusOut($event)">
       @let exportLabel = exporting() ? 'Generando…' : 'Exportar';
-      <button type="button" class="btn btn-soft" [disabled]="exporting()" (click)="exportOpen.set(!exportOpen())" aria-haspopup="menu" [attr.aria-expanded]="exportOpen()" [attr.aria-label]="exportLabel">
+      <button
+        #exportButton
+        type="button"
+        class="btn btn-soft btn-icon"
+        [appSoftDisabled]="exporting()"
+        (click)="toggleExport()"
+        aria-controls="export-menu"
+        [attr.aria-expanded]="exportOpen()"
+        [attr.aria-label]="exportLabel"
+      >
         <app-icon name="download-outline" class="text-base" />
         <span class="hidden sm:inline">{{ exportLabel }}</span>
       </button>
       @if (exportOpen()) {
-        <div class="card absolute right-0 z-30 mt-1 w-48 p-1" role="menu">
-          <button type="button" class="nav-link w-full" role="menuitem" (click)="export('xlsx')">
+        <!-- Right after its button, in the order of the page, and on the side of it where it fits (see toggleExport). -->
+        <div id="export-menu" class="card absolute z-30 mt-1 w-48 max-w-[calc(100vw-2rem)] p-1" [class.left-0]="exportSide() === 'left'" [class.right-0]="exportSide() === 'right'">
+          <button type="button" class="nav-link w-full" (click)="export('xlsx')">
             <app-icon name="file-excel-outline" class="text-lg leading-none text-success" />
             Excel (.xlsx)
           </button>
-          <button type="button" class="nav-link w-full" role="menuitem" (click)="export('pdf')">
+          <button type="button" class="nav-link w-full" (click)="export('pdf')">
             <app-icon name="file-pdf-box" class="text-lg leading-none text-danger" />
             PDF
           </button>
@@ -46,6 +58,7 @@
       <div class="relative min-w-0 flex-1">
         <app-icon name="magnify" class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-base text-muted" />
         <input
+          #searchBox
           class="input pl-8"
           type="search"
           placeholder="Buscar empresa, descripción, observación o código"
@@ -58,7 +71,7 @@
       @let count = filterCount();
       <button
         type="button"
-        class="btn btn-soft"
+        class="btn btn-soft btn-icon"
         aria-controls="ticket-filters"
         [attr.aria-expanded]="filtersOpen()"
         [attr.aria-label]="count ? 'Filtros: ' + count + (count === 1 ? ' activo' : ' activos') : 'Filtros'"
@@ -68,7 +81,7 @@
         <app-icon name="filter-variant" class="text-base" />
         <span class="hidden sm:inline">Filtros</span>
         @if (count) {
-          <span class="badge bg-primary px-1.5 text-white">{{ count }}</span>
+          <span class="badge bg-primary-fill px-1.5 text-white">{{ count }}</span>
         }
       </button>
       <app-ticket-columns [visible]="visibleColumns()" (visibleChange)="chooseColumns($event)" />
@@ -79,16 +92,19 @@
   </div>
 
   @if (newOpen()) {
-    <app-new-ticket (registered)="onRegistered()" (closed)="newOpen.set(false)" />
+    <app-new-ticket (registered)="onRegistered()" (closed)="closeNewTicket()" />
   }
 
   <!--
-    A wide screen: the table. A phone: a card per case. Only the one that applies is drawn.
-    Neither gets shorter than a few rows (min-h-64): with the filters and the form of a new case
-    open on a low screen, the page scrolls instead.
+    A wide screen: the table. A phone or a tablet held upright: a card per case. Only the one that
+    applies is drawn. The table never gets shorter than a few rows (min-h-64): with the filters and
+    the form of a new case open on a low screen, the page scrolls instead.
+    The table scrolls under its header and its column of codes, which stay in view: a code the
+    focus goes to stops clear of both (scroll-pt: the header is 60 px high; scroll-pl), and a shadow on the right edge says
+    there are more columns that way (scroll-cue-x).
   -->
   @if (wide()) {
-    <div class="card min-h-64 flex-1 overflow-auto">
+    <div class="card scroll-cue-x min-h-64 flex-1 scroll-pt-16 scroll-pl-22 overflow-auto" [attr.aria-busy]="loading()">
       <!--
         Fixed layout: Descripción and Observación share the space the other columns leave. The cells
         are padded 8 px a side, and the widths of the columns count on it (see COLUMNS).
@@ -99,18 +115,42 @@
             <col [style.width.px]="column.width" />
           }
         </colgroup>
-        <thead class="sticky top-0 z-10 bg-primary text-xs text-white">
-          <tr>
+        <thead class="sticky top-0 z-10 bg-primary-fill text-xs text-white">
+          <!-- The colour of the header, which the cell of the codes needs of its own: the other cells pass under it. -->
+          <tr class="bg-inherit">
             @for (column of columns(); track column.id) {
               @if (column.id === 'code') {
-                <th class="px-2 py-2.5 font-semibold" [attr.aria-sort]="sortDir() === 'asc' ? 'ascending' : 'descending'">
-                  <button type="button" class="inline-flex items-center gap-0.5 font-semibold" (click)="toggleSort()" [title]="sortDir() === 'asc' ? 'Orden: número de caso de menor a mayor. Clic para invertir' : 'Orden: número de caso de mayor a menor. Clic para invertir'">
-                    Código
-                    <app-icon [name]="sortDir() === 'asc' ? 'arrow-up' : 'arrow-down'" class="text-sm leading-none" />
-                  </button>
+                <!--
+                  Named "Código" alone: the "?" under the button is the legend of the flags under each code
+                  (see TicketFlagsLegend), which the column has no room to write out. One under the other, as
+                  far apart as two targets of 24 px need (WCAG 2.5.8): the column is too narrow for both on a line.
+                -->
+                <th class="sticky left-0 bg-inherit px-2 py-2.5 font-semibold" aria-label="Código" [attr.aria-sort]="sortDir() === 'asc' ? 'ascending' : 'descending'">
+                  <div class="flex flex-col items-start gap-2">
+                    <!-- 24 px high for a finger (WCAG 2.5.8); the margins keep the header as high as before. -->
+                    <button type="button" class="-my-1 inline-flex min-h-6 items-center gap-0.5 font-semibold" (click)="toggleSort()" [title]="sortDir() === 'asc' ? 'Orden: número de caso de menor a mayor. Clic para invertir' : 'Orden: número de caso de mayor a menor. Clic para invertir'">
+                      Código
+                      <app-icon [name]="sortDir() === 'asc' ? 'arrow-up' : 'arrow-down'" class="text-sm leading-none" />
+                    </button>
+                    <app-ticket-flags-legend textId="list-flags-legend" />
+                  </div>
                 </th>
               } @else {
-                <th class="px-2 py-2.5 font-semibold" [attr.title]="column.hint ?? null">{{ column.label }}</th>
+                <!--
+                  The hint of a header is behind its "?" (see Hint), and is said with the header to who
+                  hears the table. The header is named by its label alone: the "?" is not part of it.
+                -->
+                <th
+                  class="px-2 py-2.5 font-semibold"
+                  [attr.title]="column.hint ?? null"
+                  [attr.aria-label]="column.hint ? column.label : null"
+                  [attr.aria-describedby]="column.hint ? 'column-hint-' + column.id : null"
+                >
+                  {{ column.label }}
+                  @if (column.hint) {
+                    <app-hint [textId]="'column-hint-' + column.id" [about]="column.label" [text]="column.hint" />
+                  }
+                </th>
               }
             }
           </tr>
@@ -119,13 +159,17 @@
           @for (row of rows(); track row.ticket.id) {
             @let t = row.ticket;
             <!-- Read only: the case is changed in its form, which the row opens. -->
-            <tr class="cursor-pointer border-b border-line align-top hover:bg-elevated/60" (click)="openRow(t)">
+            <tr class="group cursor-pointer border-b border-line align-top hover:bg-elevated/60" (click)="openRow(t)">
               @for (column of columns(); track column.id) {
                 @switch (column.id) {
                   @case ('code') {
-                    <td class="p-2">
-                      <!-- The way into the case for the keyboard. Its press stops here: the row would not open with a text selected somewhere. -->
-                      <button type="button" class="font-mono text-xs text-primary hover:underline" (click)="$event.stopPropagation(); openId.set(t.id)">{{ t.code }}</button>
+                    <!-- In view however far the table scrolls sideways: opaque, in the colour the row has under the pointer, with a line where the others pass under it. -->
+                    <td class="sticky left-0 z-[1] bg-surface p-2 shadow-[inset_-1px_0_0_var(--color-line)] group-hover:bg-[color-mix(in_srgb,var(--color-elevated)_60%,var(--color-surface))]">
+                      <!--
+                        The way into the case for the keyboard. Its press stops here: the row would not open with a text selected somewhere.
+                        24 px high for a finger (WCAG 2.5.8): the margins keep the row as high as before.
+                      -->
+                      <button type="button" class="-my-1 min-h-6 font-mono text-xs text-primary hover:underline" [attr.data-case-id]="t.id" (click)="$event.stopPropagation(); openId.set(t.id)">{{ t.code }}</button>
                       <app-ticket-flags class="mt-0.5" [ticket]="t" [showPromise]="!promiseWritten()" />
                       @if (t.archivedAt) {
                         <span class="badge mt-1 bg-elevated text-muted" [title]="row.archived">Archivado</span>
@@ -133,7 +177,8 @@
                     </td>
                   }
                   @case ('date') {
-                    <td class="p-2 whitespace-nowrap">
+                    <!-- The dates may go on to a second line: with wider letters (WCAG 1.4.12), kept on one they ran into the next column. -->
+                    <td class="p-2">
                       {{ row.day }}
                       @if (t.time) {
                         <div class="text-xs text-muted" title="Hora del caso">{{ t.time }}</div>
@@ -141,10 +186,13 @@
                     </td>
                   }
                   @case ('createdAt') {
-                    <td class="p-2 whitespace-nowrap text-muted" [title]="row.registered">{{ row.text.createdAt }}</td>
+                    <td class="p-2 text-muted" [title]="row.registered">{{ row.text.createdAt }}</td>
                   }
                   @case ('company') {
-                    <td class="p-2 font-medium">{{ t.company }}</td>
+                    <!-- Three lines at most, as the description: the whole name is in the form of the case. -->
+                    <td class="p-2 font-medium">
+                      <div class="line-clamp-3">{{ t.company }}</div>
+                    </td>
                   }
                   @case ('description') {
                     <td class="p-2">
@@ -155,15 +203,16 @@
                       }
                       @if (t.promisedDate && !shown().has('promisedDate')) {
                         <div class="mt-0.5 flex items-center gap-1 text-2xs" [class]="row.promiseClass">
-                          <app-icon name="calendar-clock-outline" />
+                          <app-icon [name]="row.promiseIcon" />
                           Entrega prometida: {{ row.text.promisedDate }}
                         </div>
                       }
                     </td>
                   }
                   @case ('status') {
+                    <!-- On more lines rather than over the next column, with wider letters (WCAG 1.4.12). -->
                     <td class="p-2">
-                      <span appStatusBadge [status]="t.status"></span>
+                      <span appStatusBadge class="whitespace-normal" [status]="t.status"></span>
                     </td>
                   }
                   @case ('assignee') {
@@ -179,7 +228,7 @@
                     <td class="p-2 whitespace-nowrap">
                       @if (t.priority) {
                         <!-- The colour is in the flag: as the colour of the text, some of them are too faint to read. -->
-                        <app-icon name="flag" [class]="row.priorityClass" />
+                        <app-icon [name]="row.priorityIcon" [class]="row.priorityClass" />
                         {{ row.text.priority }}
                       }
                     </td>
@@ -204,7 +253,13 @@
                     </td>
                   }
                   @case ('dueAt') {
-                    <td class="p-2" [class.text-danger]="t.overdue" [attr.title]="t.overdue ? 'Vencido' : null">{{ row.text.dueAt }}</td>
+                    <!-- Said in words too, not only in the colour of the date. -->
+                    <td class="p-2" [class.text-danger]="t.overdue">
+                      {{ row.text.dueAt }}
+                      @if (t.overdue) {
+                        <div class="text-xs font-medium"><app-icon name="clock-alert-outline" /> Vencido</div>
+                      }
+                    </td>
                   }
                   @case ('lastNote') {
                     <td class="p-2">
@@ -212,7 +267,8 @@
                         <div class="flex items-start gap-1">
                           <span class="line-clamp-2 flex-1 whitespace-pre-line">{{ t.lastNote }}</span>
                           @if (t.notesCount > 1) {
-                            <span class="badge bg-elevated text-muted" [title]="t.notesCount + ' observaciones'">{{ t.notesCount }}</span>
+                            <!-- How many the case has: the eye is told by the hint of the column, who hears the row by the word after the number. -->
+                            <span class="badge bg-elevated text-muted" [title]="t.notesCount + ' observaciones'">{{ t.notesCount }}<span class="sr-only"> observaciones</span></span>
                           }
                         </div>
                       }
@@ -230,14 +286,7 @@
           } @empty {
             <tr>
               <td [attr.colspan]="columns().length" class="px-3 py-12 text-center text-muted">
-                @if (loading()) {
-                  Cargando…
-                } @else if (hasFilters()) {
-                  Ningún caso coincide con los filtros.
-                  <button type="button" class="font-medium text-primary underline underline-offset-2" (click)="clearFilters()">Limpiar filtros</button>
-                } @else {
-                  Todavía no hay casos. Usa «Nuevo caso», pega una captura (Ctrl+V) o importa tu hoja de Excel.
-                }
+                <ng-container [ngTemplateOutlet]="emptyList" />
               </td>
             </tr>
           }
@@ -245,18 +294,33 @@
       </table>
     </div>
   } @else {
-    <!-- A card per case, with what the person chose to see in "Columnas". -->
-    <div class="flex min-h-64 flex-1 flex-col gap-2 overflow-auto">
+    <!--
+      A card per case, with what the person chose to see in "Columnas". The cards go on down the
+      page, which scrolls, and the pager after them: a box of its own that scrolls inside the page
+      was lower than one card on a small phone.
+      A card is named by its code and its company, and the rest of what it shows is its description:
+      named by all its text, a button was read out whole every time the focus reached it.
+    -->
+    <div class="flex flex-col gap-2" [attr.aria-busy]="loading()">
       @for (row of rows(); track row.ticket.id) {
         @let t = row.ticket;
-        <button type="button" class="card p-3 text-left" (click)="openId.set(t.id)">
+        @let card = 'case-card-' + t.id;
+        <button
+          type="button"
+          class="card p-3 text-left"
+          [attr.data-case-id]="t.id"
+          [attr.aria-labelledby]="card + '-code ' + card + '-company'"
+          [attr.aria-describedby]="card + '-date ' + card + '-flags ' + card + '-state ' + card + '-details'"
+          (click)="openId.set(t.id)"
+        >
           <div class="flex flex-wrap items-center gap-2">
-            <span class="font-mono text-xs text-primary">{{ t.code }}</span>
+            <span class="font-mono text-xs text-primary" [id]="card + '-code'">{{ t.code }}</span>
             @if (shown().has('date')) {
-              <span class="text-xs text-muted" title="Fecha del caso">{{ row.dayAndTime }}</span>
+              <span class="text-xs text-muted" title="Fecha del caso" [id]="card + '-date'"><span class="sr-only">Fecha del caso: </span>{{ row.dayAndTime }}</span>
             }
-            <app-ticket-flags [ticket]="t" />
-            <span class="ml-auto flex items-center gap-1">
+            <!-- A phone card has room for the words of each flag, beside its icon. -->
+            <app-ticket-flags [ticket]="t" [id]="card + '-flags'" labelled />
+            <span class="ml-auto flex items-center gap-1" [id]="card + '-state'">
               @if (t.archivedAt) {
                 <span class="badge bg-elevated text-muted">Archivado</span>
               }
@@ -266,47 +330,87 @@
             </span>
           </div>
           @if (shown().has('company')) {
-            <div class="mt-1 font-medium">{{ t.company }}</div>
+            <div class="mt-1 font-medium" [id]="card + '-company'">{{ t.company }}</div>
           }
-          @if (shown().has('description')) {
-            <div class="line-clamp-2 text-muted">{{ t.description }}</div>
-          }
-          @if (shown().has('supportTypes') && t.supportTypes.length) {
-            <div class="mt-1 flex flex-wrap gap-1">
-              @for (type of t.supportTypes; track type.id) {
-                <app-type-chip [type]="type" />
-              }
-            </div>
-          }
-          @if (shown().has('assignee') && t.assigneeName) {
-            <div class="mt-1 text-xs text-muted"><app-icon name="account-outline" /> {{ t.assigneeName }}</div>
-          }
-          @for (column of cardLines(); track column.id) {
-            @if (row.text[column.id]; as value) {
-              <div class="mt-1 line-clamp-2 text-xs"><span class="text-muted">{{ column.label }}:</span> {{ value }}</div>
+          <div [id]="card + '-details'">
+            @if (shown().has('description')) {
+              <div class="line-clamp-2 text-muted">{{ t.description }}</div>
             }
-          }
+            @if (shown().has('supportTypes') && t.supportTypes.length) {
+              <div class="mt-1 flex flex-wrap gap-1">
+                @for (type of t.supportTypes; track type.id) {
+                  <app-type-chip [type]="type" />
+                }
+              </div>
+            }
+            @if (shown().has('assignee') && t.assigneeName) {
+              <div class="mt-1 text-xs text-muted"><app-icon name="account-outline" /> {{ t.assigneeName }}</div>
+            }
+            @for (column of cardLines(); track column.id) {
+              @if (row.text[column.id]; as value) {
+                <div class="mt-1 line-clamp-2 text-xs"><span class="text-muted">{{ column.label }}:</span> {{ value }}</div>
+              }
+            }
+          </div>
         </button>
       } @empty {
-        <p class="py-10 text-center text-muted">{{ loading() ? 'Cargando…' : 'No hay casos para mostrar.' }}</p>
+        <p class="py-10 text-center text-muted">
+          <ng-container [ngTemplateOutlet]="emptyList" />
+        </p>
       }
     </div>
   }
 
-  <!-- Footer -->
-  <div class="flex items-center gap-3 text-xs text-muted">
-    <span>{{ total() }} caso(s)</span>
+  <!-- What the list says when it has no case to show: the same in the table and in the cards. -->
+  <ng-template #emptyList>
     @if (loading()) {
-      <span>Actualizando…</span>
+      Cargando…
+    } @else if (hasFilters()) {
+      Ningún caso coincide con los filtros.
+      <button type="button" class="font-medium text-primary underline underline-offset-2" (click)="clearFilters()">Limpiar filtros</button>
+    } @else {
+      Todavía no hay casos. Usa «Nuevo caso», pega una captura (Ctrl+V) o importa tu hoja de Excel.
     }
+  </ng-template>
+
+  <!-- Footer. Its count is said to a screen reader as it changes after a read the person asked for: a search, a filter, a page. -->
+  <div class="flex items-center gap-3 text-xs text-muted">
+    <!--
+      What the eye sees: the count after every read, and "Actualizando…" while one is on its way, also one
+      made for a change someone else made (a case registered, deleted or archived elsewhere). Hidden from a
+      screen reader, which hears the status below: a read made in silence said "112 caso(s)" each time.
+      No count before the first answer: the first read said "0 caso(s) Actualizando…".
+    -->
+    @if (counted()) {
+      <span aria-hidden="true">{{ total() }} caso(s)</span>
+    }
+    @if (loading()) {
+      <span aria-hidden="true">Actualizando…</span>
+    }
+    <!--
+      What is said: the count as the last read the person asked for left it (spokenTotal), and
+      "Actualizando…" only while one is on its way. The space before each part is for who hears it.
+      The words of an empty list are said here too, in others than the ones on screen.
+    -->
+    <app-status class="sr-only">
+      @if (spokenTotal() !== null) {
+        <span>{{ spokenTotal() }} caso(s)</span>
+      }
+      @if (asked()) {
+        <span> Actualizando…</span>
+      } @else if (spokenTotal() === 0 && hasFilters()) {
+        <span> Ninguno coincide con los filtros.</span>
+      }
+    </app-status>
     <span class="hidden lg:inline">Consejo: pega una captura con Ctrl+V para crear un caso con IA.</span>
     @if (pageCount() > 1) {
       <div class="ml-auto flex items-center gap-1">
-        <button type="button" class="btn btn-soft px-2 py-1" [disabled]="page() <= 1" (click)="page.set(page() - 1)" aria-label="Página anterior">
+        <!-- A finger's size on a phone (44 px), small next to the table. -->
+        <button type="button" class="btn btn-soft btn-icon px-2 py-1" [appSoftDisabled]="page() <= 1" (click)="page.set(page() - 1)" aria-label="Página anterior">
           <app-icon name="chevron-left" />
         </button>
         <span>Página {{ page() }} de {{ pageCount() }}</span>
-        <button type="button" class="btn btn-soft px-2 py-1" [disabled]="page() >= pageCount()" (click)="page.set(page() + 1)" aria-label="Página siguiente">
+        <button type="button" class="btn btn-soft btn-icon px-2 py-1" [appSoftDisabled]="page() >= pageCount()" (click)="page.set(page() + 1)" aria-label="Página siguiente">
           <app-icon name="chevron-right" />
         </button>
       </div>

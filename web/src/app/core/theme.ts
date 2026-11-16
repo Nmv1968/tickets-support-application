@@ -8,8 +8,10 @@ export class Theme {
 
   /**
    * Colours for what is drawn outside CSS (the charts), read from the variables of styles.css
-   * so that each one is written down once. `muted` and `line` change with the theme; `neutral`
-   * (a slice without a value) does not.
+   * so that each one is written down once. All of them change with the theme: the charts have
+   * colours of their own (`--chart-*`), which stand out from the card in both; `muted` writes the
+   * axes and the legend, `line` the grid, and `surface` is the card itself, which separates the
+   * pieces of a bar or of a doughnut.
    *
    * Read once per theme and kept, so the stylesheet has to be applied before the first read.
    * That is why the production build does not load it late (angular.json, `inlineCritical: false`).
@@ -20,13 +22,14 @@ export class Theme {
     const style = getComputedStyle(document.documentElement);
     const read = (name: string): string => style.getPropertyValue(name).trim();
     return {
-      primary: read('--color-primary'),
-      success: read('--color-success'),
-      warning: read('--color-warning'),
-      danger: read('--color-danger'),
+      primary: read('--chart-primary'),
+      resolved: read('--chart-resolved'),
+      pending: read('--chart-pending'),
+      unresolved: read('--chart-unresolved'),
+      neutral: read('--chart-neutral'),
       muted: read('--app-muted'),
       line: read('--app-line'),
-      neutral: read('--chart-neutral'),
+      surface: read('--app-surface'),
     };
   });
 

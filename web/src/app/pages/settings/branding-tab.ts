@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { Say } from '../../core/announcer';
 import { Api } from '../../core/api';
 import { AppLogo } from '../../core/app-logo';
 import { Branding } from '../../core/branding';
@@ -13,7 +14,7 @@ const LOGO_SIDE = 256;
 /** The company logo: upload one, see it as it will look, or go back to the default icon. */
 @Component({
   selector: 'app-branding-tab',
-  imports: [AppLogo, Icon],
+  imports: [AppLogo, Icon, Say],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="card max-w-2xl space-y-4 p-4">
@@ -29,12 +30,13 @@ const LOGO_SIDE = 256;
         <app-logo size="xl" class="border border-line" />
         <div class="min-w-48 flex-1 space-y-2">
           <div class="flex flex-wrap gap-2">
-            <button type="button" class="btn btn-primary" [disabled]="busy()" (click)="picker.click()">
-              <app-icon [name]="busy() ? 'loading' : 'upload'" />
-              {{ branding.logoUrl() ? 'Cambiar imagen' : 'Subir imagen' }}
+            <!-- Each says in words what it is doing: the icon that turns stands still with less motion asked for. -->
+            <button type="button" class="btn btn-primary" [disabled]="busy() !== ''" (click)="picker.click()">
+              <app-icon [name]="busy() === 'upload' ? 'loading' : 'upload'" />
+              {{ busy() === 'upload' ? 'Subiendo…' : branding.logoUrl() ? 'Cambiar imagen' : 'Subir imagen' }}
             </button>
             @if (branding.logoUrl()) {
-              <button type="button" class="btn btn-ghost" [disabled]="busy()" (click)="remove()">Quitar logo</button>
+              <button type="button" class="btn btn-ghost" [disabled]="busy() !== ''" (click)="remove()">{{ busy() === 'remove' ? 'Quitando…' : 'Quitar logo' }}</button>
             }
           </div>
           <p class="text-2xs text-muted">
@@ -46,8 +48,9 @@ const LOGO_SIDE = 256;
 
       <input #picker type="file" class="sr-only" tabindex="-1" aria-label="Imagen del logo" accept="image/png,image/jpeg,image/webp,image/svg+xml" (change)="upload(picker)" />
 
+      <!-- Said at once as it comes (see Say): an alert that comes with its words may not be read. -->
       @if (error()) {
-        <p class="alert-error" role="alert">{{ error() }}</p>
+        <p class="alert-error" [appSay]="error()" sayAs="assertive">{{ error() }}</p>
       }
     </div>
   `,
@@ -59,7 +62,8 @@ export class BrandingTab {
   protected readonly branding = inject(Branding);
 
   protected readonly side = LOGO_SIDE;
-  protected readonly busy = signal(false);
+  /** What is being done to the logo, if anything: one at a time. */
+  protected readonly busy = signal<'' | 'upload' | 'remove'>('');
   protected readonly error = signal('');
 
   protected async upload(picker: HTMLInputElement): Promise<void> {
@@ -67,7 +71,7 @@ export class BrandingTab {
     // Emptied at once: choosing the same file again must count as a new choice.
     picker.value = '';
     if (!file) return;
-    this.busy.set(true);
+    this.busy.set('upload');
     this.error.set('');
     try {
       const { logoVersion } = await this.api.saveLogo(await toSmallPng(file, LOGO_SIDE));
@@ -76,13 +80,13 @@ export class BrandingTab {
     } catch (error) {
       this.error.set(errorMessage(error));
     } finally {
-      this.busy.set(false);
+      this.busy.set('');
     }
   }
 
   protected async remove(): Promise<void> {
     if (!(await this.confirm.ask({ title: '¿Quitar el logo y volver al icono por defecto?', confirmLabel: 'Quitar', danger: true }))) return;
-    this.busy.set(true);
+    this.busy.set('remove');
     this.error.set('');
     try {
       await this.api.removeLogo();
@@ -91,7 +95,7 @@ export class BrandingTab {
     } catch (error) {
       this.error.set(errorMessage(error));
     } finally {
-      this.busy.set(false);
+      this.busy.set('');
     }
   }
 }

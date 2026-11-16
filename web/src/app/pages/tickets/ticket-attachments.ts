@@ -1,6 +1,8 @@
+import { A11yModule } from '@angular/cdk/a11y';
 import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { Api } from '../../core/api';
 import type { Attachment } from '../../core/api';
+import { BackdropClick } from '../../core/backdrop-click';
 import { Confirm } from '../../core/confirm';
 import { Icon } from '../../core/icon';
 import { Toast } from '../../core/toast';
@@ -14,7 +16,7 @@ import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
  */
 @Component({
   selector: 'app-ticket-attachments',
-  imports: [Icon],
+  imports: [A11yModule, BackdropClick, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block', '(document:paste)': 'onPaste($event)' },
   template: `
@@ -36,12 +38,19 @@ import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
                 <span class="grid size-full place-items-center text-muted"><app-icon name="file-outline" class="text-2xl" /></span>
               }
             </button>
-            <div class="flex items-center gap-1 px-1.5 py-1 text-2xs">
-              <span class="flex-1 truncate" [title]="a.filename">{{ a.filename }}</span>
-              <span class="text-muted">{{ formatBytes(a.size) }}</span>
-              <button type="button" class="hover:text-danger" (click)="removeAttachment(a)" [attr.aria-label]="'Eliminar ' + a.filename">
-                <app-icon name="close" />
-              </button>
+            <!--
+              The name whole, on as many lines as it takes, with its size and its "×" under it: cut with an
+              ellipsis in a third of a phone, three letters of it were left, and the rest was only in its title.
+            -->
+            <div class="px-1.5 py-1 text-2xs">
+              <span class="block" [title]="a.filename">{{ a.filename }}</span>
+              <div class="flex items-center gap-1">
+                <span class="flex-1 text-muted">{{ formatBytes(a.size) }}</span>
+                <!-- 24 px a side (WCAG 2.5.8), 44 on a phone (.btn-icon): the margins take back part of it from the line. -->
+                <button type="button" class="btn-icon -m-1 grid size-6 shrink-0 place-items-center hover:text-danger" (click)="removeAttachment(a)" [attr.aria-label]="'Eliminar ' + a.filename">
+                  <app-icon name="close" />
+                </button>
+              </div>
             </div>
           </div>
         }
@@ -51,10 +60,26 @@ import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
       </p>
     </section>
 
-    @if (lightbox(); as url) {
-      <button type="button" class="fixed inset-0 z-60 grid place-items-center bg-black/80 p-4" (click)="lightbox.set(null)" aria-label="Cerrar imagen">
-        <img class="max-h-full max-w-full rounded-control" [src]="url" alt="Adjunto ampliado" />
-      </button>
+    <!--
+      A dialog over the panel, with the focus kept in it: before, Tab went on to the buttons hidden
+      under it, which could be pressed unseen. "Cerrar", a press beside the image and Escape (which
+      the panel hears, see closeLightbox) close it, and the focus goes back to the thumbnail.
+    -->
+    @if (lightbox(); as shown) {
+      <div
+        class="fixed inset-0 z-60 grid place-items-center bg-black/80 p-4"
+        role="dialog"
+        aria-modal="true"
+        [attr.aria-label]="'Imagen: ' + shown.name"
+        cdkTrapFocus
+        [cdkTrapFocusAutoCapture]="true"
+        (appBackdropClick)="closeLightbox()"
+      >
+        <img class="max-h-full max-w-full rounded-control" [src]="shown.url" [alt]="shown.name" />
+        <button type="button" class="btn btn-soft absolute top-3 right-3" cdkFocusInitial (click)="closeLightbox()">
+          <app-icon name="close" /> Cerrar
+        </button>
+      </div>
     }
   `,
 })
@@ -68,7 +93,8 @@ export class TicketAttachments {
   readonly attachments = input.required<Attachment[]>();
 
   protected readonly uploading = signal(false);
-  protected readonly lightbox = signal<string | null>(null);
+  /** The image enlarged: its address and the name of its file. */
+  protected readonly lightbox = signal<{ url: string; name: string } | null>(null);
   /** Object URLs of image attachments, by attachment id. */
   protected readonly thumbs = signal<Record<number, string>>({});
   /**
@@ -136,7 +162,7 @@ export class TicketAttachments {
   protected async openAttachment(attachment: Attachment): Promise<void> {
     const thumb = this.thumbs()[attachment.id];
     if (thumb) {
-      this.lightbox.set(thumb);
+      this.lightbox.set({ url: thumb, name: attachment.filename });
       return;
     }
     try {

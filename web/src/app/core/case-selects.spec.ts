@@ -222,4 +222,24 @@ describe('The selects of the fields of a case', () => {
       expect(document.querySelector('.ng-dropdown-panel')).toBeNull();
     }));
   });
+
+  // Each "×" was named "Quitar": four of them in the form of a case, and nothing said what each took away.
+  it('names the "×" that empties each one by what it empties', fakeAsync(() => {
+    form.companyId.set(1);
+    form.priority.set('HIGH');
+    form.assignee.set(4);
+    form.moduleId.set(MODULES[0].id);
+    form.typeIds.set([TRAINING.id]);
+    form.typeId.set(FAILURE.id);
+    render();
+    const clear = (name: string): string | null => select(name).querySelector('.ng-clear-wrapper')?.getAttribute('title') ?? null;
+
+    expect(clear('company')).toBe('Quitar empresa');
+    expect(clear('filter-status')).toBe('Quitar estado');
+    expect(clear('priority')).toBe('Quitar prioridad');
+    expect(el.querySelector('app-assignee-select .ng-clear-wrapper')!.getAttribute('title')).toBe('Quitar responsable');
+    expect(clear('module')).toBe('Quitar módulo');
+    expect(clear('types')).toBe('Quitar todos los tipos de soporte');
+    expect(clear('type')).toBe('Quitar tipo de soporte');
+  }));
 });

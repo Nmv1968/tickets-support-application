@@ -1,5 +1,6 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { ChangeDetectionStrategy, Component, booleanAttribute, input, output } from '@angular/core';
+import { Say } from './announcer';
 import { BackdropClick } from './backdrop-click';
 import { Icon } from './icon';
 
@@ -12,7 +13,7 @@ import { Icon } from './icon';
  */
 @Component({
   selector: 'app-dialog-pending',
-  imports: [A11yModule, BackdropClick, Icon],
+  imports: [A11yModule, BackdropClick, Icon, Say],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
@@ -34,7 +35,8 @@ import { Icon } from './icon';
           </div>
         </div>
       } @else {
-        <div class="card flex items-center gap-2 p-4" role="status">
+        <!-- Said as it comes (see Say): a status that comes with its words may not be read. -->
+        <div class="card flex items-center gap-2 p-4" appSay>
           <app-icon name="loading" />
           Abriendo…
         </div>

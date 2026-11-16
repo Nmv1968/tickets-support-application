@@ -10,6 +10,8 @@ import { ICONS, type IconName } from './icons';
  * that name, for an icon that says something no text beside it says (the flags of a case).
  *
  * `loading` turns by itself; `spin` turns any other one (the refresh of the board while it reads).
+ * With less motion asked for it stands still (styles.css): what it says is also said in words, in
+ * the text of its button ("Guardando…") or beside it.
  */
 @Component({
   selector: 'app-icon',
