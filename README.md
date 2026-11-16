@@ -820,7 +820,7 @@ flowchart LR
 
 | Parte | Tecnología |
 | --- | --- |
-| `web/` | Angular 20 (componentes standalone, signals), Tailwind CSS 4, Angular CDK, ng-select, Chart.js |
+| `web/` | Angular 20 (componentes standalone, signals, sin zone.js), Tailwind CSS 4, Angular CDK, ng-select, Chart.js |
 | `api/` | NestJS 11, Prisma 6, PostgreSQL |
 | `mcp/`, `skills/` | Servidor MCP en Node.js sobre el API HTTP, y skill para asistentes |
 | Despliegue | Docker Compose: `db` (PostgreSQL 17), `api`, `web` (nginx), `backup` |

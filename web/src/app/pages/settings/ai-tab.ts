@@ -4,6 +4,7 @@ import { Api } from '../../core/api';
 import type { AiModel, AiProviderConfig } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
+import { Icon } from '../../core/icon';
 import { SELECT } from '../../core/select';
 import { Toast } from '../../core/toast';
 import { errorMessage } from '../../core/ui';
@@ -15,7 +16,7 @@ import { errorMessage } from '../../core/ui';
  */
 @Component({
   selector: 'app-ai-tab',
-  imports: [FormsModule, ...SELECT],
+  imports: [FormsModule, ...SELECT, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="card max-w-2xl space-y-4 p-4">
@@ -70,7 +71,7 @@ import { errorMessage } from '../../core/ui';
             />
             @if (urlChanged() && !apiKey().trim()) {
               <p class="mt-1 rounded-control bg-warning/10 px-3 py-2 text-xs" role="status">
-                <i class="mdi mdi-alert-outline text-warning" aria-hidden="true"></i>
+                <app-icon name="alert-outline" class="text-warning" />
                 Cambiaste la URL del servidor. La API key guardada es de la URL anterior y no se envía a otra: escríbela de nuevo. Si guardas sin
                 escribirla, la guardada se borra.
               </p>
@@ -98,7 +99,7 @@ import { errorMessage } from '../../core/ui';
                 }
               </div>
               <button type="button" class="btn btn-soft" [disabled]="busy() !== ''" (click)="loadModels()">
-                <i class="mdi" [class]="busy() === 'models' ? 'mdi-loading mdi-spin' : 'mdi-refresh'" aria-hidden="true"></i>
+                <app-icon [name]="busy() === 'models' ? 'loading' : 'refresh'" />
                 Cargar modelos
               </button>
             </div>
@@ -114,7 +115,7 @@ import { errorMessage } from '../../core/ui';
               {{ busy() === 'save' ? 'Guardando…' : 'Guardar y activar' }}
             </button>
             <button type="button" class="btn btn-soft" [disabled]="busy() !== '' || !model().trim()" (click)="test()">
-              <i class="mdi" [class]="busy() === 'test' ? 'mdi-loading mdi-spin' : 'mdi-connection'" aria-hidden="true"></i>
+              <app-icon [name]="busy() === 'test' ? 'loading' : 'connection'" />
               {{ busy() === 'test' ? 'Probando…' : 'Guardar y probar' }}
             </button>
             @if (p.hasKey) {

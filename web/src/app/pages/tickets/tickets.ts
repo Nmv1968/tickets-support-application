@@ -1,32 +1,24 @@
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, linkedSignal, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Api } from '../../core/api';
 import type { Ticket, TicketFilters, TicketPage } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
+import { DialogPending } from '../../core/dialog-pending';
+import { Icon } from '../../core/icon';
+import { liveResource } from '../../core/loading';
+import { StatusBadge } from '../../core/status-badge';
 import { TicketEvents } from '../../core/ticket-events';
 import type { TicketEvent } from '../../core/ticket-events';
 import { TicketFlags } from '../../core/ticket-flags';
 import { Toast } from '../../core/toast';
 import { TypeChip } from '../../core/type-chip';
-import {
-  PRIORITY_CLASS,
-  PRIORITY_LABEL,
-  PROMISE_CLASS,
-  STATUS_LABEL,
-  downloadBlob,
-  formatCaseDate,
-  formatDateTime,
-  formatDay,
-  formatMinutes,
-  formatMomentDay,
-  pastedImages,
-  promiseText,
-  timeAgo,
-  todayIso,
-} from '../../core/ui';
+import { downloadBlob, pastedImages, todayIso } from '../../core/ui';
+import { UserPreference } from '../../core/user-preference';
+import { wideScreen } from '../../core/wide-screen';
 import { AiDraftDialog } from './ai-draft';
+import { caseRow } from './case-row';
 import { ImportDialog } from './import-dialog';
 import { NewTicketForm } from './new-ticket';
 import { COLUMNS, DEFAULT_COLUMNS, TicketColumnsMenu, readColumnChoice, tableWidth } from './ticket-columns';
@@ -34,7 +26,6 @@ import type { ColumnChoice, ColumnId } from './ticket-columns';
 import { NO_FILTERS, PROMISE_OPTIONS, TicketFiltersPanel, activeFilters, filterQuery } from './ticket-filters';
 import type { ListFilters } from './ticket-filters';
 import { TicketPanel } from './ticket-panel';
-import { UserPreference } from './user-preference';
 
 const PAGE_SIZE = 50;
 
@@ -44,13 +35,19 @@ const PAGE_SIZE = 50;
  */
 const CARD_LINES: ReadonlySet<ColumnId> = new Set<ColumnId>(['createdAt', 'priority', 'module', 'promisedDate', 'dueAt', 'estimatedMinutes', 'spentMinutes', 'lastNote', 'createdBy', 'lastActivityAt']);
 
+/** Two queries of the list ask for the same cases. */
+function sameQuery(a: TicketFilters, b: TicketFilters): boolean {
+  const keys = Object.keys(a) as (keyof TicketFilters)[];
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+}
+
 /**
  * Main screen: the support log as a table, like the spreadsheet it replaces. Its rows are read
  * only: a case is changed in its form, which a click on the row opens.
  */
 @Component({
   selector: 'app-tickets',
-  imports: [FormsModule, TicketFlags, TypeChip, TicketPanel, AiDraftDialog, ImportDialog, NewTicketForm, TicketFiltersPanel, TicketColumnsMenu],
+  imports: [FormsModule, StatusBadge, TicketFlags, TypeChip, TicketPanel, AiDraftDialog, ImportDialog, NewTicketForm, TicketFiltersPanel, TicketColumnsMenu, Icon, DialogPending],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './tickets.html',
   host: { '(document:paste)': 'onPaste($event)', '(document:pointerdown)': 'onPointerDown($event)', '(document:keydown.escape)': 'onEscape()' },
@@ -61,28 +58,21 @@ export class TicketsPage {
   private readonly router = inject(Router);
   private readonly query = toSignal(inject(ActivatedRoute).queryParamMap);
   protected readonly catalogs = inject(Catalogs);
-
-  protected readonly promiseClass = PROMISE_CLASS;
-  protected readonly promiseText = promiseText;
-  protected readonly priorityClass = PRIORITY_CLASS;
-  protected readonly priorityLabel = PRIORITY_LABEL;
-  protected readonly statusLabel = STATUS_LABEL;
-  protected readonly formatDay = formatDay;
-  protected readonly formatCaseDate = formatCaseDate;
-  protected readonly formatDateTime = formatDateTime;
-  protected readonly formatMomentDay = formatMomentDay;
-  protected readonly timeAgo = timeAgo;
+  /** A wide screen shows the list as a table, a narrow one (a phone) as cards. Only one of them is drawn. */
+  protected readonly wide = wideScreen();
 
   // Filters
   protected readonly searchText = signal('');
   private readonly q = signal('');
   /** The filters of the panel that "Filtros" opens, as its controls hold them. */
   protected readonly panelFilters = signal<ListFilters>(NO_FILTERS);
-  protected readonly page = signal(1);
   /** Rows go by ticket number. Highest first by default (newest ticket on top); the "Código" header reverses it. */
   protected readonly sortDir = signal<'asc' | 'desc'>('desc');
 
-  protected readonly filters = computed<TicketFilters>(() => ({ q: this.q(), ...filterQuery(this.panelFilters()) }));
+  /** What the list asks for. The same cases asked for again are no change: the list stays where it is. */
+  protected readonly filters = computed<TicketFilters>(() => ({ q: this.q(), ...filterQuery(this.panelFilters()) }), { equal: sameQuery });
+  /** Back to the first page whenever the filters or the order change. */
+  protected readonly page = linkedSignal({ source: () => [this.filters(), this.sortDir()], computation: () => 1 });
   protected readonly hasFilters = computed(() => Object.values(this.filters()).some(Boolean));
   /** How many filters of the panel are on. Its button shows it: with the panel closed, nothing else says the list is filtered. */
   protected readonly filterCount = computed(() => activeFilters(this.panelFilters()));
@@ -113,10 +103,35 @@ export class TicketsPage {
   private readonly userNames = computed(() => new Map(this.catalogs.users().map((user) => [user.id, user.name])));
 
   // Data
-  private readonly data = signal<TicketPage | null>(null);
-  protected readonly loading = signal(true);
-  protected readonly items = computed(() => this.data()?.items ?? []);
-  protected readonly total = computed(() => this.data()?.total ?? 0);
+  /** The page of the list, read again whenever the filters, the order or the page change (see liveResource). */
+  private readonly list = liveResource({
+    params: () => ({ ...this.filters(), dir: this.sortDir(), page: this.page(), pageSize: PAGE_SIZE }),
+    load: async (query, abort, current) => {
+      const answer = await this.api.tickets(query, abort);
+      // With another page to be on, that one is read. This answer, for a page the list has left,
+      // is then never shown: the answer to a read that is no longer the one asked is dropped.
+      // An answer that came after another page or other filters were asked for, and before its
+      // read was cancelled, says nothing of where the list goes now.
+      if (current()) this.page.set(this.pageAfter(answer, query.page));
+      return answer;
+    },
+    failed: (error, current) => {
+      this.toast.error(error);
+      // Where the new case landed is then told by the cases the list has. Not by a read asked
+      // for before the case was registered: the read that follows it tells.
+      if (this.toNewCase && current()) {
+        this.toNewCase = false;
+        this.page.set(this.newCasePage(this.total()));
+      }
+    },
+  });
+  protected readonly loading = this.list.loading;
+  /** The cases of the page, as their rows and cards show them (see CaseRow). */
+  protected readonly rows = computed(() => {
+    const names = this.userNames();
+    return (this.list.value()?.items ?? []).map((ticket) => caseRow(ticket, names));
+  });
+  protected readonly total = computed(() => this.list.value()?.total ?? 0);
   protected readonly pageCount = computed(() => Math.max(1, Math.ceil(this.total() / PAGE_SIZE)));
 
   // Overlays
@@ -131,32 +146,17 @@ export class TicketsPage {
   /** The export button together with its menu. */
   private readonly exportMenu = viewChild<ElementRef<HTMLElement>>('exportMenu');
 
-  private lastFilterKey = '';
-  private loadSequence = 0;
-  /** The latest load. After a case is registered, the list waits for the one that case started. */
-  private lastLoad: Promise<void> = Promise.resolve();
+  /** A case was registered with the form above the table: the next page that arrives takes the list to it (see pageAfter). */
+  private toNewCase = false;
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
-    // Reload when filters or page change. A filter change goes back to page 1 first.
-    effect(() => {
-      const key = JSON.stringify([this.filters(), this.sortDir()]);
-      const page = this.page();
-      untracked(() => {
-        if (key !== this.lastFilterKey) {
-          this.lastFilterKey = key;
-          if (page !== 1) {
-            this.page.set(1);
-            return;
-          }
-        }
-        void this.load();
-      });
-    });
     // Changes to cases, made on this screen, in the case panel or elsewhere (see TicketEvents).
     inject(TicketEvents)
       .events.pipe(takeUntilDestroyed())
       .subscribe((event) => this.onTicketEvent(event));
+    // A search typed just before leaving the screen has no list left to filter.
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.searchTimer));
 
     // Links from the bell: `?caso=12` opens that case, `?olvidados=1` turns on the forgotten
     // filter and `?promesa=due` the delivery promise filter.
@@ -190,36 +190,28 @@ export class TicketsPage {
       if (!event.archiving && !this.loading()) return;
     }
     // A new or deleted case, or cases changed elsewhere: the page is read again.
-    void this.load();
+    this.list.refresh();
   }
 
-  protected load(): Promise<void> {
-    this.lastLoad = this.fetchPage();
-    return this.lastLoad;
-  }
-
-  private async fetchPage(): Promise<void> {
-    const sequence = ++this.loadSequence;
-    const page = this.page();
-    this.loading.set(true);
-    try {
-      const result = await this.api.tickets({ ...this.filters(), dir: this.sortDir(), page, pageSize: PAGE_SIZE });
-      if (sequence !== this.loadSequence) return;
-      // A page past the end of the list: the cases it had were archived or deleted, or stopped
-      // matching the filters. Shown as it came, it would say that there are no cases at all,
-      // with no pager to go back with. The list goes to the last page there is, which the
-      // effect of the constructor then reads.
-      const lastPage = Math.ceil(result.total / PAGE_SIZE);
-      if (result.items.length === 0 && lastPage >= 1 && page > lastPage) {
-        this.page.set(lastPage);
-        return;
-      }
-      this.data.set(result);
-    } catch (error) {
-      this.toast.error(error);
-    } finally {
-      if (sequence === this.loadSequence) this.loading.set(false);
+  /**
+   * The page the list goes to with the answer for page `page`. Right after a case was registered
+   * with the form, the page where it landed. Past the end of the list (the cases of the page were
+   * archived or deleted, or stopped matching the filters), the last page there is: shown as it
+   * came, the page would say that there are no cases at all, with no pager to go back with.
+   * Otherwise the same page.
+   */
+  private pageAfter({ items, total }: TicketPage, page: number): number {
+    if (this.toNewCase) {
+      this.toNewCase = false;
+      return this.newCasePage(total);
     }
+    const last = Math.ceil(total / PAGE_SIZE);
+    return items.length === 0 && last >= 1 && page > last ? last : page;
+  }
+
+  /** The page of a case just registered, in a list of `total` cases: it has the highest number. */
+  private newCasePage(total: number): number {
+    return this.sortDir() === 'asc' ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : 1;
   }
 
   protected toggleSort(): void {
@@ -252,38 +244,6 @@ export class TicketsPage {
   }
 
   /**
-   * What a column says of a case, in words: for the columns that are plain text in the table,
-   * and for the lines of a phone card. Empty when the case has nothing there.
-   */
-  protected text(column: ColumnId, t: Ticket): string {
-    switch (column) {
-      case 'createdAt':
-        return formatMomentDay(t.createdAt);
-      case 'priority':
-        return t.priority ? PRIORITY_LABEL[t.priority] : '';
-      case 'module':
-        return t.moduleName ?? '';
-      case 'promisedDate':
-        return t.promisedDate ? formatDay(t.promisedDate) + (t.promiseState ? ' · ' + promiseText(t.promisedDate) : '') : '';
-      case 'dueAt':
-        return formatDateTime(t.dueAt);
-      case 'estimatedMinutes':
-        return t.estimatedMinutes === null ? '' : formatMinutes(t.estimatedMinutes);
-      case 'spentMinutes':
-        // Zero is a case nobody has put time on: nothing to say.
-        return t.spentMinutes ? formatMinutes(t.spentMinutes) : '';
-      case 'lastNote':
-        return t.lastNote ?? '';
-      case 'createdBy':
-        return (t.createdById !== null && this.userNames().get(t.createdById)) || '';
-      case 'lastActivityAt':
-        return formatDateTime(t.lastActivityAt);
-      default:
-        return '';
-    }
-  }
-
-  /**
    * A click anywhere on a row opens its case. Except the click that ends a selection: the
    * person dragged over a text of the row to copy it.
    */
@@ -299,17 +259,17 @@ export class TicketsPage {
     }
   }
 
-  /** A case was registered with the form above the table: the list goes to the page where it landed. */
-  protected async onRegistered(): Promise<void> {
-    // The new case has already asked for the list again (see onTicketEvent): wait for that answer.
-    await this.lastLoad;
-    // The new case has the highest number.
-    const target = this.sortDir() === 'asc' ? this.pageCount() : 1;
-    if (this.page() !== target) this.page.set(target);
+  /**
+   * A case was registered with the form above the table: the list goes to the page where it
+   * landed. The new case has already asked for the list again (see onTicketEvent), and the
+   * answer says which page that is (see pageAfter).
+   */
+  protected onRegistered(): void {
+    this.toNewCase = true;
   }
 
   private replace(updated: Ticket): void {
-    this.data.update((data) => data && { ...data, items: data.items.map((item) => (item.id === updated.id ? updated : item)) });
+    this.list.value.update((data) => data && { ...data, items: data.items.map((item) => (item.id === updated.id ? updated : item)) });
   }
 
   // The list itself is read again by the event of the new cases (see onTicketEvent).

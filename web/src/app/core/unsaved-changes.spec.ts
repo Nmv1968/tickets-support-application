@@ -1,6 +1,6 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
@@ -8,13 +8,13 @@ import { Auth } from './auth';
 import { UnsavedChanges, unsavedChangesGuard } from './unsaved-changes';
 
 // Three screens of the app, each stood in for by its name.
-@Component({ selector: 'app-cases-screen', template: 'Casos' })
+@Component({ selector: 'app-cases-screen', changeDetection: ChangeDetectionStrategy.OnPush, template: 'Casos' })
 class Cases {}
 
-@Component({ selector: 'app-board-screen', template: 'Tablero' })
+@Component({ selector: 'app-board-screen', changeDetection: ChangeDetectionStrategy.OnPush, template: 'Tablero' })
 class Board {}
 
-@Component({ selector: 'app-login-screen', template: 'Ingresar' })
+@Component({ selector: 'app-login-screen', changeDetection: ChangeDetectionStrategy.OnPush, template: 'Ingresar' })
 class Login {}
 
 // The case form asks before it is closed with unsaved changes. The Back button of the browser

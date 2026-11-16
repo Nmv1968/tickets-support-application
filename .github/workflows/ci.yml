@@ -57,6 +57,8 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.app.json
       - run: npx tsc --noEmit -p tsconfig.spec.json
+      # ESLint with angular-eslint (eslint.config.mjs), without --fix.
+      - run: npm run lint
       # Karma with the Google Chrome of the runner, without a window.
       - run: npm run test:ci
       - run: npx ng build

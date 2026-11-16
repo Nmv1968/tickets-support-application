@@ -6,6 +6,7 @@ import type { AiProviderConfig } from '../../core/api';
 import { Confirm } from '../../core/confirm';
 import { Toast } from '../../core/toast';
 import { chooseOption, clearSelect, ngSelect, optionTexts, selectedTexts } from '../../testing/ng-select';
+import { buttonIn } from '../../testing/screen';
 import { AiTab } from './ai-tab';
 
 /** A server chosen by its URL, with a key already stored for it. */
@@ -79,7 +80,7 @@ describe('AiTab, the server URL of a provider that has a stored key', () => {
     expect(style.color).toBe(getComputedStyle(el.querySelector('h2')!).color);
     expect(style.fontSize).toBe('12px');
     expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
-    expect(notice.querySelector('i.mdi-alert-outline[aria-hidden=true]')).not.toBeNull();
+    expect(notice.querySelector('app-icon[data-icon=alert-outline][aria-hidden=true]')).not.toBeNull();
 
     write('#ai-key', 'sk-otra');
     expect(warning()).toBeNull();
@@ -115,7 +116,7 @@ describe('AiTab, the model of a provider', () => {
     render();
   }
 
-  const button = (text: string): HTMLButtonElement => [...el.querySelectorAll('button')].find((item) => item.textContent?.trim() === text)!;
+  const button = (text: string): HTMLButtonElement => buttonIn(el, text);
 
   /** "Cargar modelos", answered with the models the key gives access to. */
   function loadModels(models: { id: string; name: string; vision: boolean | null }[]): void {

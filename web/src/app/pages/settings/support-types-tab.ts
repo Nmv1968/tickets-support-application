@@ -1,13 +1,11 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, linkedSignal, model, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, linkedSignal, model, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import type { SupportType } from '../../core/api';
-import { Catalogs } from '../../core/catalogs';
-import { Confirm } from '../../core/confirm';
-import { Toast } from '../../core/toast';
-import { TypeChip } from '../../core/type-chip';
-
-const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+import { Catalogs, NAME_MAX } from '../../core/catalogs';
+import { Icon } from '../../core/icon';
+import { HEX_COLOR, TypeChip } from '../../core/type-chip';
+import { CatalogEntryActions, catalogTab } from './catalog-tab';
 
 /** The colour a new type starts with: the neutral grey the import and the assistants give the ones they create. */
 const DEFAULT_COLOR = '#64748b';
@@ -21,6 +19,7 @@ let fields = 0;
  */
 @Component({
   selector: 'app-color-field',
+  imports: [Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -53,7 +52,7 @@ let fields = 0;
         As wide as the two controls and no wider (w-0 min-w-full): the message wraps under them instead of pushing its neighbours aside.
       -->
       <p class="mt-1 w-0 min-w-full text-xs" role="alert" [id]="errorId">
-        <i class="mdi mdi-alert-circle-outline text-danger" aria-hidden="true"></i> El color debe ser un código hexadecimal como #1a2b3c
+        <app-icon name="alert-circle-outline" class="text-danger" /> El color debe ser un código hexadecimal como #1a2b3c
       </p>
     }
   `,
@@ -114,7 +113,7 @@ export class ColorField {
 /** "Tipos de soporte": the labels a case can carry, each with a name and a colour of its own. */
 @Component({
   selector: 'app-support-types-tab',
-  imports: [FormsModule, TypeChip, ColorField],
+  imports: [FormsModule, TypeChip, ColorField, CatalogEntryActions, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4">
@@ -122,13 +121,13 @@ export class ColorField {
       <form class="card grid gap-3 p-4 sm:grid-cols-[1fr_auto_auto] sm:items-start" (ngSubmit)="create()">
         <div>
           <label class="label" for="type-name">Nombre del tipo de soporte</label>
-          <input id="type-name" class="input" name="name" placeholder="Falla del sistema" maxlength="60" autocomplete="off" [(ngModel)]="name" />
+          <input id="type-name" class="input" name="name" placeholder="Falla del sistema" [maxlength]="nameMax" autocomplete="off" [(ngModel)]="name" />
         </div>
         <div>
           <span class="label">Color</span>
           <app-color-field #newColor label="Color del tipo nuevo" [(color)]="color" />
         </div>
-        <button type="submit" class="btn btn-primary sm:mt-5" [disabled]="!canCreate()"><i class="mdi mdi-plus" aria-hidden="true"></i> Agregar</button>
+        <button type="submit" class="btn btn-primary sm:mt-5" [disabled]="!canCreate()"><app-icon name="plus" /> Agregar</button>
         <p class="flex flex-wrap items-center gap-2 text-xs text-muted sm:col-span-3">
           Así se verá en los casos:
           <app-type-chip [type]="preview()" />
@@ -141,30 +140,21 @@ export class ColorField {
             <app-type-chip [type]="type" />
             <input
               class="cell-control min-w-40 flex-1 cursor-text font-medium"
-              maxlength="60"
+              [attr.maxlength]="nameMax"
               [value]="type.name"
               [attr.aria-label]="'Nombre del tipo ' + type.name"
               (change)="rename(type, $event)"
             />
             <app-color-field #field [color]="type.color" [label]="'Color de ' + type.name" (chosen)="recolor(type, $event, field)" />
-            <!-- Kept together: on a narrow screen the whole group goes under the name, to the right. -->
-            <div class="ml-auto flex items-center gap-2">
-              <span class="text-xs text-muted">{{ type.tickets }} {{ type.tickets === 1 ? 'caso' : 'casos' }}</span>
-              @if (!type.active) {
-                <span class="badge bg-elevated text-muted">Inactivo</span>
-              }
-              <button type="button" class="btn btn-soft px-2 py-1 text-xs" [disabled]="busy()" (click)="toggle(type)">{{ type.active ? 'Desactivar' : 'Activar' }}</button>
-              <button
-                type="button"
-                class="btn btn-ghost px-2 py-1 text-danger disabled:text-muted"
-                [disabled]="busy() || type.tickets > 0"
-                [title]="type.tickets > 0 ? 'Está en casos: desactívalo o quítalo de esos casos' : 'Eliminar'"
-                [attr.aria-label]="'Eliminar ' + type.name"
-                (click)="remove(type)"
-              >
-                <i class="mdi mdi-trash-can-outline text-base leading-none" aria-hidden="true"></i>
-              </button>
-            </div>
+            <app-catalog-entry-actions
+              [entry]="type"
+              [busy]="tab.busy()"
+              inactiveLabel="Inactivo"
+              inUse="Está en casos: desactívalo o quítalo de esos casos"
+              [removeLabel]="'Eliminar ' + type.name"
+              (toggled)="toggle(type)"
+              (removed)="remove(type)"
+            />
           </div>
         } @empty {
           <p class="p-6 text-center text-muted">No hay tipos de soporte. Agrega arriba el primero.</p>
@@ -179,71 +169,41 @@ export class ColorField {
 })
 export class SupportTypesTab {
   private readonly api = inject(Api);
-  private readonly toast = inject(Toast);
-  private readonly confirm = inject(Confirm);
-  private readonly destroyRef = inject(DestroyRef);
   protected readonly catalogs = inject(Catalogs);
 
+  /** Reads the catalogs on arrival, and makes the writes (see catalogTab). */
+  protected readonly tab = catalogTab();
+  protected readonly nameMax = NAME_MAX.supportType;
   protected readonly name = signal('');
   protected readonly color = signal(DEFAULT_COLOR);
-  /** A write is on its way: a second click must not send it twice. */
-  protected readonly busy = signal(false);
   /** The colour field of the type being added. */
   private readonly newColor = viewChild.required<ColorField>('newColor');
-  protected readonly canCreate = computed(() => !!this.name().trim() && this.newColor().valid() && !this.busy());
+  protected readonly canCreate = computed(() => !!this.name().trim() && this.newColor().valid() && !this.tab.busy());
   protected readonly preview = computed(() => ({ name: this.name().trim() || 'Tipo de soporte', color: this.color() }));
-
-  constructor() {
-    // The number of cases of each type moves with every case that takes or drops it: read it again on arrival.
-    this.catalogs.reload().catch((error: unknown) => this.toast.error(error));
-  }
-
-  private async run(action: () => Promise<unknown>, done: string): Promise<boolean> {
-    if (this.busy()) return false;
-    this.busy.set(true);
-    try {
-      await action();
-      this.toast.ok(done);
-      return true;
-    } catch (error) {
-      this.toast.error(error);
-      return false;
-    } finally {
-      // Also after a refusal: the list on screen may be what was out of date.
-      await this.catalogs.reload().catch(() => undefined);
-      this.busy.set(false);
-    }
-  }
 
   protected async create(): Promise<void> {
     const name = this.name().trim();
     // Enter in the name sends the form whatever the hex field holds.
     if (!name || !this.newColor().valid()) return;
     // The colour stays for the next one: a team that adds several picks each from the last.
-    if (await this.run(() => this.api.createSupportType({ name, color: this.color() }), 'Tipo de soporte agregado')) this.name.set('');
+    if (await this.tab.run(() => this.api.createSupportType({ name, color: this.color() }), 'Tipo de soporte agregado')) this.name.set('');
   }
 
-  protected async rename(type: SupportType, event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const name = input.value.trim();
-    const renamed = !!name && name !== type.name && (await this.run(() => this.api.updateSupportType(type.id, { name }), 'Nombre actualizado'));
-    // An empty or refused name: the field goes back to the name the type has.
-    if (!renamed) input.value = type.name;
+  protected rename(type: SupportType, event: Event): Promise<void> {
+    return this.tab.rename(event, type.name, (name) => this.api.updateSupportType(type.id, { name }));
   }
 
   protected async recolor(type: SupportType, color: string, field: ColorField): Promise<void> {
-    const recolored = color !== type.color && (await this.run(() => this.api.updateSupportType(type.id, { color }), 'Color actualizado'));
+    const recolored = color !== type.color && (await this.tab.run(() => this.api.updateSupportType(type.id, { color }), 'Color actualizado'));
     // The same colour or a refused one: the field goes back to the colour the type has.
     if (!recolored) field.show(type.color);
   }
 
   protected toggle(type: SupportType): void {
-    void this.run(() => this.api.updateSupportType(type.id, { active: !type.active }), type.active ? 'Tipo de soporte desactivado' : 'Tipo de soporte activado');
+    void this.tab.run(() => this.api.updateSupportType(type.id, { active: !type.active }), type.active ? 'Tipo de soporte desactivado' : 'Tipo de soporte activado');
   }
 
-  /** Asked first: it cannot be undone, and its button is next to the one that only deactivates. */
-  protected async remove(type: SupportType): Promise<void> {
-    if (!(await this.confirm.ask({ title: `¿Eliminar el tipo de soporte «${type.name}»?`, confirmLabel: 'Eliminar', danger: true }, this.destroyRef))) return;
-    await this.run(() => this.api.deleteSupportType(type.id), 'Tipo de soporte eliminado');
+  protected remove(type: SupportType): Promise<void> {
+    return this.tab.remove(`¿Eliminar el tipo de soporte «${type.name}»?`, () => this.api.deleteSupportType(type.id), 'Tipo de soporte eliminado');
   }
 }

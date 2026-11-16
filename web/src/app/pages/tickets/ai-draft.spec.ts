@@ -6,21 +6,11 @@ import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing
 import { provideRouter } from '@angular/router';
 import type { Company, TicketDraft } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
-import { Toast } from '../../core/toast';
-import { chooseOption, clearSelect, closeSelect, ngSelect, openSelect, optionTexts, selectedTexts, typeInSelect } from '../../testing/ng-select';
+import { clearSelect, closeSelect, openSelect, typeInSelect } from '../../testing/ng-select';
+import { paste, screenOf, toasts } from '../../testing/screen';
 import { AiDraftDialog } from './ai-draft';
 
 const picture = new File(['png'], 'captura.png', { type: 'image/png' });
-
-/** A paste as the browser reports it: on the element that has the focus, with what was copied. */
-function paste(target: Element, files: File[], text?: string): ClipboardEvent {
-  const data = new DataTransfer();
-  for (const file of files) data.items.add(file);
-  if (text !== undefined) data.setData('text/plain', text);
-  const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
-  target.dispatchEvent(event);
-  return event;
-}
 
 describe('AiDraftDialog, a paste', () => {
   let http: HttpTestingController;
@@ -56,6 +46,23 @@ describe('AiDraftDialog, a paste', () => {
     expect(paste(textBox(), [picture]).defaultPrevented).toBeTrue();
     render();
     expect(images()).toBe(2);
+  }));
+
+  // A screenshot pasted on the list opens the dialog with it.
+  it('opens with the images it is given, up to four', fakeAsync(() => {
+    fixture = TestBed.createComponent(AiDraftDialog);
+    el = fixture.nativeElement as HTMLElement;
+    fixture.componentRef.setInput('initialImages', [picture, picture]);
+    render();
+    expect(images()).toBe(2);
+
+    fixture = TestBed.createComponent(AiDraftDialog);
+    el = fixture.nativeElement as HTMLElement;
+    fixture.componentRef.setInput('initialImages', Array<File>(5).fill(picture));
+    render();
+    expect(images()).toBe(4);
+    expect(toasts()).toEqual(['Máximo 4 imágenes por caso']);
+    tick(6000);
   }));
 
   // The box asks for the client's message to be pasted in it. Copied from Excel or from a chat,
@@ -138,23 +145,10 @@ describe('AiDraftDialog, the case under review', () => {
     render();
   }
 
-  function button(text: string): HTMLButtonElement {
-    const found = Array.from(el.querySelectorAll('button')).find((item) => item.textContent?.trim() === text);
-    if (!found) throw new Error(`No "${text}" button on screen`);
-    return found;
-  }
-
-  function click(target: HTMLElement): void {
-    target.click();
-    render();
-  }
-
-  function type(id: string, text: string): void {
-    const field = el.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)!;
-    field.value = text;
-    field.dispatchEvent(new Event('input'));
-    render();
-  }
+  const screen = screenOf(() => el, render);
+  const { button, click, select, chosen, offers, pick } = screen;
+  /** What the person types in the field with this id. */
+  const type = (id: string, text: string): void => screen.type(screen.find(`#${id}`), text);
 
   function open(): void {
     fixture = TestBed.createComponent(AiDraftDialog);
@@ -179,26 +173,8 @@ describe('AiDraftDialog, the case under review', () => {
     settle();
   }
 
-  const select = (name: string): HTMLElement => ngSelect(el, name);
-  /** What a select shows as chosen. */
-  const chosen = (name: string): string[] => selectedTexts(select(name));
-
-  /** What a select offers. Its list is closed again: left open, it would stay on the page. */
-  function offers(name: string): string[] {
-    const texts = optionTexts(select(name));
-    closeSelect(select(name));
-    render();
-    return texts;
-  }
-
-  function pick(name: string, option: string): void {
-    chooseOption(select(name), option);
-    render();
-  }
-
   /** What is said under the company select about the company the AI read. Null when nothing is. */
   const hint = (): HTMLElement | null => el.querySelector<HTMLElement>('#ai-company-read');
-  const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
   const caseSave = (): TestRequest => http.expectOne({ method: 'POST', url: '/api/tickets' });
   const companySave = (): TestRequest => http.expectOne({ method: 'POST', url: '/api/companies' });
   /** The body of a request as it travels: what was left undefined is not in it. */

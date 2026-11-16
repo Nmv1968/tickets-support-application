@@ -22,6 +22,7 @@ import { errorMessage } from '../core/ui';
 
         <div>
           <label class="label" for="username">Usuario</label>
+          <!-- eslint-disable-next-line @angular-eslint/template/no-autofocus -- The form is the whole page, and the focus always started here. -->
           <input id="username" class="input" name="username" autocomplete="username" autofocus required [(ngModel)]="username" />
         </div>
         <div>

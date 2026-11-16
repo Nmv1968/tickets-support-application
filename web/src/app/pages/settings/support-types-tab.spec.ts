@@ -5,8 +5,8 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import type { SupportType } from '../../core/api';
 import { Confirm } from '../../core/confirm';
-import { Toast } from '../../core/toast';
 import { answerCatalogs } from '../../testing/catalogs';
+import { buttonIn, screenOf, toasts } from '../../testing/screen';
 import { SupportTypesTab } from './support-types-tab';
 
 const REFUSED = { status: 409, statusText: 'Conflict' };
@@ -54,6 +54,8 @@ describe('SupportTypesTab, the support types in Configuración', () => {
     catalogs(supportTypes);
   }
 
+  const { click, type } = screenOf(() => el, render);
+  const button = (row: HTMLElement, text: string): HTMLButtonElement => buttonIn(row, text);
   const form = (): HTMLFormElement => el.querySelector('form')!;
   const rows = (): HTMLElement[] => [...el.querySelectorAll<HTMLElement>('.card.divide-y > div')];
   const nameOf = (row: HTMLElement): HTMLInputElement => row.querySelector<HTMLInputElement>('input[aria-label^="Nombre del tipo"]')!;
@@ -62,19 +64,10 @@ describe('SupportTypesTab, the support types in Configuración', () => {
   const hex = (within: HTMLElement): HTMLInputElement => within.querySelector<HTMLInputElement>('input[aria-label$="en hexadecimal"]')!;
   const chip = (within: HTMLElement): HTMLElement => within.querySelector<HTMLElement>('app-type-chip')!;
   const errorOf = (within: HTMLElement): string | null => within.querySelector('[role=alert]')?.textContent?.trim() ?? null;
-  const button = (row: HTMLElement, text: string): HTMLButtonElement => [...row.querySelectorAll('button')].find((item) => item.textContent?.trim() === text)!;
   const trash = (row: HTMLElement): HTMLButtonElement => row.querySelector<HTMLButtonElement>('button[aria-label^="Eliminar "]')!;
   const newName = (): HTMLInputElement => el.querySelector<HTMLInputElement>('#type-name')!;
   const add = (): HTMLButtonElement => el.querySelector<HTMLButtonElement>('form button[type="submit"]')!;
-  const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
   const write = (method: string, url: string): TestRequest => http.expectOne({ method, url });
-
-  /** Text typed in a field the person is still in. */
-  function type(input: HTMLInputElement, value: string): void {
-    input.value = value;
-    input.dispatchEvent(new Event('input'));
-    render();
-  }
 
   /** Text typed in a field that is then left. */
   function leave(input: HTMLInputElement, value: string): void {
@@ -87,11 +80,6 @@ describe('SupportTypesTab, the support types in Configuración', () => {
   function pick(input: HTMLInputElement, color: string): void {
     type(input, color);
     input.dispatchEvent(new Event('change'));
-    render();
-  }
-
-  function click(target: HTMLElement): void {
-    target.click();
     render();
   }
 

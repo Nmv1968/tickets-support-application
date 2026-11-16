@@ -55,8 +55,7 @@ describe('SettingsPage, the tabs of Configuración', () => {
     tick();
     fixture.detectChanges();
 
-    expect(el.querySelector('app-companies-tab')).not.toBeNull();
-    expect(el.querySelector<HTMLInputElement>('app-companies-tab input[aria-label="Nombre de la empresa Acme"]')!.value).toBe('Acme');
+    expect(el.querySelector<HTMLInputElement>('app-named-catalog-tab input[aria-label="Nombre de la empresa Acme"]')!.value).toBe('Acme');
   }));
 
   it('"Tipos de soporte" is the catalog of the labels of a case', fakeAsync(() => {
@@ -73,6 +72,6 @@ describe('SettingsPage, the tabs of Configuración', () => {
     openTab('Logo');
 
     expect(el.querySelector('app-branding-tab h2')!.textContent).toBe('Logo de la empresa');
-    expect(el.querySelector('app-companies-tab')).toBeNull();
+    expect(el.querySelector('app-named-catalog-tab')).toBeNull();
   }));
 });

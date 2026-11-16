@@ -1,16 +1,14 @@
-import { Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed } from '@angular/core/testing';
 import { TypeChip, readableOn } from './type-chip';
 
-/** The chip inside something that listens for the press of the mouse and for the keys, as a select does. */
+/** The chip inside something that listens for the press of the mouse and for the keys, as a select does on its own element. */
 @Component({
   imports: [TypeChip],
-  template: `
-    <div (mousedown)="presses = presses + 1" (keydown)="keys.push($event.key)">
-      <app-type-chip [type]="type()" [removable]="removable()" (removed)="removals = removals + 1" />
-    </div>
-  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '(mousedown)': 'presses = presses + 1', '(keydown)': 'keys.push($event.key)' },
+  template: `<app-type-chip [type]="type()" [removable]="removable()" (removed)="removals = removals + 1" />`,
 })
 class Host {
   readonly type = signal({ name: 'Falla del sistema', color: '#b91c1c' });
@@ -24,6 +22,7 @@ class Host {
 /** The chip in places narrower than a long name: a column of the table, a select, a column of the board. */
 @Component({
   imports: [TypeChip],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div id="cell" class="w-28">
       <div class="flex flex-wrap gap-1">

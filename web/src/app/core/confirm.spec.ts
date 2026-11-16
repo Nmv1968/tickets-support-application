@@ -1,14 +1,16 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
 import { ngSelect, openSelect } from '../testing/ng-select';
+import { buttonIn } from '../testing/screen';
 import { Confirm, ConfirmDialog } from './confirm';
 import { SELECT } from './select';
 
 /** Something that asks about itself and can go away before it is answered, as the case panel does when its case is deleted elsewhere. */
 @Component({
   selector: 'app-test-asker',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<button type="button" id="discard" (click)="leave()">Cerrar</button>`,
 })
 class Asker {
@@ -25,6 +27,7 @@ class Asker {
 /** A screen with something that asks, and under the question a panel that closes with Escape, as the case panel does. */
 @Component({
   imports: [ConfirmDialog, Asker],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'escapes = escapes + 1' },
   template: `
     <button type="button" id="delete" (click)="remove()">Eliminar caso</button>
@@ -78,7 +81,7 @@ describe('Confirm, the question asked before something is done', () => {
 
   const dialog = (): HTMLElement | null => el.querySelector('[role=alertdialog]');
   const opener = (): HTMLButtonElement => el.querySelector<HTMLButtonElement>('#delete')!;
-  const button = (text: string): HTMLButtonElement => [...dialog()!.querySelectorAll('button')].find((item) => item.textContent?.trim() === text)!;
+  const button = (text: string): HTMLButtonElement => buttonIn(dialog()!, text);
 
   /** The person presses the button of the screen that asks. */
   async function ask(): Promise<void> {
@@ -387,6 +390,7 @@ describe('Confirm, the question asked before something is done', () => {
 /** A form with a list of options, and the question that can arrive while the list is open: the Back button of the browser asks about what the form has unsaved. */
 @Component({
   imports: [ConfirmDialog, FormsModule, ...SELECT],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ng-select ariaLabel="Estado" [items]="statuses" [clearable]="false" [(ngModel)]="status" />
     <app-confirm />

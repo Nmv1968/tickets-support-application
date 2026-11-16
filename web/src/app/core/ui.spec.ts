@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { errorMessage, formatCaseDate, formatDay, formatHours, formatMinutes, formatMomentDay, imagesFrom, nameKey, pastedImages, promiseText, timeAgo, todayIso } from './ui';
+import { PRIORITY_OPTIONS, STATUS_OPTIONS, errorMessage, formatCaseDate, formatDay, formatHours, formatMinutes, formatMomentDay, imagesFrom, nameKey, pastedImages, promiseText, timeAgo, todayIso } from './ui';
 
 /**
  * Sets "now" from local date parts, so every expectation holds in any time zone. The cases
@@ -360,5 +360,25 @@ describe('nameKey', () => {
 
   it('is empty for a name of spaces alone', () => {
     expect(nameKey(' \t ')).toBe('');
+  });
+});
+
+// What every select of a status or a priority offers, in the form of a case and in the filters.
+describe('the options of the status and the priority', () => {
+  it('are the statuses from the open ones to the resolved, each with its name', () => {
+    expect(STATUS_OPTIONS).toEqual([
+      { id: 'UNRESOLVED', label: 'Sin resolver' },
+      { id: 'PENDING', label: 'Pendiente' },
+      { id: 'RESOLVED', label: 'Resuelto' },
+    ]);
+  });
+
+  it('are the priorities from the lowest, each with its name', () => {
+    expect(PRIORITY_OPTIONS).toEqual([
+      { id: 'LOW', label: 'Baja' },
+      { id: 'MEDIUM', label: 'Media' },
+      { id: 'HIGH', label: 'Alta' },
+      { id: 'CRITICAL', label: 'Crítica' },
+    ]);
   });
 });

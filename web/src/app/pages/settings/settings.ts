@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
+import { Icon } from '../../core/icon';
+import type { IconName } from '../../core/icons';
 import { Toast } from '../../core/toast';
 import { AiTab } from './ai-tab';
-import { AssigneesTab } from './assignees-tab';
 import { BrandingTab } from './branding-tab';
-import { CompaniesTab } from './companies-tab';
 import { ModulesTab } from './modules-tab';
+import { ASSIGNEES, COMPANIES, NamedCatalogTab } from './named-catalog-tab';
 import { RemindersTab } from './reminders-tab';
 import { SlaTab } from './sla-tab';
 import { SupportTypesTab } from './support-types-tab';
@@ -16,7 +17,7 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
 
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule, UsersTab, AssigneesTab, CompaniesTab, SupportTypesTab, ModulesTab, SlaTab, RemindersTab, AiTab, BrandingTab],
+  imports: [FormsModule, UsersTab, NamedCatalogTab, SupportTypesTab, ModulesTab, SlaTab, RemindersTab, AiTab, BrandingTab, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="mx-auto max-w-4xl space-y-4 p-3 md:p-5">
@@ -34,7 +35,7 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
             [attr.aria-selected]="tab() === item.id"
             (click)="tab.set(item.id)"
           >
-            <i class="mdi text-base leading-none" [class]="item.icon" aria-hidden="true"></i>
+            <app-icon [name]="item.icon" class="text-base leading-none" />
             {{ item.label }}
           </button>
         }
@@ -45,10 +46,10 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
           <app-users-tab />
         }
         @case ('assignees') {
-          <app-assignees-tab />
+          <app-named-catalog-tab [catalog]="assignees" />
         }
         @case ('companies') {
-          <app-companies-tab />
+          <app-named-catalog-tab [catalog]="companies" />
         }
         @case ('supportTypes') {
           <app-support-types-tab />
@@ -90,20 +91,22 @@ export class SettingsPage {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
 
-  protected readonly tabs: { id: TabId; label: string; icon: string }[] = [
-    { id: 'users', label: 'Usuarios', icon: 'mdi-account-multiple-outline' },
-    { id: 'assignees', label: 'Responsables', icon: 'mdi-account-hard-hat-outline' },
-    { id: 'companies', label: 'Empresas', icon: 'mdi-domain' },
-    { id: 'supportTypes', label: 'Tipos de soporte', icon: 'mdi-tag-multiple-outline' },
-    { id: 'modules', label: 'Módulos', icon: 'mdi-view-grid-outline' },
-    { id: 'sla', label: 'SLA', icon: 'mdi-timer-cog-outline' },
-    { id: 'reminders', label: 'Recordatorios', icon: 'mdi-bell-cog-outline' },
-    { id: 'ai', label: 'IA', icon: 'mdi-creation-outline' },
+  protected readonly tabs: { id: TabId; label: string; icon: IconName }[] = [
+    { id: 'users', label: 'Usuarios', icon: 'account-multiple-outline' },
+    { id: 'assignees', label: 'Responsables', icon: 'account-hard-hat-outline' },
+    { id: 'companies', label: 'Empresas', icon: 'domain' },
+    { id: 'supportTypes', label: 'Tipos de soporte', icon: 'tag-multiple-outline' },
+    { id: 'modules', label: 'Módulos', icon: 'view-grid-outline' },
+    { id: 'sla', label: 'SLA', icon: 'timer-cog-outline' },
+    { id: 'reminders', label: 'Recordatorios', icon: 'bell-cog-outline' },
+    { id: 'ai', label: 'IA', icon: 'creation-outline' },
     // "Logo" and not "Empresa": the companies of the catalog are the clients, and have their own tab.
-    { id: 'branding', label: 'Logo', icon: 'mdi-image-outline' },
-    { id: 'account', label: 'Mi cuenta', icon: 'mdi-account-key-outline' },
+    { id: 'branding', label: 'Logo', icon: 'image-outline' },
+    { id: 'account', label: 'Mi cuenta', icon: 'account-key-outline' },
   ];
   protected readonly tab = signal<TabId>('users');
+  protected readonly assignees = ASSIGNEES;
+  protected readonly companies = COMPANIES;
   protected readonly current = signal('');
   protected readonly next = signal('');
 

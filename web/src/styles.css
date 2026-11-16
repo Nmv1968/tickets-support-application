@@ -325,7 +325,7 @@
   @apply flex w-8 items-center justify-center self-stretch pr-1 text-muted;
 }
 
-/* A chevron drawn with two borders: the icon font is not there in every page that shows a select. */
+/* A chevron drawn with two borders, on the arrow element that ng-select draws itself. */
 .ng-select .ng-select-container .ng-arrow-wrapper .ng-arrow {
   width: 0.45rem;
   height: 0.45rem;
@@ -431,8 +431,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   /*
-   * Pseudo-elements too: the MDI spinner turns on ::before. A single iteration, because an
-   * endless animation made this short would flicker instead of stopping.
+   * Pseudo-elements too: the knob of a switch slides on ::after. A single iteration, because an
+   * endless animation made this short (an icon that spins) would flicker instead of stopping.
    */
   *,
   *::before,

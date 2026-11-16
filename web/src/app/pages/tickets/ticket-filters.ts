@@ -1,10 +1,10 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, model, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, model, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Priority, TicketFilters, TicketStatus } from '../../core/api';
+import { AssigneeSelect, CompanySelect, ModuleSelect, PrioritySelect, StatusSelect, SupportTypeSelect } from '../../core/case-selects';
 import { Catalogs } from '../../core/catalogs';
+import { Icon } from '../../core/icon';
 import { SELECT } from '../../core/select';
-import { TypeChip } from '../../core/type-chip';
-import { PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL } from '../../core/ui';
 
 /** Delivery promise filter: any promise, or the open cases whose promise stands at that point. */
 export type PromiseFilter = 'any' | 'due' | 'overdue' | 'today' | 'soon';
@@ -108,99 +108,39 @@ export function activeFilters(filters: ListFilters): number {
  */
 @Component({
   selector: 'app-ticket-filters',
-  imports: [FormsModule, ...SELECT, TypeChip],
+  imports: [FormsModule, ...SELECT, CompanySelect, StatusSelect, AssigneeSelect, PrioritySelect, ModuleSelect, SupportTypeSelect, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Aligned at the bottom: a label that takes two lines on a narrow screen does not push its control out of the row.
   host: { id: 'ticket-filters', role: 'group', 'aria-label': 'Filtros', class: 'grid grid-cols-2 items-end gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6' },
   template: `
     @let f = filters();
-    <!-- Every list of options hangs from the body: inside the page it would be cut where the page scrolls. -->
+    <!--
+      Every entry of each catalog, active or not: the cases of an inactive one are still listed.
+      Every list of options hangs from the body: inside the page it would be cut where the page scrolls.
+    -->
     <div>
       <label class="label" for="tf-status">Estado</label>
-      <ng-select
-        labelForId="tf-status"
-        bindValue="id"
-        bindLabel="label"
-        placeholder="Todos"
-        appendTo="body"
-        [items]="statusOptions"
-        [searchable]="false"
-        [ngModel]="f.status"
-        (ngModelChange)="set('status', $event)"
-      />
+      <app-status-select inputId="tf-status" placeholder="Todos" clearable [value]="f.status" (valueChange)="set('status', $event)" />
     </div>
     <div>
       <label class="label" for="tf-assignee">Responsable</label>
-      <ng-select
-        labelForId="tf-assignee"
-        bindValue="id"
-        bindLabel="name"
-        placeholder="Todos"
-        appendTo="body"
-        [items]="assigneeOptions()"
-        [ngModel]="f.assignee"
-        (ngModelChange)="set('assignee', $event)"
-      />
+      <app-assignee-select inputId="tf-assignee" placeholder="Todos" [items]="catalogs.assigneeFilterOptions()" [value]="f.assignee" (valueChange)="set('assignee', $event)" />
     </div>
     <div>
       <label class="label" for="tf-company">Empresa</label>
-      <ng-select
-        labelForId="tf-company"
-        bindValue="id"
-        bindLabel="name"
-        placeholder="Todas"
-        appendTo="body"
-        [items]="catalogs.companies()"
-        [ngModel]="f.companyId"
-        (ngModelChange)="set('companyId', $event)"
-      />
+      <app-company-select inputId="tf-company" placeholder="Todas" [items]="catalogs.companies()" [value]="f.companyId" (valueChange)="set('companyId', $event)" />
     </div>
     <div>
       <label class="label" for="tf-module">Módulo</label>
-      <ng-select
-        labelForId="tf-module"
-        bindValue="id"
-        bindLabel="fullName"
-        placeholder="Todos"
-        appendTo="body"
-        [items]="catalogs.modules()"
-        [ngModel]="f.moduleId"
-        (ngModelChange)="set('moduleId', $event)"
-      />
+      <app-module-select inputId="tf-module" placeholder="Todos" [items]="catalogs.modules()" [value]="f.moduleId" (valueChange)="set('moduleId', $event)" />
     </div>
     <div>
       <label class="label" for="tf-priority">Prioridad</label>
-      <ng-select
-        labelForId="tf-priority"
-        bindValue="id"
-        bindLabel="label"
-        placeholder="Todas"
-        appendTo="body"
-        [items]="priorityOptions"
-        [searchable]="false"
-        [ngModel]="f.priority"
-        (ngModelChange)="set('priority', $event)"
-      />
+      <app-priority-select inputId="tf-priority" placeholder="Todas" [value]="f.priority" (valueChange)="set('priority', $event)" />
     </div>
     <div>
       <label class="label" for="tf-type">Tipo de soporte</label>
-      <ng-select
-        labelForId="tf-type"
-        bindValue="id"
-        bindLabel="name"
-        placeholder="Todos"
-        appendTo="body"
-        [items]="catalogs.supportTypes()"
-        [ngModel]="f.supportType"
-        (ngModelChange)="set('supportType', $event)"
-      >
-        <ng-template ng-label-tmp let-item="item">
-          <app-type-chip [type]="item" />
-        </ng-template>
-        <ng-template ng-option-tmp let-item="item">
-          <app-type-chip [type]="item" />
-        </ng-template>
-      </ng-select>
+      <app-support-type-select inputId="tf-type" placeholder="Todos" [items]="catalogs.supportTypes()" [value]="f.supportType" (valueChange)="set('supportType', $event)" />
     </div>
     <div>
       <label class="label" for="tf-created-by" title="El usuario que registró el caso">Registrado por</label>
@@ -262,7 +202,7 @@ export function activeFilters(filters: ListFilters): number {
         Olvidados
       </label>
       <button type="button" class="btn btn-ghost ml-auto px-2 py-1 text-xs" [disabled]="!canClear()" (click)="cleared.emit()">
-        <i class="mdi mdi-filter-off-outline" aria-hidden="true"></i>
+        <app-icon name="filter-off-outline" />
         Limpiar filtros
       </button>
     </div>
@@ -277,12 +217,8 @@ export class TicketFiltersPanel {
   /** "Limpiar filtros" was pressed. The list clears them: the search box is its own. */
   readonly cleared = output<void>();
 
-  protected readonly statusOptions = STATUSES.map((id) => ({ id, label: STATUS_LABEL[id] }));
-  protected readonly priorityOptions = PRIORITIES.map((id) => ({ id, label: PRIORITY_LABEL[id] }));
   protected readonly promiseOptions = PROMISE_OPTIONS;
   protected readonly archivedOptions = ARCHIVED_OPTIONS;
-  /** Everyone of the catalog, active or not (their cases are still theirs), and the cases nobody has. */
-  protected readonly assigneeOptions = computed<{ id: number | 'none'; name: string }[]>(() => [{ id: 'none', name: 'Sin asignar' }, ...this.catalogs.assignees()]);
 
   protected set<K extends keyof ListFilters>(field: K, value: ListFilters[K]): void {
     this.filters.update((filters) => ({ ...filters, [field]: value }));

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, model, signal } from '@angular/core';
+import { Icon } from '../../core/icon';
 
 export type ColumnId =
   | 'code'
@@ -99,12 +100,13 @@ export function tableWidth(columns: readonly Column[]): number {
  */
 @Component({
   selector: 'app-ticket-columns',
+  imports: [Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'relative', '(document:pointerdown)': 'onPointerDown($event)', '(document:keydown.escape)': 'onEscape()' },
   template: `
     <!-- On a phone it shows only its icon, so it carries its name apart from the text. -->
     <button type="button" class="btn btn-soft" aria-label="Columnas" title="Elegir qué columnas ver" aria-controls="ticket-columns" [attr.aria-expanded]="open()" (click)="open.set(!open())">
-      <i class="mdi mdi-view-column-outline text-base" aria-hidden="true"></i>
+      <app-icon name="view-column-outline" class="text-base" />
       <span class="hidden sm:inline">Columnas</span>
     </button>
     @if (open()) {
@@ -124,7 +126,7 @@ export function tableWidth(columns: readonly Column[]): number {
         <div class="mt-1 flex items-center gap-2 border-t border-line px-2 pt-1.5">
           <p class="flex-1 text-2xs text-muted">Se guarda solo para tu usuario.</p>
           <button type="button" class="btn btn-ghost px-2 py-1 text-xs" [disabled]="isDefault()" title="Volver a las columnas iniciales" (click)="reset()">
-            <i class="mdi mdi-restore" aria-hidden="true"></i>
+            <app-icon name="restore" />
             Restablecer
           </button>
         </div>

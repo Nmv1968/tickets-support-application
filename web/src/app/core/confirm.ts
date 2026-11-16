@@ -1,6 +1,7 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
+import { BackdropClick } from './backdrop-click';
 
 export interface ConfirmQuestion {
   /** What is asked, in a few words: "¿Eliminar el caso SOP-00012?". */
@@ -92,12 +93,12 @@ export class Confirm {
 
 @Component({
   selector: 'app-confirm',
-  imports: [A11yModule],
+  imports: [A11yModule, BackdropClick],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- A list of one: a question that was waiting gets a dialog of its own, with the focus where it starts. -->
     @for (question of shown(); track question.id) {
-      <div class="modal-backdrop" (click)="onBackdrop($event)">
+      <div class="modal-backdrop" (appBackdropClick)="answer($event, false)">
         <!-- alertdialog: it interrupts to ask, and is read out with its message. -->
         <div
           class="card w-full max-w-md p-4"
@@ -160,10 +161,5 @@ export class ConfirmDialog {
   protected answer(event: MouseEvent, confirmed: boolean): void {
     if (event.detail > 1) return;
     this.confirm.answer(confirmed);
-  }
-
-  /** Returns nothing on purpose: a handler that evaluates to false makes Angular cancel the click (see AiDraftDialog). */
-  protected onBackdrop(event: MouseEvent): void {
-    if (event.target === event.currentTarget) this.answer(event, false);
   }
 }

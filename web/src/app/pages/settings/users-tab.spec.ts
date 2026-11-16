@@ -6,8 +6,8 @@ import { provideRouter } from '@angular/router';
 import type { User } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { Catalogs } from '../../core/catalogs';
-import { Toast } from '../../core/toast';
 import { answerCatalogs } from '../../testing/catalogs';
+import { toasts } from '../../testing/screen';
 import { UsersTab } from './users-tab';
 
 // A user is someone who can log in, and nothing else. The tab used to say which responsible each
@@ -54,7 +54,6 @@ describe('UsersTab, the users in Configuración', () => {
 
   const rows = (): HTMLElement[] => [...el.querySelectorAll<HTMLElement>('tbody tr')];
   const cells = (row: HTMLElement): string[] => [...row.querySelectorAll('td')].map((cell) => cell.textContent?.replace(/\s+/g, ' ').trim() ?? '');
-  const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
 
   function fill(id: string, value: string): void {
     const input = el.querySelector<HTMLInputElement>(`#${id}`)!;

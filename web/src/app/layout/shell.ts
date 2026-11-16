@@ -5,6 +5,8 @@ import { Auth } from '../core/auth';
 import { Branding } from '../core/branding';
 import { Catalogs } from '../core/catalogs';
 import { ConfirmDialog } from '../core/confirm';
+import { Icon } from '../core/icon';
+import type { IconName } from '../core/icons';
 import { Live } from '../core/live';
 import { Reminders } from '../core/reminders';
 import { RemindersPanel } from './reminders-panel';
@@ -13,7 +15,7 @@ import { Toast } from '../core/toast';
 
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, RemindersPanel, AppLogo, ConfirmDialog],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, RemindersPanel, AppLogo, ConfirmDialog, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex h-dvh">
@@ -29,12 +31,12 @@ import { Toast } from '../core/toast';
         <nav class="flex-1 space-y-1 px-2" aria-label="Principal">
           @for (link of links; track link.path) {
             <a class="nav-link" [routerLink]="link.path" routerLinkActive="active">
-              <i class="mdi text-lg leading-none" [class]="link.icon" aria-hidden="true"></i>
+              <app-icon [name]="link.icon" class="text-lg leading-none" />
               {{ link.label }}
             </a>
           }
           <button type="button" class="nav-link w-full" (click)="remindersOpen.set(true)" [attr.aria-label]="'Avisos: ' + reminders.count() + ' casos'">
-            <i class="mdi text-lg leading-none" [class]="reminders.count() ? 'mdi-bell-ring-outline' : 'mdi-bell-outline'" aria-hidden="true"></i>
+            <app-icon [name]="reminders.count() ? 'bell-ring-outline' : 'bell-outline'" class="text-lg leading-none" />
             Avisos
             @if (reminders.count()) {
               <span class="badge ml-auto bg-danger text-white">{{ reminders.count() }}</span>
@@ -54,11 +56,11 @@ import { Toast } from '../core/toast';
             </span>
           </div>
           <button type="button" class="nav-link w-full" (click)="theme.toggle()">
-            <i class="mdi text-lg leading-none" [class]="theme.dark() ? 'mdi-white-balance-sunny' : 'mdi-weather-night'" aria-hidden="true"></i>
+            <app-icon [name]="theme.dark() ? 'white-balance-sunny' : 'weather-night'" class="text-lg leading-none" />
             {{ theme.dark() ? 'Tema claro' : 'Tema oscuro' }}
           </button>
           <button type="button" class="nav-link w-full" (click)="auth.logout()">
-            <i class="mdi mdi-logout text-lg leading-none" aria-hidden="true"></i>
+            <app-icon name="logout" class="text-lg leading-none" />
             Salir
           </button>
         </div>
@@ -69,16 +71,16 @@ import { Toast } from '../core/toast';
           <app-logo size="sm" />
           <span class="flex-1 font-semibold">Soporte</span>
           <button type="button" class="btn btn-ghost relative px-2" (click)="remindersOpen.set(true)" [attr.aria-label]="'Avisos: ' + reminders.count() + ' casos'">
-            <i class="mdi text-lg" [class]="reminders.count() ? 'mdi-bell-ring-outline' : 'mdi-bell-outline'" aria-hidden="true"></i>
+            <app-icon [name]="reminders.count() ? 'bell-ring-outline' : 'bell-outline'" class="text-lg" />
             @if (reminders.count()) {
               <span class="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-danger px-1 text-center text-[10px] leading-4 font-semibold text-white">{{ reminders.count() }}</span>
             }
           </button>
           <button type="button" class="btn btn-ghost px-2" (click)="theme.toggle()" aria-label="Cambiar tema">
-            <i class="mdi text-lg" [class]="theme.dark() ? 'mdi-white-balance-sunny' : 'mdi-weather-night'" aria-hidden="true"></i>
+            <app-icon [name]="theme.dark() ? 'white-balance-sunny' : 'weather-night'" class="text-lg" />
           </button>
           <button type="button" class="btn btn-ghost px-2" (click)="auth.logout()" aria-label="Salir">
-            <i class="mdi mdi-logout text-lg" aria-hidden="true"></i>
+            <app-icon name="logout" class="text-lg" />
           </button>
         </header>
 
@@ -89,7 +91,7 @@ import { Toast } from '../core/toast';
         <nav class="flex border-t border-line bg-surface md:hidden" aria-label="Principal">
           @for (link of links; track link.path) {
             <a class="tab-link" [routerLink]="link.path" routerLinkActive="active">
-              <i class="mdi text-xl leading-none" [class]="link.icon" aria-hidden="true"></i>
+              <app-icon [name]="link.icon" class="text-xl leading-none" />
               {{ link.label }}
             </a>
           }
@@ -114,11 +116,11 @@ export class Shell {
   private readonly toast = inject(Toast);
   private readonly branding = inject(Branding);
 
-  protected readonly links = [
-    { path: '/casos', label: 'Casos', icon: 'mdi-format-list-bulleted' },
-    { path: '/tablero', label: 'Tablero', icon: 'mdi-view-column-outline' },
-    { path: '/dashboard', label: 'Dashboard', icon: 'mdi-chart-box-outline' },
-    { path: '/configuracion', label: 'Configuración', icon: 'mdi-cog-outline' },
+  protected readonly links: { path: string; label: string; icon: IconName }[] = [
+    { path: '/casos', label: 'Casos', icon: 'format-list-bulleted' },
+    { path: '/tablero', label: 'Tablero', icon: 'view-column-outline' },
+    { path: '/dashboard', label: 'Dashboard', icon: 'chart-box-outline' },
+    { path: '/configuracion', label: 'Configuración', icon: 'cog-outline' },
   ];
 
   constructor() {

@@ -1,16 +1,12 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { nextTask } from '../testing/screen';
 import { AppLogo } from './app-logo';
 import { Branding } from './branding';
 
-/** Lets the promise chains that follow an answered request run. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve));
-}
-
-@Component({ imports: [AppLogo], template: `<app-logo size="lg" />` })
+@Component({ imports: [AppLogo], changeDetection: ChangeDetectionStrategy.OnPush, template: `<app-logo size="lg" />` })
 class Host {}
 
 // The company logo replaces the default icon everywhere at once, the browser tab included.
@@ -75,7 +71,7 @@ describe('Branding, the company logo', () => {
     const loading = branding.load();
     http.expectOne('/api/branding').error(new ProgressEvent('error'));
     await loading;
-    await settle();
+    await nextTask();
 
     expect(branding.logoUrl()).toBe('/api/branding/logo?v=abc123');
   });
@@ -86,7 +82,7 @@ describe('Branding, the company logo', () => {
       fixture.detectChanges();
       const logo = (fixture.nativeElement as HTMLElement).querySelector('app-logo')!;
 
-      expect(logo.querySelector('i.mdi-lifebuoy')).not.toBeNull();
+      expect(logo.querySelector('app-icon[data-icon=lifebuoy]')).not.toBeNull();
       expect(logo.querySelector('img')).toBeNull();
       expect(logo.classList).toContain('bg-primary');
       expect(logo.classList).toContain('size-11');
@@ -98,7 +94,7 @@ describe('Branding, the company logo', () => {
       expect(image.getAttribute('src')).toBe('/api/branding/logo?v=abc123');
       // Decorative: the name of the app is written beside it.
       expect(image.getAttribute('alt')).toBe('');
-      expect(logo.querySelector('i')).toBeNull();
+      expect(logo.querySelector('app-icon')).toBeNull();
       expect(logo.classList).not.toContain('bg-primary');
     });
   });

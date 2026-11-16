@@ -3,9 +3,9 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { answerCatalogs } from '../testing/catalogs';
 import type { CatalogsAnswer } from '../testing/catalogs';
+import { toasts } from '../testing/screen';
 import type { AiProviderConfig, Assignee, Company, SupportType, SystemModule } from './api';
-import { Catalogs, companyCreator, findByName } from './catalogs';
-import { Toast } from './toast';
+import { Catalogs, companyCreator, findByName, offered } from './catalogs';
 import { errorMessage } from './ui';
 
 // Every screen offers the same users, responsibles, companies, support types and modules. They
@@ -90,6 +90,17 @@ describe('Catalogs', () => {
     expect(catalogs.modules().map((item) => item.fullName)).toEqual(['Ventas', 'Bodega vieja']);
   }));
 
+  // The list and the board filter the cases of a responsible, inactive or not, or the ones nobody has.
+  it('offers a filter by responsible everyone of the catalog, after the cases nobody has', fakeAsync(() => {
+    load({ assignees: [person(4, 'Ana'), person(5, 'Luis', false)] });
+
+    expect(catalogs.assigneeFilterOptions().map((item) => [item.id, item.name])).toEqual([
+      ['none', 'Sin asignar'],
+      [4, 'Ana'],
+      [5, 'Luis'],
+    ]);
+  }));
+
   // Left alone, the server lists only the active modules: the deactivated ones have to be asked for.
   it('asks for every module, the deactivated ones too', fakeAsync(() => {
     void catalogs.reload();
@@ -147,7 +158,6 @@ describe('Catalogs', () => {
 
     // What every select of companies is given for its "Crear empresa «X»".
     describe('with "Crear empresa «X»"', () => {
-      const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
 
       it('is created with the name typed, without the spaces around it, and the person is told', fakeAsync(() => {
         const create = TestBed.runInInjectionContext(companyCreator);
@@ -253,5 +263,27 @@ describe('findByName', () => {
     expect(findByName(companies, 'Acm')).toBeUndefined();
     expect(findByName(companies, 'Acme del Sur')).toBeUndefined();
     expect(findByName(companies, '   ')).toBeUndefined();
+  });
+});
+
+// The form of a case offers what a new case takes, and keeps what the case has.
+describe('offered', () => {
+  const catalog = [
+    { id: 1, name: 'Acme', active: true },
+    { id: 2, name: 'Bodega Sur', active: false },
+    { id: 3, name: 'Zeta', active: true },
+  ];
+
+  it('is the active entries of the catalog, in its order', () => {
+    expect(offered<{ id: number; name: string }>(catalog, []).map((entry) => entry.name)).toEqual(['Acme', 'Zeta']);
+  });
+
+  it('keeps in its place an inactive entry the case has', () => {
+    expect(offered(catalog, [{ id: 2, name: 'Bodega Sur' }]).map((entry) => entry.name)).toEqual(['Acme', 'Bodega Sur', 'Zeta']);
+  });
+
+  // An entry created a moment ago elsewhere, before the catalog is read again.
+  it('adds at the end, as the case names it, an entry the catalog does not have yet', () => {
+    expect(offered(catalog, [{ id: 9, name: 'Ferretería' }]).map((entry) => entry.name)).toEqual(['Acme', 'Zeta', 'Ferretería']);
   });
 });

@@ -1,14 +1,15 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
+import type { OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { NgSelectComponent } from '@ng-select/ng-select';
 import { Api } from '../../core/api';
 import type { Priority, TicketDetail, TicketStatus } from '../../core/api';
-import { Catalogs, companyCreator, findByName } from '../../core/catalogs';
-import { SELECT } from '../../core/select';
+import { BackdropClick } from '../../core/backdrop-click';
+import { AssigneeSelect, CompanySelect, ModuleSelect, PrioritySelect, StatusSelect, SupportTypeSelect } from '../../core/case-selects';
+import { Catalogs, findByName } from '../../core/catalogs';
+import { Icon } from '../../core/icon';
 import { Toast } from '../../core/toast';
-import { TypeChip } from '../../core/type-chip';
-import { PRIORITIES, PRIORITY_LABEL, STATUSES, STATUS_LABEL, errorMessage, imagesFrom, pastedImages, shrinkImage, todayIso } from '../../core/ui';
+import { errorMessage, imagesFrom, pastedImages, shrinkImage, todayIso } from '../../core/ui';
 
 interface Picked {
   file: File;
@@ -24,17 +25,17 @@ const MAX_IMAGES = 4;
  */
 @Component({
   selector: 'app-ai-draft',
-  imports: [FormsModule, A11yModule, ...SELECT, TypeChip],
+  imports: [FormsModule, A11yModule, BackdropClick, CompanySelect, StatusSelect, AssigneeSelect, PrioritySelect, ModuleSelect, SupportTypeSelect, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'closed.emit()', '(document:paste)': 'onPaste($event)' },
   template: `
-    <div class="modal-backdrop" (click)="onBackdrop($event)">
+    <div class="modal-backdrop" (appBackdropClick)="closed.emit()">
       <div class="card flex max-h-full w-full max-w-2xl flex-col" role="dialog" aria-modal="true" aria-labelledby="ai-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
         <header class="flex items-center gap-2 border-b border-line px-4 py-3">
-          <i class="mdi mdi-creation-outline text-xl text-primary" aria-hidden="true"></i>
+          <app-icon name="creation-outline" class="text-xl text-primary" />
           <h2 id="ai-title" class="font-semibold">{{ step() === 'input' ? 'Nuevo caso con IA' : 'Revisar el caso' }}</h2>
           <button type="button" class="btn btn-ghost ml-auto px-2" (click)="closed.emit()" aria-label="Cerrar">
-            <i class="mdi mdi-close text-lg" aria-hidden="true"></i>
+            <app-icon name="close" class="text-lg" />
           </button>
         </header>
 
@@ -53,28 +54,28 @@ const MAX_IMAGES = 4;
                     <div class="relative overflow-hidden rounded-control border border-line">
                       <img class="aspect-video w-full object-cover" [src]="image.url" [alt]="image.file.name" />
                       <button type="button" class="absolute top-1 right-1 grid size-6 place-items-center rounded-full bg-black/60 text-white" (click)="removeImage(image)" aria-label="Quitar imagen">
-                        <i class="mdi mdi-close" aria-hidden="true"></i>
+                        <app-icon name="close" />
                       </button>
                     </div>
                   }
                 </div>
               } @else {
-                <i class="mdi mdi-image-plus-outline text-4xl text-muted" aria-hidden="true"></i>
+                <app-icon name="image-plus-outline" class="text-4xl text-muted" />
                 <p class="mt-1 font-medium">Pega una captura (Ctrl+V) o arrastra una imagen aquí</p>
                 <p class="text-xs text-muted">Hasta {{ maxImages }} imágenes: pantalla con el error, foto del equipo, chat del cliente…</p>
               }
               <div class="mt-3 flex flex-wrap justify-center gap-2">
                 <label class="btn btn-soft cursor-pointer">
-                  <i class="mdi mdi-folder-image" aria-hidden="true"></i> Elegir imágenes
+                  <app-icon name="folder-image" /> Elegir imágenes
                   <input type="file" class="sr-only" accept="image/*" multiple (change)="onFiles($event)" />
                 </label>
                 <label class="btn btn-soft cursor-pointer">
-                  <i class="mdi mdi-camera-outline" aria-hidden="true"></i> Tomar foto
+                  <app-icon name="camera-outline" /> Tomar foto
                   <input type="file" class="sr-only" accept="image/*" capture="environment" (change)="onFiles($event)" />
                 </label>
                 @if (canReadClipboard) {
                   <button type="button" class="btn btn-soft" (click)="pasteFromClipboard()">
-                    <i class="mdi mdi-content-paste" aria-hidden="true"></i> Pegar captura
+                    <app-icon name="content-paste" /> Pegar captura
                   </button>
                 }
               </div>
@@ -107,36 +108,21 @@ const MAX_IMAGES = 4;
                 </div>
                 <p class="mt-1 text-2xs text-muted">Día en que lo reportó el cliente. La fecha de registro será hoy, automática.</p>
               </div>
-              <!-- Every list of options hangs from the body: inside the dialog it would be cut where the dialog scrolls. -->
               <div class="col-span-2 sm:col-span-1">
                 <label class="label" for="ai-status">Estado</label>
-                <ng-select
-                  labelForId="ai-status"
-                  bindValue="id"
-                  bindLabel="label"
-                  appendTo="body"
-                  [items]="statusOptions"
-                  [clearable]="false"
-                  [searchable]="false"
-                  [(ngModel)]="status"
-                />
+                <app-status-select inputId="ai-status" [(value)]="status" />
               </div>
               <div class="col-span-2">
                 <label class="label" for="ai-company">Empresa <span class="text-danger" aria-hidden="true">*</span></label>
-                <ng-select
+                <app-company-select
                   #company
-                  labelForId="ai-company"
-                  bindValue="id"
-                  bindLabel="name"
+                  inputId="ai-company"
                   placeholder="Elige o escribe una empresa"
-                  appendTo="body"
+                  creatable
+                  required
                   [items]="catalogs.activeCompanies()"
-                  [addTag]="createCompany"
-                  [inputAttrs]="{ maxlength: '200', 'aria-required': 'true' }"
-                  [(ngModel)]="companyId"
-                >
-                  <ng-template ng-tag-tmp let-search="searchTerm">Crear empresa «{{ search }}»</ng-template>
-                </ng-select>
+                  [(value)]="companyId"
+                />
                 @if (unmatchedCompany(); as read) {
                   <!-- The company the AI read is in no option of the select: said here, with the way to add it. -->
                   <p id="ai-company-read" class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" role="status">
@@ -145,7 +131,7 @@ const MAX_IMAGES = 4;
                     } @else {
                       <span>La IA leyó «{{ read.name }}», que no está registrada.</span>
                       <button type="button" class="btn btn-soft px-2 py-1 text-xs whitespace-normal" [disabled]="creatingCompany()" (click)="createReadCompany(read.name)">
-                        <i class="mdi" [class]="creatingCompany() ? 'mdi-loading mdi-spin' : 'mdi-plus'" aria-hidden="true"></i>
+                        <app-icon [name]="creatingCompany() ? 'loading' : 'plus'" />
                         Crear empresa «{{ read.name }}»
                       </button>
                     }
@@ -159,40 +145,15 @@ const MAX_IMAGES = 4;
               <div>
                 <label class="label" for="ai-assignee">Responsable</label>
                 <!-- Empty unless someone is chosen: registering a case makes nobody its responsible. -->
-                <ng-select
-                  labelForId="ai-assignee"
-                  bindValue="id"
-                  bindLabel="name"
-                  placeholder="Sin asignar"
-                  appendTo="body"
-                  [items]="catalogs.activeAssignees()"
-                  [(ngModel)]="assigneeId"
-                />
+                <app-assignee-select inputId="ai-assignee" [items]="catalogs.activeAssignees()" [(value)]="assigneeId" />
               </div>
               <div>
                 <label class="label" for="ai-priority">Prioridad</label>
-                <ng-select
-                  labelForId="ai-priority"
-                  bindValue="id"
-                  bindLabel="label"
-                  placeholder="Sin prioridad"
-                  appendTo="body"
-                  [items]="priorityOptions"
-                  [searchable]="false"
-                  [(ngModel)]="priority"
-                />
+                <app-priority-select inputId="ai-priority" [(value)]="priority" />
               </div>
               <div>
                 <label class="label" for="ai-module">Módulo</label>
-                <ng-select
-                  labelForId="ai-module"
-                  bindValue="id"
-                  bindLabel="fullName"
-                  placeholder="Sin módulo"
-                  appendTo="body"
-                  [items]="catalogs.activeModules()"
-                  [(ngModel)]="moduleId"
-                />
+                <app-module-select inputId="ai-module" [items]="catalogs.activeModules()" [(value)]="moduleId" />
               </div>
               <div>
                 <label class="label" for="ai-estimated">Tiempo estimado (minutos)</label>
@@ -200,25 +161,7 @@ const MAX_IMAGES = 4;
               </div>
               <div class="col-span-2">
                 <label class="label" for="ai-types">Tipos de soporte</label>
-                <!-- The list stays open after each choice: a case often takes more than one. -->
-                <ng-select
-                  labelForId="ai-types"
-                  bindValue="id"
-                  bindLabel="name"
-                  placeholder="Sin tipo de soporte"
-                  appendTo="body"
-                  [items]="catalogs.activeSupportTypes()"
-                  [multiple]="true"
-                  [closeOnSelect]="false"
-                  [(ngModel)]="supportTypeIds"
-                >
-                  <ng-template ng-label-tmp let-item="item" let-clear="clear">
-                    <app-type-chip [type]="item" removable (removed)="clear(item)" />
-                  </ng-template>
-                  <ng-template ng-option-tmp let-item="item">
-                    <app-type-chip [type]="item" />
-                  </ng-template>
-                </ng-select>
+                <app-support-type-select inputId="ai-types" multiple [items]="catalogs.activeSupportTypes()" [(value)]="supportTypeIds" />
               </div>
               <div class="col-span-2 rounded-control border border-line px-3 py-2.5">
                 <div class="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2">
@@ -240,7 +183,7 @@ const MAX_IMAGES = 4;
               </div>
             </div>
             @if (images().length) {
-              <p class="text-xs text-muted"><i class="mdi mdi-paperclip" aria-hidden="true"></i> {{ images().length }} imagen(es) se guardan como adjuntos del caso.</p>
+              <p class="text-xs text-muted"><app-icon name="paperclip" /> {{ images().length }} imagen(es) se guardan como adjuntos del caso.</p>
             }
             @if (error()) {
               <p class="alert-error" role="alert">{{ error() }}</p>
@@ -252,7 +195,7 @@ const MAX_IMAGES = 4;
           @if (step() === 'input') {
             <button type="button" class="btn btn-ghost mr-auto" [disabled]="busy()" (click)="skipAi()">Llenar a mano</button>
             <button type="button" class="btn btn-primary" [disabled]="busy() || (!images().length && !text().trim())" (click)="analyze()">
-              <i class="mdi" [class]="busy() ? 'mdi-loading mdi-spin' : 'mdi-creation-outline'" aria-hidden="true"></i>
+              <app-icon [name]="busy() ? 'loading' : 'creation-outline'" />
               {{ busy() ? 'Analizando…' : 'Analizar con IA' }}
             </button>
           } @else {
@@ -266,7 +209,7 @@ const MAX_IMAGES = 4;
     </div>
   `,
 })
-export class AiDraftDialog {
+export class AiDraftDialog implements OnInit {
   private readonly api = inject(Api);
   private readonly toast = inject(Toast);
   protected readonly catalogs = inject(Catalogs);
@@ -280,8 +223,6 @@ export class AiDraftDialog {
   protected readonly today = todayIso();
   /** Reading the clipboard from a button only exists on HTTPS or localhost. */
   protected readonly canReadClipboard = typeof navigator.clipboard?.read === 'function';
-  protected readonly statusOptions = STATUSES.map((id) => ({ id, label: STATUS_LABEL[id] }));
-  protected readonly priorityOptions = PRIORITIES.map((id) => ({ id, label: PRIORITY_LABEL[id] }));
 
   protected readonly step = signal<'input' | 'review'>('input');
   protected readonly images = signal<Picked[]>([]);
@@ -325,24 +266,17 @@ export class AiDraftDialog {
     if (!name || this.companyId() !== null || findByName(this.catalogs.activeCompanies(), name)) return null;
     return { name, inactive: !!findByName(this.catalogs.companies(), name) };
   });
-  /** "Crear empresa «X»" in the company select. */
-  protected readonly createCompany = companyCreator();
   protected readonly creatingCompany = signal(false);
-  private readonly companySelect = viewChild<NgSelectComponent>('company');
+  /** The company select, whose "Crear empresa «X»" the button for the company the AI read uses too. */
+  private readonly companySelect = viewChild<CompanySelect<number | null>>('company');
 
   constructor() {
-    // Inputs are set before the first change detection; read them once the component exists.
-    queueMicrotask(() => this.addImages(this.initialImages()));
     inject(DestroyRef).onDestroy(() => this.images().forEach((image) => URL.revokeObjectURL(image.url)));
   }
 
-  /**
-   * Closes when the click lands on the backdrop itself. Kept as a method that returns nothing:
-   * an inline `a && b` expression evaluates to false for clicks inside the dialog, and Angular
-   * then cancels the click, which stops file inputs and checkboxes from working.
-   */
-  protected onBackdrop(event: MouseEvent): void {
-    if (event.target === event.currentTarget) this.closed.emit();
+  /** The images it opens with: its inputs are set by now. */
+  ngOnInit(): void {
+    this.addImages(this.initialImages());
   }
 
   private addImages(files: File[]): void {
@@ -436,12 +370,14 @@ export class AiDraftDialog {
    * "Crear empresa «X»".
    */
   protected async createReadCompany(name: string): Promise<void> {
-    if (this.creatingCompany()) return;
+    // The button is drawn under the select: it is there with it.
+    const select = this.companySelect();
+    if (!select || this.creatingCompany()) return;
     this.creatingCompany.set(true);
     try {
-      this.companyId.set((await this.createCompany(name)).id);
+      this.companyId.set((await select.create(name)).id);
       // The button goes away with what it said, and the focus it had with it.
-      this.companySelect()?.focus();
+      select.focus();
     } catch {
       // Already said (see companyCreator). The button stays, to try again or to choose another company.
     } finally {

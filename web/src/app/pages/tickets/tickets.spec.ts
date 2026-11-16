@@ -2,93 +2,28 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import type { TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
-import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
+import { DeferBlockBehavior, DeferBlockState, TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
+import type { DeferBlockFixture } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import type { Assignee, Company, SupportType, SystemModule, Ticket, TicketDetail, TicketPage, User } from '../../core/api';
+import type { Company, Ticket, TicketDetail, User } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { Catalogs } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
 import { TicketEvents } from '../../core/ticket-events';
-import { Toast } from '../../core/toast';
 import { todayIso } from '../../core/ui';
-import { chooseOption, clearSelect, closeSelect, ngSelect, optionTexts, selectedTexts, typeInSelect } from '../../testing/ng-select';
+import { ASSIGNEES, COMPANIES, FAILURE, MODULES, SUPPORT_TYPES, TRAINING, ticket, ticketPage } from '../../testing/fixtures';
+import { clearSelect, closeSelect, ngSelect, optionTexts, typeInSelect } from '../../testing/ng-select';
+import { paste, screenOf, toasts } from '../../testing/screen';
+import { DESKTOP, PHONE, ScreenWidth, provideScreenWidth } from '../../testing/screen-width';
 import { TicketsPage } from './tickets';
-
-function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
-  return {
-    id: 7,
-    code: 'SOP-00007',
-    date: '2026-11-05',
-    time: null,
-    companyId: 1,
-    company: 'Acme',
-    description: 'No imprime',
-    status: 'PENDING',
-    assigneeId: null,
-    assigneeName: null,
-    supportTypes: [],
-    priority: null,
-    estimatedMinutes: null,
-    spentMinutes: 0,
-    timerStartedAt: null,
-    moduleId: null,
-    moduleName: null,
-    dueAt: null,
-    promisedDate: null,
-    promiseState: null,
-    resolvedAt: null,
-    overdue: false,
-    lastActivityAt: '2026-11-05T10:00:00.000Z',
-    stale: false,
-    aiGenerated: false,
-    customerReply: null,
-    createdAt: '2026-11-05T10:00:00.000Z',
-    createdById: null,
-    archivedAt: null,
-    lastNote: null,
-    notesCount: 0,
-    attachmentsCount: 0,
-    createdByName: null,
-    notes: [],
-    attachments: [],
-    history: [],
-    ...overrides,
-  };
-}
-
-function page(items: Ticket[]): TicketPage {
-  return { items, total: items.length, page: 1, pageSize: 50 };
-}
 
 const OTHER = ticket({ id: 8, code: 'SOP-00008', companyId: 5, company: 'Bodega Sur', description: 'No abre la caja' });
 
-// The catalogs the filters and the form of a new case offer. One entry of each is deactivated:
-// it keeps its cases and takes no new ones.
+// The users of the catalog, for "Registrado por". The other catalogs the filters and the form of a
+// new case offer are the ones of the specs (see testing/fixtures).
 const USERS: User[] = [
   { id: 1, username: 'ana', name: 'Ana', active: true, canLogin: true },
   { id: 2, username: 'luis', name: 'Luis', active: true, canLogin: true },
-];
-const COMPANIES: Company[] = [
-  { id: 1, name: 'Acme', active: true, tickets: 3 },
-  { id: 5, name: 'Bodega Sur', active: true, tickets: 1 },
-  { id: 6, name: 'Taller Viejo', active: false, tickets: 2 },
-];
-const ASSIGNEES: Assignee[] = [
-  { id: 4, name: 'Ana', active: true, tickets: 1 },
-  { id: 5, name: 'Luis', active: true, tickets: 0 },
-  { id: 6, name: 'Zoe', active: false, tickets: 2 },
-];
-const TRAINING = { id: 1, name: 'Capacitación', color: '#12b76a' };
-const FAILURE = { id: 2, name: 'Falla del sistema', color: '#b91c1c' };
-const TYPES: SupportType[] = [
-  { ...TRAINING, active: true, tickets: 0 },
-  { ...FAILURE, active: true, tickets: 4 },
-  { id: 3, name: 'Garantía', color: '#64748b', active: false, tickets: 1 },
-];
-const MODULES: SystemModule[] = [
-  { id: 1, name: 'Ventas', parentId: null, active: true, fullName: 'Ventas' },
-  { id: 2, name: 'Facturas', parentId: 1, active: true, fullName: 'Ventas / Facturas' },
-  { id: 3, name: 'Bodega vieja', parentId: null, active: false, fullName: 'Bodega vieja' },
 ];
 
 /** The headers of the table for someone who never chose their columns. */
@@ -98,16 +33,6 @@ const STARTING_IDS = ['code', 'date', 'createdAt', 'company', 'description', 'st
 const REFUSED = { status: 400, statusText: 'Bad Request' };
 const STORED = { status: 204, statusText: 'No Content' };
 const picture = new File(['png'], 'captura.png', { type: 'image/png' });
-
-/** A paste as the browser reports it: on the element that has the focus, with what was copied. */
-function paste(target: Element, files: File[], text?: string): ClipboardEvent {
-  const data = new DataTransfer();
-  for (const file of files) data.items.add(file);
-  if (text !== undefined) data.setData('text/plain', text);
-  const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
-  target.dispatchEvent(event);
-  return event;
-}
 
 /** What this browser keeps of the list, for any user: the copies of their preferences. */
 function forgetBrowserCopies(): void {
@@ -119,6 +44,8 @@ function forgetBrowserCopies(): void {
 // The list with the real Api: the tests act on the controls of the page and on TicketEvents, and
 // look at the requests that leave and at what the rows show. Answers arrive when the test sends
 // them (fakeAsync), which is what lets one arrive late.
+//
+// On a laptop, which shows the list as a table: the tests that are about the phone cards say so.
 describe('TicketsPage', () => {
   let http: HttpTestingController;
   let events: TicketEvents;
@@ -128,7 +55,7 @@ describe('TicketsPage', () => {
 
   beforeEach(() => {
     forgetBrowserCopies();
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([]), provideScreenWidth(DESKTOP)] });
     http = TestBed.inject(HttpTestingController);
     events = TestBed.inject(TicketEvents);
     // The list is behind the login: there is always someone logged in.
@@ -137,7 +64,7 @@ describe('TicketsPage', () => {
     catalogs.users.set(USERS);
     catalogs.companies.set(COMPANIES);
     catalogs.assignees.set(ASSIGNEES);
-    catalogs.supportTypes.set(TYPES);
+    catalogs.supportTypes.set(SUPPORT_TYPES);
     catalogs.modules.set(MODULES);
   });
 
@@ -188,55 +115,11 @@ describe('TicketsPage', () => {
     create();
     preferenceRead('tickets.columns').flush({ value: saved.columns ?? null });
     preferenceRead('tickets.filters-open').flush({ value: saved.filtersOpen ?? null });
-    listRead().flush(page(items));
+    listRead().flush(ticketPage(items, 50));
     settle();
   }
 
-  function find<T extends HTMLElement>(selector: string): T {
-    const found = el.querySelector<T>(selector);
-    if (!found) throw new Error(`Nothing on screen matches ${selector}`);
-    return found;
-  }
-
-  function button(text: string, within: HTMLElement = el): HTMLButtonElement {
-    const found = Array.from(within.querySelectorAll('button')).find((candidate) => candidate.textContent?.includes(text));
-    if (!found) throw new Error(`No "${text}" button on screen`);
-    return found;
-  }
-
-  function click(target: HTMLElement): void {
-    target.click();
-    render();
-  }
-
-  /** What the person types in a field, or picks in the calendar of a date: the browser reports both the same way. */
-  function type(control: HTMLInputElement | HTMLTextAreaElement, text: string): void {
-    control.value = text;
-    control.dispatchEvent(new Event('input'));
-    render();
-  }
-
-  function pressEscape(): void {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    render();
-  }
-
-  const select = (name: string): HTMLElement => ngSelect(el, name);
-  /** What a select shows as chosen. */
-  const chosen = (name: string): string[] => selectedTexts(select(name));
-
-  /** What a select offers. Its list is closed again: left open, it would stay on the page. */
-  function offers(name: string): string[] {
-    const texts = optionTexts(select(name));
-    closeSelect(select(name));
-    render();
-    return texts;
-  }
-
-  function pick(name: string, option: string): void {
-    chooseOption(select(name), option);
-    render();
-  }
+  const { find, button, click, type, pressEscape, select, chosen, offers, pick } = screenOf(() => el, render);
 
   // The table: its headers, its rows, and the cell of a row under a header.
   const headers = (): string[] => Array.from(el.querySelectorAll('thead th'), (header) => header.textContent?.trim() ?? '');
@@ -249,7 +132,6 @@ describe('TicketsPage', () => {
   }
 
   const panel = (): HTMLElement | null => el.querySelector('app-ticket-panel');
-  const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
   /** The body of a request as it travels: what was left undefined is not in it. */
   const sent = (request: TestRequest): unknown => JSON.parse(JSON.stringify(request.request.body));
 
@@ -369,16 +251,15 @@ describe('TicketsPage', () => {
     it('does not open when the press ends a selection: the person is copying a text of the row', fakeAsync(() => {
       open();
       const description = cell('Descripción');
-      // What the browser reports after a drag over the text. Not a selection made here: at the
-      // width these tests run with the page shows its phone cards, the table is not drawn, and
-      // a text that is not drawn cannot be selected.
-      const selection = spyOn(window, 'getSelection').and.returnValue({ toString: () => 'No imprime' } as Selection);
+      // What a drag over the text leaves selected.
+      window.getSelection()!.selectAllChildren(description);
+      expect(window.getSelection()!.toString()).toContain('No imprime');
 
       click(description);
       expect(panel()).toBeNull();
 
       // With nothing selected, the same press opens the case.
-      selection.and.callThrough();
+      window.getSelection()!.removeAllRanges();
       click(description);
       expect(panel()).not.toBeNull();
       http.expectOne({ method: 'GET', url: '/api/tickets/7' }).flush(ticket());
@@ -392,8 +273,9 @@ describe('TicketsPage', () => {
     // The read may have been taken before the save was stored: shown, it would undo the save on screen.
     it('while the list is being read is shown on its row, and the list is read again', fakeAsync(() => {
       open();
-      // Someone else changed a case: the list is read again.
+      // Someone else changed a case: the list is read again, with the screen update that follows.
       events.outdated(null);
+      render();
       const stale = listRead();
 
       events.saved(ticket({ status: 'RESOLVED' }));
@@ -401,11 +283,12 @@ describe('TicketsPage', () => {
       expect(rowStatus()).toBe('Resuelto');
       const fresh = listRead();
 
-      stale.flush(page([ticket()]));
+      // Its answer, maybe older than the save, never arrives.
+      expect(stale.cancelled).toBeTrue();
       settle();
       expect(rowStatus()).toBe('Resuelto');
 
-      fresh.flush(page([ticket({ status: 'RESOLVED', company: 'Acme del Sur' })]));
+      fresh.flush(ticketPage([ticket({ status: 'RESOLVED', company: 'Acme del Sur' })], 50));
       settle();
       expect(rowStatus()).toBe('Resuelto');
       expect(el.textContent).toContain('Acme del Sur');
@@ -430,7 +313,7 @@ describe('TicketsPage', () => {
       const read = listRead();
       // The list goes on with the cases that are not archived.
       expect(read.request.params.has('archived')).toBeFalse();
-      read.flush(page([OTHER]));
+      read.flush(ticketPage([OTHER], 50));
       settle();
       expect(rows().length).toBe(1);
       expect(el.textContent).not.toContain('SOP-00007');
@@ -441,7 +324,7 @@ describe('TicketsPage', () => {
       events.saved(ticket(), { archiving: true });
       render();
 
-      listRead().flush(page([ticket()]));
+      listRead().flush(ticketPage([ticket()], 50));
       settle();
       expect(cell('Código').textContent).not.toContain('Archivado');
     }));
@@ -474,7 +357,7 @@ describe('TicketsPage', () => {
         openForm(ticket());
 
         press('Archivar', archived);
-        listRead().flush(page([OTHER]));
+        listRead().flush(ticketPage([OTHER], 50));
         settle();
         expect(codes()).toEqual(['SOP-00008']);
 
@@ -482,7 +365,7 @@ describe('TicketsPage', () => {
         press('Desarchivar', ticket());
         const read = listRead();
         expect(read.request.params.has('archived')).toBeFalse();
-        read.flush(page([ticket(), OTHER]));
+        read.flush(ticketPage([ticket(), OTHER], 50));
         settle();
         expect(codes()).toEqual(['SOP-00007', 'SOP-00008']);
       }));
@@ -490,19 +373,19 @@ describe('TicketsPage', () => {
       it('the other way round, under "Archivados": brought back and archived again, it is in the list again', fakeAsync(() => {
         open([ticket(), OTHER], { filtersOpen: true });
         pick('tf-archived', 'Archivados');
-        listRead().flush(page([archived, otherArchived]));
+        listRead().flush(ticketPage([archived, otherArchived], 50));
         settle();
         openForm(archived);
 
         press('Desarchivar', ticket());
-        listRead().flush(page([otherArchived]));
+        listRead().flush(ticketPage([otherArchived], 50));
         settle();
         expect(codes()).toEqual(['SOP-00008']);
 
         press('Archivar', archived);
         const read = listRead();
         expect(read.request.params.get('archived')).toBe('only');
-        read.flush(page([archived, otherArchived]));
+        read.flush(ticketPage([archived, otherArchived], 50));
         settle();
         expect(codes()).toEqual(['SOP-00007', 'SOP-00008']);
       }));
@@ -512,7 +395,7 @@ describe('TicketsPage', () => {
         open([ticket(), OTHER]);
         openForm(ticket());
         press('Archivar', archived);
-        listRead().flush(page([OTHER]));
+        listRead().flush(ticketPage([OTHER], 50));
         settle();
 
         events.saved({ ...archived, description: 'No imprime desde el lunes' });
@@ -597,6 +480,197 @@ describe('TicketsPage', () => {
     }));
   });
 
+  // The table needs the room of a laptop; a phone gets a card per case. Only the one that applies is drawn.
+  describe('the layout', () => {
+    const cards = (): HTMLElement[] => Array.from(el.querySelectorAll<HTMLElement>('button.card'));
+    const codes = (): string[] => cards().map((card) => card.querySelector('.font-mono')?.textContent?.trim() ?? '');
+
+    it('is a table on a wide screen, with no cards', fakeAsync(() => {
+      open([ticket(), OTHER]);
+
+      expect(rows().length).toBe(2);
+      expect(cards()).toEqual([]);
+    }));
+
+    it('is a card per case on a phone, with no table', fakeAsync(() => {
+      TestBed.inject(ScreenWidth).set(PHONE);
+      open([ticket(), OTHER]);
+
+      expect(codes()).toEqual(['SOP-00007', 'SOP-00008']);
+      expect(el.querySelector('table')).toBeNull();
+    }));
+
+    // Where the classes `md:` of the page switch too.
+    it('switches at 768 px, also when the window is resized, without reading the list again', fakeAsync(() => {
+      const screen = TestBed.inject(ScreenWidth);
+      screen.set(767);
+      open();
+      expect(el.querySelector('table')).toBeNull();
+      expect(codes()).toEqual(['SOP-00007']);
+
+      screen.set(768);
+      render();
+      expect(cards()).toEqual([]);
+      expect(cell('Código').textContent).toContain('SOP-00007');
+
+      screen.set(PHONE);
+      render();
+      expect(el.querySelector('table')).toBeNull();
+      expect(codes()).toEqual(['SOP-00007']);
+      // Nothing was asked for: http.verify, after each test, fails on any read left.
+    }));
+
+    it('on a phone: a card pressed opens its case', fakeAsync(() => {
+      TestBed.inject(ScreenWidth).set(PHONE);
+      open([ticket(), OTHER]);
+
+      click(cards()[1]);
+      expect(panel()).not.toBeNull();
+      http.expectOne({ method: 'GET', url: '/api/tickets/8' }).flush(OTHER);
+      settle();
+    }));
+
+    it('on a phone: says so while the cases are read, and when there are none', fakeAsync(() => {
+      TestBed.inject(ScreenWidth).set(PHONE);
+      create();
+      preferenceRead('tickets.columns').flush({ value: null });
+      preferenceRead('tickets.filters-open').flush({ value: null });
+      settle();
+      expect(el.textContent).toContain('Cargando…');
+
+      listRead().flush(ticketPage([], 50));
+      settle();
+      expect(el.textContent).toContain('No hay casos para mostrar.');
+      expect(el.textContent).not.toContain('Cargando…');
+    }));
+  });
+
+  // The list is read again whenever its filters, its order or its page change, and when cases change.
+  describe('reading the list', () => {
+    const pager = (): string => find('button[aria-label="Página anterior"]').parentElement!.textContent?.trim() ?? '';
+    const sortButton = (): HTMLButtonElement => button('Código', find('thead'));
+
+    /** Opens the list on the first of three pages. */
+    function openLong(): void {
+      create();
+      preferenceRead('tickets.columns').flush({ value: null });
+      preferenceRead('tickets.filters-open').flush({ value: null });
+      listRead().flush({ items: [ticket()], total: 120, page: 1, pageSize: 50 });
+      settle();
+    }
+
+    it('keeps the rows on screen while the next page is read, and says it is updating', fakeAsync(() => {
+      openLong();
+      expect(el.textContent).not.toContain('Actualizando…');
+
+      click(find('button[aria-label="Página siguiente"]'));
+      const next = listRead();
+      expect(next.request.params.get('page')).toBe('2');
+      expect(pager()).toBe('Página 2 de 3');
+      expect(cell('Código').textContent).toContain('SOP-00007');
+      expect(el.textContent).toContain('Actualizando…');
+
+      next.flush({ items: [OTHER], total: 120, page: 2, pageSize: 50 });
+      settle();
+      expect(cell('Código').textContent).toContain('SOP-00008');
+      expect(el.textContent).not.toContain('Actualizando…');
+    }));
+
+    it('cancels the read of a page left before it arrives', fakeAsync(() => {
+      openLong();
+      click(find('button[aria-label="Página siguiente"]'));
+      const second = listRead();
+      click(find('button[aria-label="Página siguiente"]'));
+      const third = listRead();
+      expect(second.cancelled).toBeTrue();
+      expect(third.request.params.get('page')).toBe('3');
+
+      third.flush({ items: [OTHER], total: 120, page: 3, pageSize: 50 });
+      settle();
+      expect(pager()).toBe('Página 3 de 3');
+      expect(cell('Código').textContent).toContain('SOP-00008');
+    }));
+
+    // The page is pressed, and the read of the page left is answered before the screen update
+    // that would cancel it: that answer is no longer the one asked for, and moves nothing.
+    it('stays on the page pressed when the read of the page left is answered just after the press', fakeAsync(() => {
+      openLong();
+      events.outdated(null);
+      render();
+      const left = listRead();
+
+      find<HTMLButtonElement>('button[aria-label="Página siguiente"]').click();
+      left.flush({ items: [ticket()], total: 120, page: 1, pageSize: 50 });
+      flushMicrotasks();
+      render();
+
+      const next = listRead();
+      expect(next.request.params.get('page')).toBe('2');
+      next.flush({ items: [OTHER], total: 120, page: 2, pageSize: 50 });
+      settle();
+      expect(pager()).toBe('Página 2 de 3');
+      expect(cell('Código').textContent).toContain('SOP-00008');
+    }));
+
+    it('that fails says why, and keeps the rows it had', fakeAsync(() => {
+      open([ticket(), OTHER]);
+      events.outdated(null);
+      render();
+      listRead().flush({ message: 'Error interno' }, { status: 500, statusText: 'Server Error' });
+      settle();
+
+      expect(toasts()).toEqual(['Error interno']);
+      expect(rows().length).toBe(2);
+      expect(el.textContent).not.toContain('Actualizando…');
+    }));
+
+    // A link of the bell to the filter that is already on, for one.
+    it('stays where it is when the same cases are asked for again, and is not read for that', fakeAsync(() => {
+      const router = TestBed.inject(Router);
+      openLong();
+      void router.navigateByUrl('/?olvidados=1');
+      settle();
+      settle();
+      listRead().flush({ items: [ticket()], total: 120, page: 1, pageSize: 50 });
+      settle();
+      click(find('button[aria-label="Página siguiente"]'));
+      listRead().flush({ items: [ticket()], total: 120, page: 2, pageSize: 50 });
+      settle();
+
+      void router.navigateByUrl('/?olvidados=1');
+      settle();
+      settle();
+      http.expectNone((request) => request.url === '/api/tickets');
+      expect(pager()).toBe('Página 2 de 3');
+    }));
+
+    it('in the other order, by "Código", goes back to the first page, from the lowest ticket number', fakeAsync(() => {
+      openLong();
+      click(find('button[aria-label="Página siguiente"]'));
+      listRead().flush({ items: [ticket()], total: 120, page: 2, pageSize: 50 });
+      settle();
+      expect(sortButton().closest('th')!.getAttribute('aria-sort')).toBe('descending');
+
+      click(sortButton());
+      const ascending = listRead();
+      expect(ascending.request.params.get('dir')).toBe('asc');
+      expect(ascending.request.params.get('page')).toBe('1');
+      ascending.flush({ items: [OTHER], total: 120, page: 1, pageSize: 50 });
+      settle();
+      expect(sortButton().closest('th')!.getAttribute('aria-sort')).toBe('ascending');
+      expect(pager()).toBe('Página 1 de 3');
+    }));
+
+    it('is not asked for any longer once the screen goes away', fakeAsync(() => {
+      openLong();
+      events.outdated(null);
+      render();
+      const read = listRead();
+      fixture.destroy();
+      expect(read.cancelled).toBeTrue();
+    }));
+  });
+
   // The form is drawn over the list, which takes it away when its case is gone.
   describe('the form of a case, open over the list', () => {
     it('closed because its case was deleted elsewhere takes with it the question it had on screen', fakeAsync(() => {
@@ -612,7 +686,7 @@ describe('TicketsPage', () => {
       // Someone else deletes the case: the list and the form read again, and the form finds it gone.
       events.outdated(7);
       render();
-      listRead().flush(page([OTHER]));
+      listRead().flush(ticketPage([OTHER], 50));
       http.expectOne({ method: 'GET', url: '/api/tickets/7' }).flush({ message: 'El caso no existe' }, { status: 404, statusText: 'Not Found' });
       settle();
 
@@ -730,7 +804,7 @@ describe('TicketsPage', () => {
       // The user chose other columns from another browser meanwhile.
       preferenceRead('tickets.columns').flush({ value: { visible: ['code', 'status', 'assignee'] } });
       preferenceRead('tickets.filters-open').flush({ value: null });
-      listRead().flush(page([ticket()]));
+      listRead().flush(ticketPage([ticket()], 50));
       settle();
       expect(headers()).toEqual(['Código', 'Estado', 'Responsable']);
       expect(JSON.parse(localStorage.getItem(COPY)!)).toEqual({ visible: ['code', 'status', 'assignee'] });
@@ -745,7 +819,7 @@ describe('TicketsPage', () => {
       create();
       preferenceRead('tickets.columns').error(new ProgressEvent('error'));
       preferenceRead('tickets.filters-open').flush({ value: null });
-      listRead().flush(page([ticket()]));
+      listRead().flush(ticketPage([ticket()], 50));
       settle();
       expect(headers()).toEqual(['Código', 'Empresa']);
       expect(toasts()).toEqual([]);
@@ -810,7 +884,7 @@ describe('TicketsPage', () => {
       expect(headers()).toContain('Empresa');
       preferenceRead('tickets.columns').flush({ value: JSON.parse(mine!) });
       preferenceRead('tickets.filters-open').flush({ value: null });
-      listRead().flush(page([ticket()]));
+      listRead().flush(ticketPage([ticket()], 50));
       settle();
     }));
 
@@ -838,7 +912,7 @@ describe('TicketsPage', () => {
 
       preferenceRead('tickets.columns').flush({ value: { visible: ['code', 'company'] } });
       preferenceRead('tickets.filters-open').flush({ value: null });
-      listRead().flush(page([ticket()]));
+      listRead().flush(ticketPage([ticket()], 50));
       settle();
       expect(headers()).toEqual(STARTING_COLUMNS.filter((column) => column !== 'Registro'));
 
@@ -996,6 +1070,7 @@ describe('TicketsPage', () => {
     it('are also what each card of the phone list shows of its case', fakeAsync(() => {
       const card = (): string => find('button.card').textContent ?? '';
       const whole = ticket({ priority: 'HIGH', assigneeId: 4, assigneeName: 'Ana', supportTypes: [TRAINING], archivedAt: '2026-11-08T09:00:00.000Z' });
+      TestBed.inject(ScreenWidth).set(PHONE);
       open([whole]);
       for (const shown of ['SOP-00007', '05/11/2026', 'Archivado', 'Pendiente', 'Acme', 'No imprime', 'Capacitación', 'Ana', 'Registro: 05/11/2026']) {
         expect(card()).toContain(shown);
@@ -1036,7 +1111,7 @@ describe('TicketsPage', () => {
     /** The read of the list that a change of filter starts, answered. Gives back what it asked for. */
     function filtered(items: Ticket[] = []): Record<string, string> {
       const read = listRead();
-      read.flush(page(items));
+      read.flush(ticketPage(items, 50));
       settle();
       const params = read.request.params;
       return Object.fromEntries(params.keys().map((key) => [key, params.get(key)!]));
@@ -1079,7 +1154,7 @@ describe('TicketsPage', () => {
       expect(filters()).not.toBeNull();
       preferenceRead('tickets.columns').flush({ value: null });
       preferenceRead('tickets.filters-open').flush({ value: true });
-      listRead().flush(page([ticket()]));
+      listRead().flush(ticketPage([ticket()], 50));
       settle();
       expect(filters()).not.toBeNull();
 
@@ -1187,7 +1262,7 @@ describe('TicketsPage', () => {
         const read = listRead();
         // No parameter: the server then lists only the cases that are not archived.
         expect(read.request.params.has('archived')).toBeFalse();
-        read.flush(page([ticket()]));
+        read.flush(ticketPage([ticket()], 50));
         settle();
 
         expect(chosen('tf-archived')).toEqual(['Activos']);
@@ -1268,6 +1343,34 @@ describe('TicketsPage', () => {
       render();
       expect(filtered()).toEqual({ ...ALWAYS, q: 'tornillo' });
       expect(count()).toBe('');
+    }));
+
+    // The pause is a timer, and the app has no zone to tell Angular when it fires: the search is
+    // a signal, and the list reads again and shows what it found on its own.
+    it('the search box narrows the list by itself after the pause, with nobody checking the screen', fakeAsync(() => {
+      open([ticket(), ticket({ id: 2, code: 'SOP-00002' })]);
+      expect(el.textContent).toContain('2 caso(s)');
+      type(search(), 'tornillo');
+
+      tick(300);
+      const read = listRead();
+      expect(read.request.params.get('q')).toBe('tornillo');
+      read.flush(ticketPage([ticket()], 50));
+      tick();
+
+      expect(el.textContent).toContain('1 caso(s)');
+    }));
+
+    // Left a moment after typing: there is no list left to filter.
+    it('the search box leaves nothing behind when the screen goes away before it filters', fakeAsync(() => {
+      open();
+      const timers = spyOn(window, 'setTimeout').and.callThrough();
+      const cleared = spyOn(window, 'clearTimeout').and.callThrough();
+      type(search(), 'tornillo');
+      const pending = timers.calls.all().find((call) => call.args[1] === 300)!.returnValue;
+
+      fixture.destroy();
+      expect(cleared).toHaveBeenCalledWith(pending);
     }));
 
     it('"Limpiar filtros" turns them all off, empties the search box and lists every active case again', fakeAsync(() => {
@@ -1379,7 +1482,7 @@ describe('TicketsPage', () => {
     function answer(save: TestRequest, created: TicketDetail = stored): void {
       save.flush(created);
       settle();
-      listRead().flush(page([created, ticket()]));
+      listRead().flush(ticketPage([created, ticket()], 50));
       settle();
     }
 
@@ -1635,6 +1738,103 @@ describe('TicketsPage', () => {
       expect(el.textContent).toContain('Página 1 de 3');
     }));
 
+    // From the lowest ticket number, the new case is the last one: on the last page, which the
+    // list that the new case asked for says, since the new case may have made one more.
+    it('takes the list in the other order to its last page, where the new case is', fakeAsync(() => {
+      create();
+      preferenceRead('tickets.columns').flush({ value: null });
+      preferenceRead('tickets.filters-open').flush({ value: null });
+      listRead().flush({ items: [ticket()], total: 100, page: 1, pageSize: 50 });
+      settle();
+      click(button('Código', find('thead')));
+      listRead().flush({ items: [ticket()], total: 100, page: 1, pageSize: 50 });
+      settle();
+
+      openForm();
+      pick('nt-company', 'Acme');
+      type(description(), 'No imprime');
+      click(register());
+      caseSave().flush(stored);
+      settle();
+      listRead().flush({ items: [ticket()], total: 101, page: 1, pageSize: 50 });
+      settle();
+      const last = listRead();
+      expect(last.request.params.get('page')).toBe('3');
+      expect(last.request.params.get('dir')).toBe('asc');
+      last.flush({ items: [stored], total: 101, page: 3, pageSize: 50 });
+      settle();
+      expect(el.textContent).toContain('Página 3 de 3');
+    }));
+
+    // A read asked for before the case was registered fails just after it, before the screen
+    // update that would cancel it: the old total it would go by is one case short.
+    it('takes the list to the page of the new case also when a read asked for before it fails just after it', fakeAsync(() => {
+      create();
+      preferenceRead('tickets.columns').flush({ value: null });
+      preferenceRead('tickets.filters-open').flush({ value: null });
+      listRead().flush({ items: [ticket()], total: 100, page: 1, pageSize: 50 });
+      settle();
+      click(button('Código', find('thead')));
+      listRead().flush({ items: [ticket()], total: 100, page: 1, pageSize: 50 });
+      settle();
+
+      openForm();
+      pick('nt-company', 'Acme');
+      type(description(), 'No imprime');
+      click(register());
+      events.outdated(null);
+      render();
+      const before = listRead();
+      caseSave().flush(stored);
+      flushMicrotasks();
+      before.flush({ message: 'Error interno' }, { status: 500, statusText: 'Server Error' });
+      flushMicrotasks();
+      render();
+
+      listRead().flush({ items: [ticket()], total: 101, page: 1, pageSize: 50 });
+      settle();
+      const last = listRead();
+      expect(last.request.params.get('page')).toBe('3');
+      last.flush({ items: [stored], total: 101, page: 3, pageSize: 50 });
+      settle();
+      expect(el.textContent).toContain('Página 3 de 3');
+    }));
+
+    // The list could not say where the new case is: the cases it has on screen say it.
+    it('takes the list to the page of the new case also when the list the new case asked for cannot be read', fakeAsync(() => {
+      create();
+      preferenceRead('tickets.columns').flush({ value: null });
+      preferenceRead('tickets.filters-open').flush({ value: null });
+      listRead().flush({ items: [ticket()], total: 120, page: 1, pageSize: 50 });
+      settle();
+      click(find('button[aria-label="Página siguiente"]'));
+      listRead().flush({ items: [ticket()], total: 120, page: 2, pageSize: 50 });
+      settle();
+
+      openForm();
+      pick('nt-company', 'Acme');
+      type(description(), 'No imprime');
+      click(register());
+      caseSave().flush(stored);
+      settle();
+      listRead().flush({ message: 'Error interno' }, { status: 500, statusText: 'Server Error' });
+      settle();
+      expect(toasts()).toEqual(['Caso SOP-00008 registrado', 'Error interno']);
+      const first = listRead();
+      expect(first.request.params.get('page')).toBe('1');
+      first.flush({ items: [stored, ticket()], total: 121, page: 1, pageSize: 50 });
+      settle();
+      expect(el.textContent).toContain('Página 1 de 3');
+
+      // Once there, a later read leaves it where it is.
+      events.outdated(null);
+      render();
+      listRead().flush({ items: [stored, ticket()], total: 121, page: 1, pageSize: 50 });
+      settle();
+      expect(el.textContent).toContain('Página 1 de 3');
+      http.expectNone((request) => request.url === '/api/tickets');
+    }));
+
     describe('the responsible', () => {
       /** The catalogs as they arrive from the server, some time after the screen is on. */
       function catalogsArrive(): void {
@@ -1782,14 +1982,31 @@ describe('TicketsPage', () => {
   });
 
   describe('a paste', () => {
+    // The dialog is loaded apart from the page the first time it opens (see the next describe).
     it('of a screenshot opens "Nuevo caso con IA" with it', fakeAsync(() => {
       open();
+      expect(el.querySelector('app-ai-draft')).toBeNull();
       const event = paste(document.body, [picture]);
       render();
       settle();
 
       expect(event.defaultPrevented).toBeTrue();
       expect(find('app-ai-draft').querySelectorAll('img').length).toBe(1);
+    }));
+
+    it('of a screenshot opens the dialog with it again after the dialog was closed', fakeAsync(() => {
+      open();
+      paste(document.body, [picture]);
+      render();
+      settle();
+      click(find('app-ai-draft button[aria-label="Cerrar"]'));
+      expect(el.querySelector('app-ai-draft')).toBeNull();
+
+      const second = new File(['png'], 'otra.png', { type: 'image/png' });
+      paste(document.body, [picture, second]);
+      render();
+      settle();
+      expect(Array.from(find('app-ai-draft').querySelectorAll('img'), (image) => image.alt)).toEqual(['captura.png', 'otra.png']);
     }));
 
     // A cell copied from Excel carries its text and a picture of the cell.
@@ -1806,13 +2023,40 @@ describe('TicketsPage', () => {
     }));
   });
 
+  // "Nuevo con IA" and "Importar" open on demand: their code is loaded apart from the page.
+  describe('the dialogs', () => {
+    it('"Importar" opens its own, which closes with Escape and opens again', fakeAsync(() => {
+      open();
+      expect(el.querySelector('app-import-dialog')).toBeNull();
+
+      click(find('button[aria-label="Importar"]'));
+      settle();
+      expect(find('app-import-dialog [role=dialog]').getAttribute('aria-labelledby')).toBe('import-title');
+
+      pressEscape();
+      expect(el.querySelector('app-import-dialog')).toBeNull();
+      click(find('button[aria-label="Importar"]'));
+      settle();
+      expect(el.querySelector('app-import-dialog')).not.toBeNull();
+    }));
+
+    it('"Nuevo con IA" opens its own, with no image', fakeAsync(() => {
+      open();
+      click(find('button[title="Crear un caso desde una foto, captura o texto"]'));
+      settle();
+
+      expect(find('app-ai-draft #ai-title').textContent?.trim()).toBe('Nuevo caso con IA');
+      expect(find('app-ai-draft').querySelectorAll('img').length).toBe(0);
+    }));
+  });
+
   // Below 640 px their text is hidden, and a hidden text names nothing.
   describe('the buttons that show only their icon on a phone', () => {
     const exportButton = (): HTMLButtonElement => find('button[aria-haspopup=menu]');
 
     it('have a name of their own', fakeAsync(() => {
       open();
-      expect(find('button .mdi-file-import-outline').closest('button')!.getAttribute('aria-label')).toBe('Importar');
+      expect(find('button app-icon[data-icon=file-import-outline]').closest('button')!.getAttribute('aria-label')).toBe('Importar');
       expect(exportButton().getAttribute('aria-label')).toBe('Exportar');
       expect(find('button[aria-controls="ticket-filters"]').getAttribute('aria-label')).toBe('Filtros');
       expect(find('app-ticket-columns > button').getAttribute('aria-label')).toBe('Columnas');
@@ -1833,4 +2077,101 @@ describe('TicketsPage', () => {
       expect(exportButton().disabled).toBeFalse();
     }));
   });
+});
+
+// The code of the two dialogs comes apart from the page (`@defer`): here it has not arrived yet when
+// the person pastes, as on a slow connection the first time.
+describe('TicketsPage, with the code of its dialogs still on its way', () => {
+  let http: HttpTestingController;
+  let fixture: ComponentFixture<TicketsPage>;
+  let el: HTMLElement;
+
+  beforeEach(() => {
+    forgetBrowserCopies();
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([]), provideScreenWidth(DESKTOP)],
+      // Each `@defer` block stays as it is until the test loads it.
+      deferBlockBehavior: DeferBlockBehavior.Manual,
+    });
+    http = TestBed.inject(HttpTestingController);
+    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana' });
+  });
+
+  afterEach(() => {
+    http.verify();
+    forgetBrowserCopies();
+  });
+
+  function render(): void {
+    fixture.detectChanges();
+    flushMicrotasks();
+    fixture.detectChanges();
+  }
+
+  it('a screenshot pasted on the list reaches the AI dialog once its code arrives', fakeAsync(() => {
+    fixture = TestBed.createComponent(TicketsPage);
+    el = fixture.nativeElement as HTMLElement;
+    render();
+    http.expectOne({ method: 'GET', url: '/api/preferences/tickets.columns' }).flush({ value: null });
+    http.expectOne({ method: 'GET', url: '/api/preferences/tickets.filters-open' }).flush({ value: null });
+    http.expectOne((request) => request.url === '/api/tickets').flush(ticketPage([ticket()], 50));
+    tick();
+    render();
+
+    // The AI dialog and the import dialog, in the order of the page.
+    let blocks: DeferBlockFixture[] = [];
+    void fixture.getDeferBlocks().then((found) => (blocks = found));
+    flushMicrotasks();
+    expect(blocks.length).toBe(2);
+
+    const event = paste(document.body, [picture]);
+    render();
+    expect(event.defaultPrevented).toBeTrue();
+    expect(el.querySelector('app-ai-draft')).toBeNull();
+
+    void blocks[0].render(DeferBlockState.Complete);
+    flushMicrotasks();
+    render();
+    expect(el.querySelector('app-ai-draft')?.querySelectorAll('img').length).toBe(1);
+    expect(el.querySelector('app-import-dialog')).toBeNull();
+  }));
+
+  // A press on "Importar" with the code of the dialog late, and then not coming at all (offline,
+  // or the app was updated and the old code is gone).
+  it('says the dialog is opening while its code is late, and that it could not open when it does not come', fakeAsync(() => {
+    fixture = TestBed.createComponent(TicketsPage);
+    el = fixture.nativeElement as HTMLElement;
+    render();
+    http.expectOne({ method: 'GET', url: '/api/preferences/tickets.columns' }).flush({ value: null });
+    http.expectOne({ method: 'GET', url: '/api/preferences/tickets.filters-open' }).flush({ value: null });
+    http.expectOne((request) => request.url === '/api/tickets').flush(ticketPage([ticket()], 50));
+    tick();
+    render();
+    let blocks: DeferBlockFixture[] = [];
+    void fixture.getDeferBlocks().then((found) => (blocks = found));
+    flushMicrotasks();
+    const importButton = (): HTMLButtonElement => el.querySelector<HTMLButtonElement>('button[aria-label="Importar"]')!;
+    const pending = (): HTMLElement | null => el.querySelector('app-dialog-pending');
+
+    importButton().click();
+    void blocks[1].render(DeferBlockState.Loading);
+    flushMicrotasks();
+    render();
+    expect(pending()?.querySelector('[role=status]')?.textContent?.trim()).toBe('Abriendo…');
+
+    void blocks[1].render(DeferBlockState.Error);
+    flushMicrotasks();
+    render();
+    expect(pending()?.querySelector('[role=status]')).toBeNull();
+    expect(pending()?.querySelector('[role=alertdialog] h2')?.textContent?.trim()).toBe('No se pudo abrir');
+    expect(el.querySelector('app-import-dialog')).toBeNull();
+
+    // Closed, the button opens it again: it says the same, and the page is not stuck.
+    pending()!.querySelector<HTMLButtonElement>('[role=alertdialog] button')!.click();
+    render();
+    expect(pending()).toBeNull();
+    importButton().click();
+    render();
+    expect(pending()?.querySelector('[role=alertdialog]')).not.toBeNull();
+  }));
 });

@@ -3,88 +3,20 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import type { TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
-import type { Assignee, Company, SupportType, SystemModule, TicketDetail } from '../../core/api';
+import type { Company, TicketDetail } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
 import { TicketEvents } from '../../core/ticket-events';
-import { Toast } from '../../core/toast';
 import { UnsavedChanges } from '../../core/unsaved-changes';
-import { chooseOption, clearSelect, closeSelect, ngSelect, openSelect, optionTexts, removeChosen, selectedTexts, typeInSelect } from '../../testing/ng-select';
+import { ASSIGNEES, COMPANIES, FAILURE, MODULES, SUPPORT_TYPES, TRAINING, WARRANTY, ticket } from '../../testing/fixtures';
+import { clearSelect, closeSelect, openSelect, optionTexts, removeChosen, typeInSelect } from '../../testing/ng-select';
+import { screenOf, toasts } from '../../testing/screen';
 import { TicketPanel } from './ticket-panel';
-
-function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
-  return {
-    id: 7,
-    code: 'SOP-00007',
-    date: '2026-11-05',
-    time: null,
-    companyId: 1,
-    company: 'Acme',
-    description: 'No imprime',
-    status: 'PENDING',
-    assigneeId: null,
-    assigneeName: null,
-    supportTypes: [],
-    priority: null,
-    estimatedMinutes: null,
-    spentMinutes: 0,
-    timerStartedAt: null,
-    moduleId: null,
-    moduleName: null,
-    dueAt: null,
-    promisedDate: null,
-    promiseState: null,
-    resolvedAt: null,
-    overdue: false,
-    lastActivityAt: '2026-11-05T10:00:00.000Z',
-    stale: false,
-    aiGenerated: false,
-    customerReply: null,
-    createdAt: '2026-11-05T10:00:00.000Z',
-    createdById: null,
-    archivedAt: null,
-    lastNote: null,
-    notesCount: 0,
-    attachmentsCount: 0,
-    createdByName: null,
-    notes: [],
-    attachments: [],
-    history: [],
-    ...overrides,
-  };
-}
 
 const OTHER = ticket({ id: 8, code: 'SOP-00008', date: '2026-11-03', companyId: 5, company: 'Bodega Sur', description: 'No abre la caja' });
 
-// The catalogs the selects of the form offer. One entry of each is deactivated: it keeps its cases and takes no new ones.
-const COMPANIES: Company[] = [
-  { id: 1, name: 'Acme', active: true, tickets: 3 },
-  { id: 5, name: 'Bodega Sur', active: true, tickets: 1 },
-  { id: 6, name: 'Taller Viejo', active: false, tickets: 2 },
-];
-const ASSIGNEES: Assignee[] = [
-  { id: 4, name: 'Ana', active: true, tickets: 1 },
-  { id: 5, name: 'Luis', active: true, tickets: 0 },
-  { id: 6, name: 'Zoe', active: false, tickets: 2 },
-];
-const TRAINING = { id: 1, name: 'Capacitación', color: '#12b76a' };
-const FAILURE = { id: 2, name: 'Falla del sistema', color: '#b91c1c' };
-const WARRANTY = { id: 3, name: 'Garantía', color: '#64748b' };
-const TYPES: SupportType[] = [
-  { ...TRAINING, active: true, tickets: 0 },
-  { ...FAILURE, active: true, tickets: 4 },
-  { ...WARRANTY, active: false, tickets: 1 },
-];
-const MODULES: SystemModule[] = [
-  { id: 1, name: 'Ventas', parentId: null, active: true, fullName: 'Ventas' },
-  { id: 2, name: 'Facturas', parentId: 1, active: true, fullName: 'Ventas / Facturas' },
-  { id: 8, name: 'Bodega vieja', parentId: null, active: false, fullName: 'Bodega vieja' },
-];
-
 const REFUSED = { status: 400, statusText: 'Bad Request' };
 const NOTE = { id: 1, text: 'Se llamó al cliente', authorName: 'Ana', createdAt: '2026-11-06T09:00:00.000Z' };
-
-type TextControl = HTMLInputElement | HTMLTextAreaElement;
 
 // The form edits a draft and saves it with "Actualizar", so these tests act on the real controls
 // and look at the requests that leave (none, until the button) and at what the form shows
@@ -108,7 +40,7 @@ describe('TicketPanel', () => {
     catalogs = TestBed.inject(Catalogs);
     catalogs.companies.set(COMPANIES);
     catalogs.assignees.set(ASSIGNEES);
-    catalogs.supportTypes.set(TYPES);
+    catalogs.supportTypes.set(SUPPORT_TYPES);
     catalogs.modules.set(MODULES);
   });
 
@@ -174,44 +106,13 @@ describe('TicketPanel', () => {
     settle();
   }
 
-  function find<T extends HTMLElement>(selector: string): T {
-    const found = el.querySelector<T>(selector);
-    if (!found) throw new Error(`Nothing on screen matches ${selector}`);
-    return found;
-  }
-
-  function button(text: string, within: HTMLElement = el): HTMLButtonElement {
-    const found = Array.from(within.querySelectorAll('button')).find((candidate) => candidate.textContent?.includes(text));
-    if (!found) throw new Error(`No "${text}" button on screen`);
-    return found;
-  }
-
-  /** An event of a control, followed by the screen update Angular runs after every event. */
-  function fire(target: HTMLElement, event: string): void {
-    target.dispatchEvent(new Event(event));
-    render();
-  }
-
-  function click(target: HTMLElement): void {
-    target.click();
-    render();
-  }
-
-  /** What the person types in a field, or picks in the calendar of a date: the browser reports both the same way. */
-  function type(control: TextControl, text: string): void {
-    control.value = text;
-    fire(control, 'input');
-  }
+  // What the person does on the form. Its selects go by the id their label points at.
+  const { find, button, fire, click, type, pressEscape, select, chosen, offers, pick } = screenOf(() => el, render);
 
   function turnPromise(on: boolean): void {
     const toggle = promiseSwitch();
     toggle.checked = on;
     fire(toggle, 'change');
-  }
-
-  function pressEscape(): void {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    render();
   }
 
   // The fields of the form.
@@ -225,24 +126,6 @@ describe('TicketPanel', () => {
   const replyBox = (): HTMLTextAreaElement => find('textarea[aria-label="Respuesta para el cliente"]');
   const noteBox = (): HTMLTextAreaElement => find('textarea[aria-label="Nueva observación"]');
 
-  // Its selects, each by the id its label points at.
-  const select = (name: string): HTMLElement => ngSelect(el, name);
-  /** What a select shows as chosen. */
-  const chosen = (name: string): string[] => selectedTexts(select(name));
-
-  /** What a select offers. Its list is closed again: left open, it would stay on the page. */
-  function offers(name: string): string[] {
-    const texts = optionTexts(select(name));
-    closeSelect(select(name));
-    render();
-    return texts;
-  }
-
-  function pick(name: string, option: string): void {
-    chooseOption(select(name), option);
-    render();
-  }
-
   // The foot of the form: what is unsaved, and the two buttons that end it.
   const footer = (): HTMLElement => find('footer');
   /** "Actualizar". It reads "Guardando…" while its save is on its way. */
@@ -251,7 +134,6 @@ describe('TicketPanel', () => {
   const unsaved = (): boolean => !!footer().textContent?.includes('Cambios sin guardar');
   /** The notice that the case changed elsewhere while the form had changes. */
   const notice = (): HTMLElement | null => Array.from(el.querySelectorAll<HTMLElement>('[role=status]')).find((item) => item.textContent?.includes('Este caso cambió en otra pantalla')) ?? null;
-  const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
 
   /** Presses "Actualizar" and gives back the save it sends. */
   function update(id = 7): TestRequest {
@@ -553,7 +435,7 @@ describe('TicketPanel', () => {
       const message = find('#tp-description-error');
       expect(getComputedStyle(message).color).toBe(ink);
       expect(getComputedStyle(message).fontSize).toBe('12px');
-      expect(getComputedStyle(find('#tp-description-error i[aria-hidden=true]')).color).toBe(danger);
+      expect(getComputedStyle(find('#tp-description-error app-icon[aria-hidden=true]')).color).toBe(danger);
       expect(getComputedStyle(description()).borderTopColor).toBe(danger);
     }));
   });
@@ -1696,16 +1578,15 @@ describe('TicketPanel', () => {
       expect(chosen('tp-priority')).toEqual(['Alta']);
     }));
 
-    it('is dropped when a newer one was asked for and answered first', fakeAsync(() => {
+    it('is dropped when a newer one was asked for: it is cancelled, and the newer one is shown', fakeAsync(() => {
       open();
       events.outdated(7);
       const older = read();
       events.outdated(7);
       const newer = read();
+      expect(older.cancelled).toBeTrue();
 
       newer.flush(ticket({ description: 'Nueva' }));
-      settle();
-      older.flush(ticket({ description: 'Vieja' }));
       settle();
       expect(description().value).toBe('Nueva');
     }));
@@ -1715,8 +1596,8 @@ describe('TicketPanel', () => {
       events.outdated(7);
       const left = read(7);
       moveTo(OTHER);
-      left.flush({ message: 'Caso no encontrado' }, { status: 404, statusText: 'Not Found' });
-      settle();
+      // The read of the case left is cancelled: whatever it would have found, nothing is said of it.
+      expect(left.cancelled).toBeTrue();
       expect(closed).toBe(0);
       expect(toasts()).toEqual([]);
 
@@ -1747,14 +1628,13 @@ describe('TicketPanel', () => {
       expect(description().value).toBe('No imprime desde el lunes');
     }));
 
-    it('answered after a newer read was shown: is dropped', fakeAsync(() => {
+    it('replaced by a newer read: is cancelled, and the newer one is shown', fakeAsync(() => {
       create(7);
       events.outdated(7);
       const [first, newer] = reads();
+      expect(first.cancelled).toBeTrue();
 
       newer.flush(ticket({ description: 'Nueva' }));
-      settle();
-      first.flush(ticket({ description: 'Vieja' }));
       settle();
       expect(description().value).toBe('Nueva');
     }));
@@ -1765,12 +1645,11 @@ describe('TicketPanel', () => {
       create(7, true);
       events.outdated(7);
       const [first, newer] = reads();
+      expect(first.cancelled).toBeTrue();
 
       newer.flush(ticket({ status: 'RESOLVED' }));
       settle();
       const draft = http.expectOne({ method: 'POST', url: '/api/ai/reply/7' });
-      first.flush(ticket({ status: 'RESOLVED' }));
-      settle();
 
       // The AI could not write it. Reading the case again later does not ask a second time.
       draft.flush({ message: 'El proveedor de IA no respondió' }, { status: 502, statusText: 'Bad Gateway' });
@@ -1787,14 +1666,20 @@ describe('TicketPanel', () => {
       events.outdated(7);
       const [first, newer] = reads();
 
+      // The first read was cancelled by the newer one: nothing else can put the case on screen.
+      expect(first.cancelled).toBeTrue();
       newer.flush({ message: 'Error interno' }, { status: 500, statusText: 'Server Error' });
       settle();
       expect(closed).toBe(1);
       expect(toasts()).toEqual(['Error interno']);
+    }));
 
-      first.flush(ticket());
-      settle();
-      expect(closed).toBe(1);
+    it('is cancelled when the panel goes away before it arrives', fakeAsync(() => {
+      create(7);
+      const first = read();
+      fixture.destroy();
+      expect(first.cancelled).toBeTrue();
+      expect(toasts()).toEqual([]);
     }));
 
     it('failed: closes the panel, whatever the failure', fakeAsync(() => {
@@ -2530,6 +2415,34 @@ describe('TicketPanel', () => {
       expect(replyBox().value).toBe('Ya puede imprimir.');
     }));
 
+    describe('"Copiar"', () => {
+      beforeEach(() => spyOn(navigator.clipboard, 'writeText').and.resolveTo());
+
+      it('copies the reply as it is in its box, and says so for two seconds', fakeAsync(() => {
+        open(ticket({ customerReply: ' Ya puede imprimir. ' }));
+        click(button('Copiar'));
+
+        expect(navigator.clipboard.writeText).toHaveBeenCalledOnceWith('Ya puede imprimir.');
+        expect(button('Copiado')).toBeDefined();
+        wait(1999);
+        expect(button('Copiado')).toBeDefined();
+        wait(1);
+        expect(button('Copiar')).toBeDefined();
+      }));
+
+      // The panel can be closed right after copying: what it was going to do later goes with it.
+      it('leaves nothing behind when the panel goes away before the two seconds', fakeAsync(() => {
+        const timers = spyOn(window, 'setTimeout').and.callThrough();
+        const cleared = spyOn(window, 'clearTimeout').and.callThrough();
+        open(ticket({ customerReply: 'Ya puede imprimir.' }));
+        click(button('Copiar'));
+        const mark = timers.calls.all().find((call) => call.args[1] === 2000)!.returnValue;
+
+        fixture.destroy();
+        expect(cleared).toHaveBeenCalledWith(mark);
+      }));
+    });
+
     it('emptied, is saved as none, and there is nothing left to copy', fakeAsync(() => {
       open(ticket({ customerReply: 'Ya puede imprimir.' }));
       type(replyBox(), '  ');
@@ -2548,7 +2461,7 @@ describe('TicketPanel', () => {
         click(button('Generar con IA'));
 
         expect(confirm.current()).toBeNull();
-        expect(button('Redactando').disabled).toBeTrue();
+        expect(button('Redactando…').disabled).toBeTrue();
         http.expectOne(reply).flush(ticket({ customerReply: 'Estimado cliente: listo.' }));
         settle();
         expect(replyBox().value).toBe('Estimado cliente: listo.');
@@ -2628,7 +2541,7 @@ describe('TicketPanel', () => {
 
         update().flush(ticket({ status: 'RESOLVED' }));
         settle();
-        expect(button('Redactando').disabled).toBeTrue();
+        expect(button('Redactando…').disabled).toBeTrue();
         http.expectOne(reply).flush(ticket({ status: 'RESOLVED', customerReply: 'Estimado cliente: ya puede imprimir.' }));
         settle();
         expect(replyBox().value).toBe('Estimado cliente: ya puede imprimir.');
@@ -2705,24 +2618,22 @@ describe('TicketPanel', () => {
       settle();
     }
 
-    it('of the first read: is not shown', fakeAsync(() => {
+    it('of the first read: is not shown, and its request is cancelled', fakeAsync(() => {
       create(7);
       const left = read(7);
       moveTo(OTHER);
 
-      left.flush(ticket());
-      settle();
+      expect(left.cancelled).toBeTrue();
       expect(find('header').textContent).toContain('SOP-00008');
       expect(chosen('tp-company')).toEqual(['Bodega Sur']);
     }));
 
-    it('of the first read, failed: does not close the panel', fakeAsync(() => {
+    it('of the first read, cancelled: neither closes the panel nor says anything', fakeAsync(() => {
       create(7);
       const left = read(7);
       moveTo(OTHER);
 
-      left.flush({ message: 'Caso no encontrado' }, { status: 404, statusText: 'Not Found' });
-      settle();
+      expect(left.cancelled).toBeTrue();
       expect(closed).toBe(0);
       expect(toasts()).toEqual([]);
     }));
@@ -2828,7 +2739,7 @@ describe('TicketPanel', () => {
       open();
       click(button('Generar con IA'));
       const left = http.expectOne({ method: 'POST', url: '/api/ai/reply/7' });
-      expect(button('Redactando').disabled).toBeTrue();
+      expect(button('Redactando…').disabled).toBeTrue();
 
       moveTo(OTHER);
       expect(button('Generar con IA').disabled).toBeFalse();
@@ -2838,7 +2749,7 @@ describe('TicketPanel', () => {
       left.flush(ticket({ customerReply: 'Ya puede imprimir.' }));
       settle();
       expect(replyBox().value).toBe('');
-      expect(button('Redactando').disabled).toBeTrue();
+      expect(button('Redactando…').disabled).toBeTrue();
 
       own.flush({ ...OTHER, customerReply: 'Ya abre la caja.' });
       settle();

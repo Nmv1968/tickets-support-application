@@ -3,13 +3,14 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import type { SystemModule } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
+import { Icon } from '../../core/icon';
 import { SELECT } from '../../core/select';
 import { Toast } from '../../core/toast';
 
 /** Catalog of the supported software's modules. It changes as the software grows, so it is edited here. */
 @Component({
   selector: 'app-modules-tab',
-  imports: [FormsModule, ...SELECT],
+  imports: [FormsModule, ...SELECT, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4">
@@ -23,14 +24,14 @@ import { Toast } from '../../core/toast';
           <!-- Left empty, the module is a main one: that is what the placeholder says. -->
           <ng-select labelForId="module-parent" name="parent" placeholder="Módulo principal" bindValue="id" bindLabel="name" [items]="parents()" [(ngModel)]="parentId" />
         </div>
-        <button type="submit" class="btn btn-primary" [disabled]="!name().trim()"><i class="mdi mdi-plus" aria-hidden="true"></i> Agregar</button>
+        <button type="submit" class="btn btn-primary" [disabled]="!name().trim()"><app-icon name="plus" /> Agregar</button>
       </form>
 
       <div class="card divide-y divide-line">
         @for (module of all(); track module.id) {
           <div class="flex items-center gap-2 px-3 py-1.5" [class.opacity-60]="!module.active" [class.pl-9]="module.parentId">
             @if (module.parentId) {
-              <i class="mdi mdi-subdirectory-arrow-right text-muted" aria-hidden="true"></i>
+              <app-icon name="subdirectory-arrow-right" class="text-muted" />
             }
             <input class="cell-control flex-1 cursor-text" [value]="module.name" [attr.aria-label]="'Nombre del módulo ' + module.name" (change)="rename(module, $event)" />
             @if (!module.active) {

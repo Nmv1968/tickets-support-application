@@ -4,6 +4,12 @@ import type { Assignee, Company, SupportType, SystemModule, User } from './api';
 import { Toast } from './toast';
 import { nameKey } from './ui';
 
+/** The longest name the server stores in each catalog. */
+export const NAME_MAX = { company: 200, assignee: 80, supportType: 60 } as const;
+
+/** The option of a filter by responsible for the cases nobody has. */
+export const NOBODY = { id: 'none', name: 'Sin asignar' } as const;
+
 /** Users, responsibles, companies, support types, modules and AI availability, loaded once and shared by every screen. */
 @Injectable({ providedIn: 'root' })
 export class Catalogs {
@@ -26,6 +32,8 @@ export class Catalogs {
   readonly activeCompanies = computed(() => this.companies().filter((company) => company.active));
   readonly activeSupportTypes = computed(() => this.supportTypes().filter((type) => type.active));
   readonly activeModules = computed(() => this.modules().filter((module) => module.active));
+  /** What a filter by responsible offers: everyone of the catalog, active or not (their cases are still theirs), and the cases nobody has. */
+  readonly assigneeFilterOptions = computed<{ id: number | 'none'; name: string }[]>(() => [NOBODY, ...this.assignees()]);
 
   private loaded = false;
 
@@ -114,4 +122,14 @@ export function companyCreator(): (name: string) => Promise<Company> {
 export function findByName<T extends { name: string }>(entries: readonly T[], name: string): T | undefined {
   const key = nameKey(name);
   return key ? entries.find((entry) => nameKey(entry.name) === key) : undefined;
+}
+
+/**
+ * What a select of a case offers out of a catalog: its active entries and the ones the case
+ * has, whatever their state. An entry the catalog does not bring (it is still on its way) is
+ * offered as the case itself names it.
+ */
+export function offered<T extends { id: number }>(catalog: readonly (T & { active: boolean })[], own: readonly T[]): T[] {
+  const options: T[] = catalog.filter((entry) => entry.active || own.some((mine) => mine.id === entry.id));
+  return [...options, ...own.filter((mine) => !options.some((entry) => entry.id === mine.id))];
 }

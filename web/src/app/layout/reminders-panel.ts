@@ -2,6 +2,7 @@ import { A11yModule } from '@angular/cdk/a11y';
 import { ChangeDetectionStrategy, Component, inject, output } from '@angular/core';
 import { Router } from '@angular/router';
 import type { Ticket } from '../core/api';
+import { Icon } from '../core/icon';
 import { Reminders } from '../core/reminders';
 import { PROMISE_CLASS, formatDateTime, formatDay, formatHours, promiseText, timeAgo } from '../core/ui';
 import { ReminderCard } from './reminder-card';
@@ -9,7 +10,7 @@ import { ReminderCard } from './reminder-card';
 /** Drawer opened by the bell: delivery promises due, then forgotten cases, then cases past their SLA deadline. */
 @Component({
   selector: 'app-reminders-panel',
-  imports: [A11yModule, ReminderCard],
+  imports: [A11yModule, ReminderCard, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
@@ -23,17 +24,17 @@ import { ReminderCard } from './reminder-card';
       [cdkTrapFocusAutoCapture]="true"
     >
       <header class="flex items-center gap-2 border-b border-line px-4 py-3">
-        <i class="mdi mdi-bell-outline text-xl text-primary" aria-hidden="true"></i>
+        <app-icon name="bell-outline" class="text-xl text-primary" />
         <h2 class="font-semibold">Avisos</h2>
         <button type="button" class="btn btn-ghost ml-auto px-2" (click)="closed.emit()" aria-label="Cerrar" cdkFocusInitial>
-          <i class="mdi mdi-close text-lg" aria-hidden="true"></i>
+          <app-icon name="close" class="text-lg" />
         </button>
       </header>
 
       <div class="min-h-0 flex-1 space-y-5 overflow-auto p-4">
         <section>
           <h3 class="section-title flex items-center gap-1.5">
-            <i class="mdi mdi-calendar-clock-outline text-base text-danger" aria-hidden="true"></i>
+            <app-icon name="calendar-clock-outline" class="text-base text-danger" />
             Promesas de entrega ({{ reminders.promises().length }})
           </h3>
           <p class="mt-1 text-2xs text-muted">
@@ -61,7 +62,7 @@ import { ReminderCard } from './reminder-card';
 
         <section>
           <h3 class="section-title flex items-center gap-1.5">
-            <i class="mdi mdi-bell-ring-outline text-base text-warning" aria-hidden="true"></i>
+            <app-icon name="bell-ring-outline" class="text-base text-warning" />
             Casos olvidados ({{ reminders.stale().length }})
           </h3>
           @if (reminders.staleHours() === 0) {
@@ -85,7 +86,7 @@ import { ReminderCard } from './reminder-card';
         @if (reminders.overdue().length) {
           <section>
             <h3 class="section-title flex items-center gap-1.5">
-              <i class="mdi mdi-clock-alert-outline text-base text-danger" aria-hidden="true"></i>
+              <app-icon name="clock-alert-outline" class="text-base text-danger" />
               Vencidos por SLA ({{ reminders.overdue().length }})
             </h3>
             <ul class="mt-2 space-y-2">
@@ -103,12 +104,12 @@ import { ReminderCard } from './reminder-card';
         <footer class="flex flex-wrap gap-2 border-t border-line px-4 py-3">
           @if (reminders.promises().length) {
             <button type="button" class="btn btn-soft flex-1" (click)="openList({ promesa: 'due' })">
-              <i class="mdi mdi-calendar-clock-outline" aria-hidden="true"></i> Ver promesas en la lista
+              <app-icon name="calendar-clock-outline" /> Ver promesas en la lista
             </button>
           }
           @if (reminders.stale().length) {
             <button type="button" class="btn btn-soft flex-1" (click)="openList({ olvidados: 1 })">
-              <i class="mdi mdi-format-list-bulleted" aria-hidden="true"></i> Ver olvidados en la lista
+              <app-icon name="format-list-bulleted" /> Ver olvidados en la lista
             </button>
           }
         </footer>

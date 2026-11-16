@@ -6,6 +6,7 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { Branding } from '../../core/branding';
 import { Confirm } from '../../core/confirm';
 import { toSmallPng } from '../../core/ui';
+import { nextTask } from '../../testing/screen';
 import { BrandingTab } from './branding-tab';
 
 /** Waits, a turn at a time, until `ready` holds: preparing the image is real work of the browser. */
@@ -90,8 +91,6 @@ describe('BrandingTab, the company logo in Configuración', () => {
     picker().dispatchEvent(new Event('change'));
     fixture.detectChanges();
   }
-  /** An answer to a question of the tab reaches it a turn later. */
-  const answered = (): Promise<void> => new Promise((resolve) => setTimeout(resolve));
   async function upload(file: File): Promise<TestRequest> {
     choose(file);
     let request: TestRequest | undefined;
@@ -116,7 +115,7 @@ describe('BrandingTab, the company logo in Configuración', () => {
     expect(button('Subir imagen')).toBeDefined();
     expect(button('Quitar logo')).toBeUndefined();
     expect(picker().accept).toBe('image/png,image/jpeg,image/webp,image/svg+xml');
-    expect(el.querySelector('app-logo i.mdi-lifebuoy')).not.toBeNull();
+    expect(el.querySelector('app-logo app-icon[data-icon=lifebuoy]')).not.toBeNull();
   });
 
   it('sends the chosen image as a small PNG and shows it at once', async () => {
@@ -171,14 +170,15 @@ describe('BrandingTab, the company logo in Configuración', () => {
     http.expectNone('/api/branding/logo');
 
     confirm.answer(true);
-    await answered();
+    // The answer reaches the tab a turn later.
+    await nextTask();
     http.expectOne({ method: 'DELETE', url: '/api/branding/logo' }).flush(null);
     await until(() => branding.logoUrl() === null);
     fixture.detectChanges();
 
     expect(confirm.current()).toBeNull();
     expect(branding.logoUrl()).toBeNull();
-    expect(el.querySelector('app-logo i.mdi-lifebuoy')).not.toBeNull();
+    expect(el.querySelector('app-logo app-icon[data-icon=lifebuoy]')).not.toBeNull();
     expect(button('Quitar logo')).toBeUndefined();
   });
 
@@ -188,7 +188,7 @@ describe('BrandingTab, the company logo in Configuración', () => {
 
     button('Quitar logo')!.click();
     confirm.answer(false);
-    await answered();
+    await nextTask();
 
     http.expectNone('/api/branding/logo');
     expect(branding.logoUrl()).toBe('/api/branding/logo?v=v1');

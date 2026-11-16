@@ -1,16 +1,27 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import type { ChartConfiguration } from 'chart.js';
 import { Api } from '../core/api';
-import type { Dashboard } from '../core/api';
 import { ChartView } from '../core/chart-view';
+import { Icon } from '../core/icon';
+import type { IconName } from '../core/icons';
+import { liveResource } from '../core/loading';
 import { Theme } from '../core/theme';
 import { TicketEvents } from '../core/ticket-events';
 import { Toast } from '../core/toast';
 import { PRIORITY_LABEL, downloadBlob, formatMinutes, todayIso } from '../core/ui';
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/** A number at the top of the dashboard, with what it counts. */
+interface Kpi {
+  label: string;
+  value: string;
+  hint: string;
+  icon: IconName;
+  color: string;
+}
 
 /** Rows a horizontal chart fits in the height the charts have. With more, "Casos por tipo de soporte" grows. */
 const ROWS_THAT_FIT = 12;
@@ -34,9 +45,14 @@ function horizontalBars(labels: string[], datasets: ChartConfiguration<'bar'>['d
   };
 }
 
+/** One bar per row with its number of cases, all in `color`: the cases by company, by module. */
+function caseBars(rows: readonly { name: string; total: number }[], color: string): ChartConfiguration {
+  return horizontalBars(rows.map((r) => r.name), [{ label: 'Casos', data: rows.map((r) => r.total), backgroundColor: color, borderRadius: 4 }], false);
+}
+
 @Component({
   selector: 'app-dashboard',
-  imports: [FormsModule, ChartView],
+  imports: [FormsModule, ChartView, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4 p-3 md:p-5">
@@ -56,11 +72,11 @@ function horizontalBars(labels: string[], datasets: ChartConfiguration<'bar'>['d
         <!-- The report of what is on screen: the same period, with the archived cases or without them. -->
         <div class="flex gap-2" role="group" aria-label="Descargar el reporte">
           <button type="button" class="btn btn-soft" [disabled]="exporting() !== null" (click)="export('xlsx')" title="Reporte en Excel, con una hoja de datos para tablas dinámicas o Power BI">
-            <i class="mdi text-base" [class]="exporting() === 'xlsx' ? 'mdi-loading mdi-spin' : 'mdi-file-excel-outline text-success'" aria-hidden="true"></i>
+            <app-icon [name]="exporting() === 'xlsx' ? 'loading' : 'file-excel-outline'" class="text-base" [class.text-success]="exporting() !== 'xlsx'" />
             {{ exporting() === 'xlsx' ? 'Generando…' : 'Excel' }}
           </button>
           <button type="button" class="btn btn-soft" [disabled]="exporting() !== null" (click)="export('pdf')" title="Reporte en PDF, para leer o imprimir">
-            <i class="mdi text-base" [class]="exporting() === 'pdf' ? 'mdi-loading mdi-spin' : 'mdi-file-pdf-box text-danger'" aria-hidden="true"></i>
+            <app-icon [name]="exporting() === 'pdf' ? 'loading' : 'file-pdf-box'" class="text-base" [class.text-danger]="exporting() !== 'pdf'" />
             {{ exporting() === 'pdf' ? 'Generando…' : 'PDF' }}
           </button>
         </div>
@@ -71,7 +87,7 @@ function horizontalBars(labels: string[], datasets: ChartConfiguration<'bar'>['d
           @for (kpi of kpis(); track kpi.label) {
             <div class="card p-3">
               <div class="flex items-center gap-1.5 text-xs text-muted">
-                <i class="mdi text-base leading-none" [class]="kpi.icon + ' ' + kpi.color" aria-hidden="true"></i>
+                <app-icon [name]="kpi.icon" class="text-base leading-none" [class]="kpi.color" />
                 {{ kpi.label }}
               </div>
               <div class="mt-1 text-2xl font-semibold">{{ kpi.value }}</div>
@@ -138,34 +154,42 @@ export class DashboardPage {
   protected readonly includeArchived = signal(true);
   /** What the screen is about: the cases of the period, with the archived ones or without them. Its report covers the same. */
   private readonly selection = computed(() => ({ from: this.from(), to: this.to(), includeArchived: this.includeArchived() }));
-  protected readonly data = signal<Dashboard | null>(null);
+  /**
+   * The numbers of the selection, read again when it changes, and when cases change here or
+   * elsewhere (see liveResource and the constructor).
+   */
+  private readonly numbers = liveResource({
+    params: this.selection,
+    load: ({ from, to, includeArchived }, abort) => this.api.dashboard(from, to, includeArchived, abort),
+    failed: (error) => this.toast.error(error),
+  });
+  protected readonly data = this.numbers.value.asReadonly();
   /** The file of the report being generated. Both buttons wait for it. */
   protected readonly exporting = signal<'xlsx' | 'pdf' | null>(null);
-  private loadSequence = 0;
 
-  protected readonly kpis = computed(() => {
+  protected readonly kpis = computed((): Kpi[] => {
     const d = this.data();
     if (!d) return [];
     const t = d.totals;
     return [
-      { label: 'Total', value: String(t.total), hint: '', icon: 'mdi-format-list-bulleted', color: 'text-primary' },
-      { label: 'Sin resolver', value: String(t.unresolved), hint: '', icon: 'mdi-alert-circle-outline', color: 'text-danger' },
-      { label: 'Pendientes', value: String(t.pending), hint: '', icon: 'mdi-progress-clock', color: 'text-warning' },
-      { label: 'Resueltos', value: String(t.resolved), hint: t.total ? `${Math.round((t.resolved / t.total) * 100)}% del total` : '', icon: 'mdi-check-circle-outline', color: 'text-success' },
-      { label: 'Vencidos', value: String(t.overdue), hint: 'abiertos fuera de plazo', icon: 'mdi-clock-alert-outline', color: 'text-danger' },
+      { label: 'Total', value: String(t.total), hint: '', icon: 'format-list-bulleted', color: 'text-primary' },
+      { label: 'Sin resolver', value: String(t.unresolved), hint: '', icon: 'alert-circle-outline', color: 'text-danger' },
+      { label: 'Pendientes', value: String(t.pending), hint: '', icon: 'progress-clock', color: 'text-warning' },
+      { label: 'Resueltos', value: String(t.resolved), hint: t.total ? `${Math.round((t.resolved / t.total) * 100)}% del total` : '', icon: 'check-circle-outline', color: 'text-success' },
+      { label: 'Vencidos', value: String(t.overdue), hint: 'abiertos fuera de plazo', icon: 'clock-alert-outline', color: 'text-danger' },
       {
         label: 'Tiempo de resolución',
         value: d.avgResolutionHours === null ? '—' : d.avgResolutionHours >= 48 ? `${Math.round(d.avgResolutionHours / 24)} d` : `${d.avgResolutionHours} h`,
         hint: 'promedio, casos resueltos en la app',
-        icon: 'mdi-timer-sand',
+        icon: 'timer-sand',
         color: 'text-primary',
       },
-      { label: 'Cumplimiento SLA', value: d.slaCompliance === null ? '—' : `${d.slaCompliance}%`, hint: 'casos con prioridad', icon: 'mdi-shield-check-outline', color: 'text-success' },
+      { label: 'Cumplimiento SLA', value: d.slaCompliance === null ? '—' : `${d.slaCompliance}%`, hint: 'casos con prioridad', icon: 'shield-check-outline', color: 'text-success' },
       {
         label: 'Estimado vs real',
         value: d.estimatedMinutes ? `${Math.round((d.spentMinutes / d.estimatedMinutes) * 100)}%` : '—',
         hint: d.estimatedMinutes ? `${formatMinutes(d.spentMinutes)} de ${formatMinutes(d.estimatedMinutes)}` : 'sin estimaciones',
-        icon: 'mdi-scale-balance',
+        icon: 'scale-balance',
         color: 'text-primary',
       },
     ];
@@ -204,15 +228,9 @@ export class DashboardPage {
     );
   });
 
-  protected readonly companyChart = computed<ChartConfiguration>(() => {
-    const rows = this.data()?.byCompany ?? [];
-    return horizontalBars(rows.map((r) => r.name), [{ label: 'Casos', data: rows.map((r) => r.total), backgroundColor: this.theme.palette().primary, borderRadius: 4 }], false);
-  });
+  protected readonly companyChart = computed(() => caseBars(this.data()?.byCompany ?? [], this.theme.palette().primary));
 
-  protected readonly moduleChart = computed<ChartConfiguration>(() => {
-    const rows = this.data()?.byModule ?? [];
-    return horizontalBars(rows.map((r) => r.name), [{ label: 'Casos', data: rows.map((r) => r.total), backgroundColor: this.theme.palette().primary, borderRadius: 4 }], false);
-  });
+  protected readonly moduleChart = computed(() => caseBars(this.data()?.byModule ?? [], this.theme.palette().primary));
 
   protected readonly hasPriorities = computed(() => (this.data()?.byPriority ?? []).some((p) => p.priority !== null));
 
@@ -255,15 +273,10 @@ export class DashboardPage {
   protected readonly supportTypeHeight = computed(() => 16 + Math.max(0, (this.data()?.bySupportType.length ?? 0) - ROWS_THAT_FIT) * 1.25);
 
   constructor() {
-    // Reloads when the period or the choice about archived cases changes, and when cases change,
-    // here or elsewhere (see TicketEvents).
-    effect(() => {
-      const selection = this.selection();
-      untracked(() => void this.load(selection));
-    });
+    // Any change to cases, here or elsewhere (see TicketEvents), can change the numbers.
     inject(TicketEvents)
       .events.pipe(takeUntilDestroyed())
-      .subscribe(() => void this.load());
+      .subscribe(() => this.numbers.refresh());
   }
 
   protected applyPreset(preset: 'all' | 'year' | 'month'): void {
@@ -277,18 +290,6 @@ export class DashboardPage {
     this.preset.set('');
     this.from.set(from);
     this.to.set(to);
-  }
-
-  private async load({ from, to, includeArchived } = this.selection()): Promise<void> {
-    // Only the answer to the latest request is shown: an older one, for another period or with
-    // the archived cases the person has just left out, can arrive after it.
-    const sequence = ++this.loadSequence;
-    try {
-      const data = await this.api.dashboard(from, to, includeArchived);
-      if (sequence === this.loadSequence) this.data.set(data);
-    } catch (error) {
-      this.toast.error(error);
-    }
   }
 
   /** Downloads the report of what is on screen: the same period, and the same choice about archived cases. */

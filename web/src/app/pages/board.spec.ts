@@ -6,58 +6,13 @@ import type { TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import type { Assignee, Ticket, TicketDetail, TicketPage, TicketStatus } from '../core/api';
+import type { Ticket, TicketStatus } from '../core/api';
 import { Catalogs } from '../core/catalogs';
 import { TicketEvents } from '../core/ticket-events';
-import { Toast } from '../core/toast';
+import { ASSIGNEES, ticket, ticketPage } from '../testing/fixtures';
 import { chooseOption, clearSelect, closeSelect, ngSelect, optionTexts, selectedTexts } from '../testing/ng-select';
+import { toasts } from '../testing/screen';
 import { BoardPage } from './board';
-
-function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
-  return {
-    id: 7,
-    code: 'SOP-00007',
-    date: '2026-11-05',
-    time: null,
-    companyId: 1,
-    company: 'Acme',
-    description: 'No imprime',
-    status: 'PENDING',
-    assigneeId: null,
-    assigneeName: null,
-    supportTypes: [],
-    priority: null,
-    estimatedMinutes: null,
-    spentMinutes: 0,
-    timerStartedAt: null,
-    moduleId: null,
-    moduleName: null,
-    dueAt: null,
-    promisedDate: null,
-    promiseState: null,
-    resolvedAt: null,
-    overdue: false,
-    lastActivityAt: '2026-11-05T10:00:00.000Z',
-    stale: false,
-    aiGenerated: false,
-    customerReply: null,
-    createdAt: '2026-11-05T10:00:00.000Z',
-    createdById: null,
-    archivedAt: null,
-    lastNote: null,
-    notesCount: 0,
-    attachmentsCount: 0,
-    createdByName: null,
-    notes: [],
-    attachments: [],
-    history: [],
-    ...overrides,
-  };
-}
-
-function page(items: Ticket[]): TicketPage {
-  return { items, total: items.length, page: 1, pageSize: 500 };
-}
 
 /** One read of the board: the open cases and the latest resolved ones, asked for together. */
 interface BoardRead {
@@ -67,12 +22,6 @@ interface BoardRead {
 
 const REFUSED = { status: 400, statusText: 'Bad Request' };
 
-// The responsibles of the catalog. One is deactivated: the cases they have are still theirs.
-const ASSIGNEES: Assignee[] = [
-  { id: 4, name: 'Ana', active: true, tickets: 1 },
-  { id: 5, name: 'Luis', active: true, tickets: 0 },
-  { id: 6, name: 'Zoe', active: false, tickets: 2 },
-];
 const OF_ANA = ticket({ id: 8, code: 'SOP-00008', assigneeId: 4, assigneeName: 'Ana' });
 const OF_ZOE = ticket({ id: 9, code: 'SOP-00009', status: 'RESOLVED', assigneeId: 6, assigneeName: 'Zoe' });
 const ARCHIVED = '2026-11-08T09:00:00.000Z';
@@ -102,10 +51,13 @@ describe('BoardPage', () => {
     return { open: of('UNRESOLVED,PENDING'), resolved: of('RESOLVED') };
   }
 
+  /** Both requests of a read were cancelled: a newer read took its place, and its answer never arrives. */
+  const cancelled = (pending: BoardRead): boolean => pending.open.cancelled && pending.resolved.cancelled;
+
   /** Answers a read with these cases, each in the request that asks for its status. */
   function answer(pending: BoardRead, tickets: Ticket[]): void {
-    pending.open.flush(page(tickets.filter((t) => t.status !== 'RESOLVED')));
-    pending.resolved.flush(page(tickets.filter((t) => t.status === 'RESOLVED')));
+    pending.open.flush(ticketPage(tickets.filter((t) => t.status !== 'RESOLVED'), 500));
+    pending.resolved.flush(ticketPage(tickets.filter((t) => t.status === 'RESOLVED'), 500));
   }
 
   /**
@@ -168,23 +120,25 @@ describe('BoardPage', () => {
     render();
   }
 
-  const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
   /** The codes of the cards on the board, column after column. */
   const cards = (): string[] => Array.from(el.querySelectorAll('article .font-mono'), (code) => code.textContent ?? '');
   const filter = (): HTMLElement => ngSelect(el, 'Filtrar por responsable');
 
   describe('answers that arrive out of order', () => {
-    it('the answer to an older read does not replace the one to the latest read', fakeAsync(() => {
+    /** "Actualizar", pressed: the columns are read again with the screen update that follows. */
+    function refresh(): void {
+      el.querySelector<HTMLButtonElement>('button[aria-label="Actualizar"]')!.click();
+      render();
+    }
+
+    it('an older read is cancelled by the latest one, whose answer is the one shown', fakeAsync(() => {
       create();
       const older = read();
-      el.querySelector<HTMLButtonElement>('button[aria-label="Actualizar"]')!.click();
+      refresh();
       const newer = read();
+      expect(cancelled(older)).toBeTrue();
 
       answer(newer, [ticket({ company: 'Acme del Sur' })]);
-      settle();
-      expect(column('Pendiente')).toContain('Acme del Sur');
-
-      answer(older, [ticket({ status: 'UNRESOLVED' })]);
       settle();
       expect(column('Pendiente')).toContain('Acme del Sur');
       expect(column('Sin resolver')).toBe('');
@@ -193,10 +147,10 @@ describe('BoardPage', () => {
     it('the board keeps saying it is loading until the latest read is answered', fakeAsync(() => {
       create();
       const older = read();
-      el.querySelector<HTMLButtonElement>('button[aria-label="Actualizar"]')!.click();
+      refresh();
       const newer = read();
 
-      answer(older, [ticket()]);
+      expect(cancelled(older)).toBeTrue();
       settle();
       expect(el.textContent).toContain('Cargando…');
       expect(column('Pendiente')).toBe('');
@@ -206,6 +160,45 @@ describe('BoardPage', () => {
       expect(el.textContent).not.toContain('Cargando…');
       expect(column('Pendiente')).toContain('SOP-00007');
     }));
+
+    it('turns the icon of "Actualizar" while it reads, and stops it with the answer', fakeAsync(() => {
+      const turning = (): boolean => {
+        const icon = el.querySelector('button[aria-label="Actualizar"] app-icon[data-icon=refresh] svg')!;
+        return getComputedStyle(icon).animationName !== 'none';
+      };
+      create();
+      const first = read();
+      settle();
+      expect(turning()).toBeTrue();
+
+      answer(first, [ticket()]);
+      settle();
+      expect(turning()).toBeFalse();
+
+      refresh();
+      const again = read();
+      settle();
+      expect(turning()).toBeTrue();
+      answer(again, [ticket()]);
+      settle();
+      expect(turning()).toBeFalse();
+    }));
+  });
+
+  describe('a read that fails', () => {
+    it('says why, and leaves the cards it had on the board', fakeAsync(() => {
+      open([ticket(), OF_ANA]);
+      el.querySelector<HTMLButtonElement>('button[aria-label="Actualizar"]')!.click();
+      render();
+      const again = read();
+      again.open.flush({ message: 'Error interno' }, { status: 500, statusText: 'Server Error' });
+      again.resolved.flush(ticketPage([], 30));
+      settle();
+
+      expect(toasts()).toEqual(['Error interno']);
+      expect(cards()).toEqual(['SOP-00007', 'SOP-00008']);
+      expect(el.textContent).not.toContain('Cargando…');
+    }));
   });
 
   describe('a case saved by this tab', () => {
@@ -214,6 +207,7 @@ describe('BoardPage', () => {
       open();
       // Someone else changed a case: the columns are read again.
       events.outdated(null);
+      render();
       const stale = read();
 
       events.saved(ticket({ status: 'UNRESOLVED' }));
@@ -221,7 +215,8 @@ describe('BoardPage', () => {
       expect(column('Sin resolver')).toContain('SOP-00007');
       const fresh = read();
 
-      answer(stale, [ticket()]);
+      // Its answer, maybe older than the save, never arrives.
+      expect(cancelled(stale)).toBeTrue();
       settle();
       expect(column('Sin resolver')).toContain('SOP-00007');
       expect(column('Pendiente')).toBe('');
@@ -299,6 +294,28 @@ describe('BoardPage', () => {
       expect(chips.map((chip) => chip.style.backgroundColor)).toEqual(['rgb(18, 183, 106)', 'rgb(185, 28, 28)']);
       expect(plain.querySelector('app-type-chip')).toBeNull();
     }));
+
+    // Dragging it is for the mouse and for touch. The keyboard, and who hears the page, open it as a button.
+    for (const [name, key] of [
+      ['Enter', 'Enter'],
+      ['Space', ' '],
+    ]) {
+      it(`is a button that ${name} opens, without scrolling the column`, fakeAsync(() => {
+        open();
+        const card = el.querySelector<HTMLElement>('article')!;
+        expect(card.getAttribute('role')).toBe('button');
+        expect(card.tabIndex).toBe(0);
+
+        const press = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        card.dispatchEvent(press);
+        render();
+
+        expect(press.defaultPrevented).toBe(key === ' ');
+        expect(el.querySelector('app-ticket-panel')).not.toBeNull();
+        http.expectOne({ method: 'GET', url: '/api/tickets/7' }).flush(ticket());
+        settle();
+      }));
+    }
   });
 
   // An archived case is put away: it is on no column, whatever its status.
@@ -334,6 +351,7 @@ describe('BoardPage', () => {
     it('a case archived while the columns are being read stays out, and the columns are read again', fakeAsync(() => {
       open([ticket(), OF_ANA]);
       events.outdated(null);
+      render();
       const stale = read();
 
       events.saved(ticket({ archivedAt: ARCHIVED }));
@@ -341,7 +359,8 @@ describe('BoardPage', () => {
       expect(cards()).toEqual(['SOP-00008']);
       const fresh = read();
 
-      answer(stale, [ticket(), OF_ANA]);
+      // Its answer, maybe older than the archiving, never arrives.
+      expect(cancelled(stale)).toBeTrue();
       settle();
       expect(cards()).toEqual(['SOP-00008']);
 

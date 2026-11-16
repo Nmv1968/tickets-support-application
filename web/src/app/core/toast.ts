@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, Injectable, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Injectable, computed, inject, signal } from '@angular/core';
+import { Icon } from './icon';
 import { errorMessage } from './ui';
 
 interface ToastItem {
@@ -34,9 +35,10 @@ export class Toast {
 
 @Component({
   selector: 'app-toasts',
+  imports: [Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="pointer-events-none fixed right-4 bottom-4 z-100 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite">
+    <div class="pointer-events-none fixed right-4 bottom-4 z-100 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2" [attr.aria-live]="live()">
       @for (item of toast.items(); track item.id) {
         <button
           type="button"
@@ -44,14 +46,12 @@ export class Toast {
           [class.border-danger]="item.kind === 'error'"
           (click)="toast.dismiss(item.id)"
         >
-          <i
-            class="mdi text-lg leading-5"
-            [class.mdi-check-circle]="item.kind === 'ok'"
+          <app-icon
+            [name]="item.kind === 'ok' ? 'check-circle' : 'alert-circle'"
+            class="text-lg leading-5"
             [class.text-success]="item.kind === 'ok'"
-            [class.mdi-alert-circle]="item.kind === 'error'"
             [class.text-danger]="item.kind === 'error'"
-            aria-hidden="true"
-          ></i>
+          />
           <span class="flex-1">{{ item.text }}</span>
         </button>
       }
@@ -60,4 +60,9 @@ export class Toast {
 })
 export class Toasts {
   protected readonly toast = inject(Toast);
+  /**
+   * An error is read out at once, interrupting the screen reader; any other toast waits for it to
+   * finish. The region takes the politeness of the toast that came last: the one it is about to read.
+   */
+  protected readonly live = computed(() => (this.toast.items().at(-1)?.kind === 'error' ? 'assertive' : 'polite'));
 }

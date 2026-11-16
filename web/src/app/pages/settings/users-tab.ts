@@ -4,11 +4,12 @@ import { Api } from '../../core/api';
 import type { User } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { Catalogs } from '../../core/catalogs';
+import { Icon } from '../../core/icon';
 import { Toast } from '../../core/toast';
 
 @Component({
   selector: 'app-users-tab',
-  imports: [FormsModule],
+  imports: [FormsModule, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4">
@@ -26,7 +27,7 @@ import { Toast } from '../../core/toast';
           <input id="user-password" class="input" name="password" type="password" autocomplete="new-password" [(ngModel)]="password" />
         </div>
         <button type="submit" class="btn btn-primary" [disabled]="!name().trim() || username().trim().length < 3 || password().length < 6">
-          <i class="mdi mdi-plus" aria-hidden="true"></i> Agregar
+          <app-icon name="plus" /> Agregar
         </button>
       </form>
 
@@ -64,7 +65,7 @@ import { Toast } from '../../core/toast';
                       <button type="button" class="btn btn-ghost px-2 py-1" (click)="passwordFor.set(null)">Cancelar</button>
                     } @else {
                       <button type="button" class="btn btn-soft px-2 py-1 text-xs" (click)="askPassword(user)">
-                        <i class="mdi mdi-key-outline" aria-hidden="true"></i> Contraseña
+                        <app-icon name="key-outline" /> Contraseña
                       </button>
                       @if (user.id !== auth.user()?.id) {
                         <button type="button" class="btn btn-soft px-2 py-1 text-xs" (click)="toggle(user)">

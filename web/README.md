@@ -50,6 +50,14 @@ To run them once without opening a browser window (headless Chrome), as a check 
 npm run test:ci
 ```
 
+## Linting
+
+To check the code and the templates with ESLint and angular-eslint (`eslint.config.mjs`), without changing any file:
+
+```bash
+npm run lint
+```
+
 ## Running end-to-end tests
 
 For end-to-end (e2e) testing, run:

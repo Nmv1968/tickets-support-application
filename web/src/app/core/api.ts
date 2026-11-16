@@ -1,6 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, fromEvent, takeUntil } from 'rxjs';
+import type { Observable } from 'rxjs';
 import { TicketEvents } from './ticket-events';
 
 export type TicketStatus = 'UNRESOLVED' | 'PENDING' | 'RESOLVED';
@@ -355,7 +356,24 @@ export async function withReadableBody(error: unknown): Promise<unknown> {
   }
 }
 
-/** Every call to the backend. Promise-based so components can use async/await with signals. */
+/**
+ * The answer to a request, as a promise. `abort` cancels the request: the promise then fails with
+ * the reason of the abort (an `AbortError`), which nobody shows, since whoever aborted no longer
+ * wants the answer.
+ */
+function answer<T>(request: Observable<T>, abort?: AbortSignal): Promise<T> {
+  if (!abort) return firstValueFrom(request);
+  if (abort.aborted) return Promise.reject(abort.reason);
+  return firstValueFrom(request.pipe(takeUntil(fromEvent(abort, 'abort')))).catch((error: unknown) => {
+    throw abort.aborted ? abort.reason : error;
+  });
+}
+
+/**
+ * Every call to the backend. Promise-based so components can use async/await with signals. The
+ * reads a screen asks for again and again take an `AbortSignal`, which cancels the request: never
+ * a write, which the server may store all the same.
+ */
 @Injectable({ providedIn: 'root' })
 export class Api {
   private readonly http = inject(HttpClient);
@@ -372,12 +390,12 @@ export class Api {
     return ticket;
   }
 
-  private get<T>(url: string, params: Params = {}): Promise<T> {
-    return firstValueFrom(this.http.get<T>(`/api/${url}`, { params: clean(params) }));
+  private get<T>(url: string, params: Params = {}, abort?: AbortSignal): Promise<T> {
+    return answer(this.http.get<T>(`/api/${url}`, { params: clean(params) }), abort);
   }
 
-  private send<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, body?: unknown, params: Params = {}): Promise<T> {
-    return firstValueFrom(this.http.request<T>(method, `/api/${url}`, { body, params: clean(params) }));
+  private send<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, body?: unknown, params: Params = {}, abort?: AbortSignal): Promise<T> {
+    return answer(this.http.request<T>(method, `/api/${url}`, { body, params: clean(params) }), abort);
   }
 
   private async blob(url: string, params: Params = {}): Promise<Blob> {
@@ -479,8 +497,8 @@ export class Api {
   }
 
   // Tickets
-  tickets(filters: TicketFilters): Promise<TicketPage> {
-    return this.get('tickets', { ...filters });
+  tickets(filters: TicketFilters, abort?: AbortSignal): Promise<TicketPage> {
+    return this.get('tickets', { ...filters }, abort);
   }
   reminders(): Promise<ReminderList> {
     return this.get('tickets/reminders');
@@ -504,8 +522,8 @@ export class Api {
   removeLogo(): Promise<void> {
     return this.send('DELETE', 'branding/logo');
   }
-  ticket(id: number): Promise<TicketDetail> {
-    return this.get(`tickets/${id}`);
+  ticket(id: number, abort?: AbortSignal): Promise<TicketDetail> {
+    return this.get(`tickets/${id}`, {}, abort);
   }
   // Every write to a case below announces its result; callers do not refresh other screens.
   createTicket(input: TicketInput): Promise<TicketDetail> {
@@ -567,8 +585,8 @@ export class Api {
 
   // Dashboard and transfer
   /** Archived cases count unless `includeArchived` is false. */
-  dashboard(from?: string, to?: string, includeArchived = true): Promise<Dashboard> {
-    return this.get('dashboard', { from, to, archived: includeArchived ? undefined : 'exclude' });
+  dashboard(from?: string, to?: string, includeArchived = true, abort?: AbortSignal): Promise<Dashboard> {
+    return this.get('dashboard', { from, to, archived: includeArchived ? undefined : 'exclude' }, abort);
   }
   /** The report of the dashboard as a file, for the same period and cases as `dashboard`. */
   dashboardExport(format: 'xlsx' | 'pdf', from?: string, to?: string, includeArchived = true): Promise<Blob> {
@@ -576,13 +594,14 @@ export class Api {
   }
   /**
    * `createMissing` adds the companies, responsibles and support types of the sheet that do not
-   * exist; without it, the rows that name them are rejected.
+   * exist; without it, the rows that name them are rejected. `abort` is for a preview (`dryRun`),
+   * which writes nothing.
    */
-  async importFile(file: File, dryRun: boolean, dateOrder: 'mdy' | 'dmy', createMissing = false): Promise<ImportResult> {
+  async importFile(file: File, dryRun: boolean, dateOrder: 'mdy' | 'dmy', createMissing = false, abort?: AbortSignal): Promise<ImportResult> {
     const form = new FormData();
     form.append('file', file, file.name);
     const params = { dryRun: dryRun ? '1' : undefined, dateOrder, createMissing: createMissing ? '1' : undefined };
-    const result = await this.send<ImportResult>('POST', 'import', form, params);
+    const result = await this.send<ImportResult>('POST', 'import', form, params, dryRun ? abort : undefined);
     // A preview writes nothing. A real import adds many cases at once.
     if (!dryRun) this.ticketEvents.outdated(null);
     return result;

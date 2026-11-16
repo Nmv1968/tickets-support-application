@@ -1,58 +1,13 @@
 import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { ticket } from '../testing/fixtures';
+import { nextTask } from '../testing/screen';
 import { Api, withReadableBody } from './api';
 import type { TicketDetail } from './api';
 import { TicketEvents } from './ticket-events';
 import type { TicketEvent } from './ticket-events';
 import { errorMessage } from './ui';
-
-function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
-  return {
-    id: 7,
-    code: 'SOP-00007',
-    date: '2026-11-01',
-    time: null,
-    companyId: 1,
-    company: 'Acme',
-    description: 'No imprime',
-    status: 'PENDING',
-    assigneeId: null,
-    assigneeName: null,
-    supportTypes: [],
-    priority: null,
-    estimatedMinutes: null,
-    spentMinutes: 0,
-    timerStartedAt: null,
-    moduleId: null,
-    moduleName: null,
-    dueAt: null,
-    promisedDate: null,
-    promiseState: null,
-    resolvedAt: null,
-    overdue: false,
-    lastActivityAt: '2026-11-01T10:00:00.000Z',
-    stale: false,
-    aiGenerated: false,
-    customerReply: null,
-    createdAt: '2026-11-01T10:00:00.000Z',
-    createdById: null,
-    archivedAt: null,
-    lastNote: null,
-    notesCount: 0,
-    attachmentsCount: 0,
-    createdByName: null,
-    notes: [],
-    attachments: [],
-    history: [],
-    ...overrides,
-  };
-}
-
-/** Lets the promise chains that follow an answered request run. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve));
-}
 
 const REJECTED = { status: 400, statusText: 'Bad Request' };
 
@@ -128,7 +83,7 @@ describe('Api, announcing changes to cases', () => {
     void api.updateTicket(7, { companyId: 1 });
 
     http.expectOne({ method: 'PATCH', url: '/api/tickets/7' }).flush(stored);
-    await settle();
+    await nextTask();
     expect(seen).toEqual([{ kind: 'saved', ticket: stored, created: false, archiving: false }]);
   });
 
@@ -177,7 +132,7 @@ describe('Api, announcing changes to cases', () => {
 
     http.expectNone('/api/tickets/7');
     http.expectOne({ method: 'DELETE', url: '/api/attachments/31' }).flush(null);
-    await settle();
+    await nextTask();
     expect(seen).toEqual([]);
 
     http.expectOne({ method: 'GET', url: '/api/tickets/7' }).flush(stored);
@@ -463,5 +418,75 @@ describe('Api, an import that may add what the catalogs lack', () => {
     second.flush({ dryRun: true, createMissing: true });
     expect((await creating).createMissing).toBeTrue();
     http.verify();
+  });
+});
+
+// The screens ask for the same reads again and again, and only the latest answer counts: an older
+// read is cancelled with the signal it was given (see core/loading).
+describe('Api, a read that is no longer wanted', () => {
+  let api: Api;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    api = TestBed.inject(Api);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  const file = new File(['x'], 'casos.xlsx');
+  const reads: { name: string; url: string; run: (abort: AbortSignal) => Promise<unknown> }[] = [
+    { name: 'tickets', url: '/api/tickets', run: (abort) => api.tickets({ status: 'PENDING' }, abort) },
+    { name: 'ticket', url: '/api/tickets/7', run: (abort) => api.ticket(7, abort) },
+    { name: 'dashboard', url: '/api/dashboard', run: (abort) => api.dashboard('2026-01-01', '2026-11-12', false, abort) },
+    { name: 'the preview of an import', url: '/api/import', run: (abort) => api.importFile(file, true, 'dmy', false, abort) },
+  ];
+
+  for (const { name, url, run } of reads) {
+    it(`${name}: aborted, its request is cancelled and the promise fails with the reason of the abort`, async () => {
+      const abort = new AbortController();
+      const read = run(abort.signal);
+      const request = http.expectOne((sent) => sent.url === url);
+      expect(request.cancelled).toBeFalse();
+
+      abort.abort();
+      expect(request.cancelled).toBeTrue();
+      await expectAsync(read).toBeRejectedWith(abort.signal.reason);
+    });
+
+    it(`${name}: answered, is not touched by an abort that comes after`, async () => {
+      const abort = new AbortController();
+      const read = run(abort.signal);
+      http.expectOne((sent) => sent.url === url).flush({});
+      await expectAsync(read).toBeResolved();
+      abort.abort();
+    });
+  }
+
+  it('already aborted: sends nothing', async () => {
+    const abort = new AbortController();
+    abort.abort();
+    await expectAsync(api.tickets({}, abort.signal)).toBeRejectedWith(abort.signal.reason);
+    http.expectNone('/api/tickets');
+  });
+
+  it('that fails before it is aborted: fails with what the server said', async () => {
+    const abort = new AbortController();
+    const read = api.ticket(7, abort.signal);
+    http.expectOne('/api/tickets/7').flush({ message: 'Caso no encontrado' }, { status: 404, statusText: 'Not Found' });
+    const error: unknown = await read.catch((failure: unknown) => failure);
+    expect(errorMessage(error)).toBe('Caso no encontrado');
+  });
+
+  // Cancelled on its way, a write may be stored all the same, and nobody would hear of it.
+  it('a real import is never cancelled, even when given a signal', async () => {
+    const abort = new AbortController();
+    const real = api.importFile(file, false, 'dmy', false, abort.signal);
+    const request = http.expectOne((sent) => sent.url === '/api/import' && !sent.params.has('dryRun'));
+    abort.abort();
+    expect(request.cancelled).toBeFalse();
+    request.flush({ dryRun: false });
+    await expectAsync(real).toBeResolved();
   });
 });

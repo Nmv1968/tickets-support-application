@@ -1,9 +1,9 @@
 import { inject, signal } from '@angular/core';
 import type { Signal, WritableSignal } from '@angular/core';
-import { Api } from '../../core/api';
-import { Auth } from '../../core/auth';
-import { Toast } from '../../core/toast';
-import { errorMessage } from '../../core/ui';
+import { Api } from './api';
+import { Auth } from './auth';
+import { Toast } from './toast';
+import { errorMessage } from './ui';
 
 /**
  * Something of a screen that each person sets for themselves: the columns of the case list,

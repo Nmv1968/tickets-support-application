@@ -4,19 +4,10 @@ import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import type { Attachment } from '../../core/api';
 import { Confirm } from '../../core/confirm';
+import { paste } from '../../testing/screen';
 import { TicketAttachments } from './ticket-attachments';
 
 const picture = new File(['png'], 'captura.png', { type: 'image/png' });
-
-/** A paste as the browser reports it: on the element that has the focus, with what was copied. */
-function paste(target: Element, files: File[], text?: string): ClipboardEvent {
-  const data = new DataTransfer();
-  for (const file of files) data.items.add(file);
-  if (text !== undefined) data.setData('text/plain', text);
-  const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
-  target.dispatchEvent(event);
-  return event;
-}
 
 // The block listens to pastes on the whole document, so that a screenshot can be pasted with the
 // focus anywhere in the case panel. The fields of the panel are stood in for by one on the page.

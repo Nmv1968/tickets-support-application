@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { nextTask } from '../testing/screen';
 import { Auth } from './auth';
 import { CLIENT_ID } from './client-id';
 import { Live, parseSse } from './live';
@@ -158,13 +159,13 @@ describe('Live', () => {
   /** The data of a change to a case, as the API sends it. */
   const caseChange = (ticketId: number, clientId: string | null): string => JSON.stringify({ scope: 'tickets', ticketId, created: null, clientId });
 
-  /** Lets Live run until it waits for the stream again. Its promises are real ones, so a real turn of the browser. */
-  const turn = (): Promise<void> => new Promise((resolve) => setTimeout(resolve));
-
-  /** Writes to the stream and waits until Live has gone through it. */
+  /**
+   * Writes to the stream and waits until Live has gone through it: until it waits for the stream
+   * again. Its promises are real ones, so it takes a real turn of the browser.
+   */
   async function send(text: string): Promise<void> {
     stream.enqueue(new TextEncoder().encode(text));
-    await turn();
+    await nextTask();
   }
 
   beforeEach(async () => {
@@ -176,14 +177,14 @@ describe('Live', () => {
     TestBed.inject(TicketEvents).events.subscribe((event) => seen.push(event));
     live = TestBed.inject(Live);
     live.start();
-    await turn();
+    await nextTask();
   });
 
   afterEach(async () => {
     // Stopped first, so the end of the stream is not taken for a drop to reconnect after.
     live.stop();
     stream.close();
-    await turn();
+    await nextTask();
   });
 
   it('opens the stream with the token in a header, not in the address', () => {

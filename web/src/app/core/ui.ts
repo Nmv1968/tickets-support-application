@@ -9,6 +9,9 @@ export const STATUS_LABEL: Record<TicketStatus, string> = {
   RESOLVED: 'Resuelto',
 };
 
+/** The statuses as a select offers them, in their order. */
+export const STATUS_OPTIONS: readonly { id: TicketStatus; label: string }[] = STATUSES.map((id) => ({ id, label: STATUS_LABEL[id] }));
+
 export const PRIORITIES: Priority[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 export const PRIORITY_LABEL: Record<Priority, string> = {
@@ -17,6 +20,9 @@ export const PRIORITY_LABEL: Record<Priority, string> = {
   HIGH: 'Alta',
   CRITICAL: 'Crítica',
 };
+
+/** The priorities as a select offers them, from the lowest. */
+export const PRIORITY_OPTIONS: readonly { id: Priority; label: string }[] = PRIORITIES.map((id) => ({ id, label: PRIORITY_LABEL[id] }));
 
 /** Text colour class per priority. */
 export const PRIORITY_CLASS: Record<Priority, string> = {
@@ -39,10 +45,12 @@ export function nameKey(name: string): string {
     .trim();
 }
 
+/** A number of a date with two digits: 7 → "07". */
+const pad = (n: number): string => String(n).padStart(2, '0');
+
 /** Local calendar day as `YYYY-MM-DD`. */
 export function todayIso(): string {
   const now = new Date();
-  const pad = (n: number): string => String(n).padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
@@ -62,7 +70,6 @@ export function formatCaseDate(ticket: { date: string; time?: string | null }): 
 export function formatMomentDay(value: string | null | undefined): string {
   if (!value) return '';
   const date = new Date(value);
-  const pad = (n: number): string => String(n).padStart(2, '0');
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 

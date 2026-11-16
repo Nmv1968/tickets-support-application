@@ -4,159 +4,24 @@ import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, e
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
-import type { Priority, TicketDetail, TicketInput, TicketStatus, TicketSupportType } from '../../core/api';
-import { Catalogs, companyCreator } from '../../core/catalogs';
+import type { TicketDetail, TicketInput, TicketSupportType } from '../../core/api';
+import { AssigneeSelect, CompanySelect, ModuleSelect, PrioritySelect, StatusSelect, SupportTypeSelect } from '../../core/case-selects';
+import { Catalogs, offered } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
-import { SELECT } from '../../core/select';
+import { Icon } from '../../core/icon';
+import { latest } from '../../core/loading';
+import { StatusBadge } from '../../core/status-badge';
 import { TicketEvents } from '../../core/ticket-events';
 import { Toast } from '../../core/toast';
-import { TypeChip } from '../../core/type-chip';
-import { PRIORITIES, PRIORITY_LABEL, PROMISE_CLASS, STATUSES, STATUS_LABEL, copyText, errorMessage, formatDateTime, formatMinutes, promiseText, todayIso } from '../../core/ui';
+import { PROMISE_CLASS, errorMessage, formatDateTime, promiseText, todayIso } from '../../core/ui';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { TicketAttachments } from './ticket-attachments';
-
-/** No case is older than this. A date before it is a year that is still being typed. */
-const OLDEST_DATE = '1900-01-01';
-
-/**
- * The fields of a case the form edits, each as its control holds it. The person works on this
- * copy: the case gets what they changed only with "Actualizar".
- */
-interface Draft {
-  /** Empty, or before 1900, while a date is being typed. */
-  date: string;
-  /** Empty: the case has only its date. */
-  time: string;
-  companyId: number;
-  description: string;
-  status: TicketStatus;
-  /** Null: nobody. */
-  assigneeId: number | null;
-  priority: Priority | null;
-  moduleId: number | null;
-  supportTypeIds: number[];
-  /** Minutes as typed: not rounded yet, and null while the field is empty. */
-  estimatedMinutes: number | null;
-  spentMinutes: number | null;
-  /** The "Promesa de entrega" switch. On with no date yet, it only shows the date field. */
-  promiseOn: boolean;
-  promisedDate: string;
-  customerReply: string;
-}
-
-/** What a draft stores in the case: the fields "Actualizar" can send, each as it is sent. */
-type Values = Required<
-  Pick<
-    TicketInput,
-    | 'date'
-    | 'time'
-    | 'companyId'
-    | 'description'
-    | 'status'
-    | 'assigneeId'
-    | 'priority'
-    | 'moduleId'
-    | 'supportTypeIds'
-    | 'estimatedMinutes'
-    | 'spentMinutes'
-    | 'promisedDate'
-    | 'customerReply'
-  >
->;
-type Field = keyof Values;
-
-/** The two fields of minutes: the estimate and the time spent. */
-type MinutesField = 'estimatedMinutes' | 'spentMinutes';
-
-/** What keeps a draft from being saved, by the field that says it. */
-type Problems = Partial<Record<'date' | 'time' | 'description' | 'promisedDate' | MinutesField, string>>;
-
-/**
- * A text as a textarea gives it back once written: with every line end as "\n". Kept as stored,
- * a text with Windows line ends (from an import or an assistant) would never equal what its
- * field holds, and would look changed by the person.
- */
-function asHeld(text: string | null): string {
-  return (text ?? '').replace(/\r\n?/g, '\n');
-}
-
-/** The form as it shows a stored case. */
-function draftOf(ticket: TicketDetail): Draft {
-  return {
-    date: ticket.date,
-    time: ticket.time ?? '',
-    companyId: ticket.companyId,
-    description: asHeld(ticket.description),
-    status: ticket.status,
-    assigneeId: ticket.assigneeId,
-    priority: ticket.priority,
-    moduleId: ticket.moduleId,
-    supportTypeIds: ticket.supportTypes.map((type) => type.id),
-    estimatedMinutes: ticket.estimatedMinutes,
-    spentMinutes: ticket.spentMinutes,
-    promiseOn: ticket.promisedDate !== null,
-    promisedDate: ticket.promisedDate ?? '',
-    customerReply: asHeld(ticket.customerReply),
-  };
-}
-
-/** Minutes typed in a number field as a case stores them: whole, and not below zero. Null for an empty field. */
-function wholeMinutes(typed: number | null): number | null {
-  return typed === null || !Number.isFinite(typed) ? null : Math.max(0, Math.round(typed));
-}
-
-/**
- * What a draft would leave in the case. Two drafts are compared through this, so that only what
- * would be stored differently counts as a change: not the spaces around a text, nor the same
- * minutes written another way ("30.4").
- */
-function valuesOf(draft: Draft): Values {
-  return {
-    date: draft.date,
-    time: draft.time || null,
-    companyId: draft.companyId,
-    description: draft.description.trim(),
-    status: draft.status,
-    assigneeId: draft.assigneeId,
-    priority: draft.priority,
-    moduleId: draft.moduleId,
-    supportTypeIds: draft.supportTypeIds,
-    estimatedMinutes: wholeMinutes(draft.estimatedMinutes),
-    // "Real" always has a number: emptied, it goes back to zero.
-    spentMinutes: wholeMinutes(draft.spentMinutes) ?? 0,
-    // The switch on with no date chosen is no promise yet.
-    promisedDate: draft.promiseOn && draft.promisedDate ? draft.promisedDate : null,
-    // The reply can be left empty: it is then stored as none.
-    customerReply: draft.customerReply.trim() || null,
-  };
-}
-
-/** The support types of a case are a set: the order they were chosen in says nothing. */
-function equal(a: Values[Field], b: Values[Field]): boolean {
-  return Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((id) => b.includes(id)) : a === b;
-}
-
-/** The fields of the case two drafts would store differently. */
-function changed(draft: Draft, other: Draft): Field[] {
-  const mine = valuesOf(draft);
-  const theirs = valuesOf(other);
-  return (Object.keys(mine) as Field[]).filter((field) => !equal(mine[field], theirs[field]));
-}
-
-/** `draft` with one field of the case as `source` has it. The promise is its switch and its date. */
-function withField(draft: Draft, source: Draft, field: Field): Draft {
-  return field === 'promisedDate' ? { ...draft, promiseOn: source.promiseOn, promisedDate: source.promisedDate } : { ...draft, [field]: source[field] };
-}
-
-/**
- * What a select of the form offers out of a catalog: its active entries and the ones the case
- * has, whatever their state. An entry the catalog does not bring (it is still on its way) is
- * offered as the case itself names it.
- */
-function offered<T extends { id: number }>(catalog: readonly (T & { active: boolean })[], own: readonly T[]): T[] {
-  const options: T[] = catalog.filter((entry) => entry.active || own.some((mine) => mine.id === entry.id));
-  return [...options, ...own.filter((mine) => !options.some((entry) => entry.id === mine.id))];
-}
+import { NO_NOT_NUMBER, afterSave, changed, changesOf, draftOf, isDirty, problemsOf, tidied, withVersion } from './ticket-form';
+import type { Draft, NotNumber, Problems, Unreadable } from './ticket-form';
+import { TicketHistory } from './ticket-history';
+import { TicketNotes } from './ticket-notes';
+import { TicketReply } from './ticket-reply';
+import { TicketTimes } from './ticket-times';
 
 /**
  * Side panel with every field of one case. The form edits a draft: nothing is sent while the
@@ -167,7 +32,7 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
  */
 @Component({
   selector: 'app-ticket-panel',
-  imports: [FormsModule, A11yModule, ...SELECT, TypeChip, TicketAttachments],
+  imports: [FormsModule, A11yModule, CompanySelect, StatusSelect, AssigneeSelect, PrioritySelect, ModuleSelect, SupportTypeSelect, StatusBadge, TicketTimes, TicketNotes, TicketReply, TicketAttachments, TicketHistory, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'onEscape()', '(window:beforeunload)': 'onBeforeUnload($event)' },
   template: `
@@ -187,27 +52,27 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
         <div class="flex min-h-9 min-w-0 flex-1 flex-wrap items-center gap-2">
           @if (stored(); as t) {
             <span class="font-mono text-sm font-semibold text-primary">{{ t.code }}</span>
-            <span class="badge" [class]="'st-' + t.status">{{ statusLabel[t.status] }}</span>
+            <span appStatusBadge [status]="t.status"></span>
             @if (t.overdue) {
-              <span class="badge bg-danger/10 text-danger"><i class="mdi mdi-clock-alert-outline" aria-hidden="true"></i> Vencido</span>
+              <span class="badge bg-danger/10 text-danger"><app-icon name="clock-alert-outline" /> Vencido</span>
             }
             @if (t.stale) {
               <span class="badge st-PENDING" [title]="'Último movimiento: ' + formatDateTime(t.lastActivityAt) + '. Agrega una observación o actualiza el caso para quitar el aviso.'">
-                <i class="mdi mdi-bell-ring-outline" aria-hidden="true"></i> Olvidado
+                <app-icon name="bell-ring-outline" /> Olvidado
               </span>
             }
             @if (t.aiGenerated) {
-              <span class="badge bg-elevated text-muted" title="El borrador de este caso lo redactó la IA"><i class="mdi mdi-creation-outline" aria-hidden="true"></i> IA</span>
+              <span class="badge bg-elevated text-muted" title="El borrador de este caso lo redactó la IA"><app-icon name="creation-outline" /> IA</span>
             }
             @if (t.archivedAt) {
               <span class="badge bg-elevated text-muted" [title]="'Archivado el ' + formatDateTime(t.archivedAt) + '. No aparece en las listas salvo que se filtre por archivados.'">
-                <i class="mdi mdi-archive-outline" aria-hidden="true"></i> Archivado
+                <app-icon name="archive-outline" /> Archivado
               </span>
             }
           }
         </div>
         <button type="button" class="btn btn-ghost px-2" (click)="close()" aria-label="Cerrar" cdkFocusInitial>
-          <i class="mdi mdi-close text-lg" aria-hidden="true"></i>
+          <app-icon name="close" class="text-lg" />
         </button>
       </header>
 
@@ -228,7 +93,7 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
                   [attr.aria-describedby]="problems().date ? 'tp-date-error' : null"
                 />
                 @if (problems().date; as problem) {
-                  <p class="field-error" id="tp-date-error"><i class="mdi mdi-alert-circle-outline text-danger" aria-hidden="true"></i> {{ problem }}</p>
+                  <p class="field-error" id="tp-date-error"><app-icon name="alert-circle-outline" class="text-danger" /> {{ problem }}</p>
                 }
               </div>
               <div>
@@ -248,12 +113,12 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
                   />
                   @if (d.time || timeHalfTyped()) {
                     <button type="button" class="btn btn-ghost px-2" aria-label="Quitar la hora del caso" title="Quitar la hora" (click)="clearTime()">
-                      <i class="mdi mdi-close" aria-hidden="true"></i>
+                      <app-icon name="close" />
                     </button>
                   }
                 </div>
                 @if (problems().time; as problem) {
-                  <p class="field-error" id="tp-time-error"><i class="mdi mdi-alert-circle-outline text-danger" aria-hidden="true"></i> {{ problem }}</p>
+                  <p class="field-error" id="tp-time-error"><app-icon name="alert-circle-outline" class="text-danger" /> {{ problem }}</p>
                 }
               </div>
               <div class="col-span-2">
@@ -264,21 +129,18 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
               </div>
               <div class="col-span-2">
                 <label class="label" for="tp-company">Empresa</label>
-                <!-- A case always has a company: the select cannot be emptied. -->
-                <ng-select
-                  labelForId="tp-company"
-                  bindValue="id"
-                  bindLabel="name"
-                  appendTo="body"
-                  [items]="companyOptions()"
+                <!--
+                  A case always has a company: the select cannot be emptied. "Crear empresa «X»" adds it
+                  to the catalog at once and chooses it in the draft: the case gets it with "Actualizar".
+                -->
+                <app-company-select
+                  inputId="tp-company"
+                  creatable
                   [clearable]="false"
-                  [addTag]="createCompany"
-                  [inputAttrs]="{ maxlength: '200' }"
-                  [ngModel]="d.companyId"
-                  (ngModelChange)="set('companyId', $event)"
-                >
-                  <ng-template ng-tag-tmp let-search="searchTerm">Crear empresa «{{ search }}»</ng-template>
-                </ng-select>
+                  [items]="companyOptions()"
+                  [value]="d.companyId"
+                  (valueChange)="set('companyId', $event)"
+                />
               </div>
               <div class="col-span-2">
                 <label class="label" for="tp-description">Descripción</label>
@@ -292,85 +154,28 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
                   [attr.aria-describedby]="problems().description ? 'tp-description-error' : null"
                 ></textarea>
                 @if (problems().description; as problem) {
-                  <p class="field-error" id="tp-description-error"><i class="mdi mdi-alert-circle-outline text-danger" aria-hidden="true"></i> {{ problem }}</p>
+                  <p class="field-error" id="tp-description-error"><app-icon name="alert-circle-outline" class="text-danger" /> {{ problem }}</p>
                 }
               </div>
               <div>
                 <label class="label" for="tp-status">Estado</label>
-                <ng-select
-                  labelForId="tp-status"
-                  bindValue="id"
-                  bindLabel="label"
-                  appendTo="body"
-                  [items]="statusOptions"
-                  [clearable]="false"
-                  [searchable]="false"
-                  [ngModel]="d.status"
-                  (ngModelChange)="set('status', $event)"
-                />
+                <app-status-select inputId="tp-status" [value]="d.status" (valueChange)="set('status', $event)" />
               </div>
               <div>
                 <label class="label" for="tp-assignee">Responsable</label>
-                <ng-select
-                  labelForId="tp-assignee"
-                  bindValue="id"
-                  bindLabel="name"
-                  placeholder="Sin asignar"
-                  appendTo="body"
-                  [items]="assigneeOptions()"
-                  [ngModel]="d.assigneeId"
-                  (ngModelChange)="set('assigneeId', $event)"
-                />
+                <app-assignee-select inputId="tp-assignee" [items]="assigneeOptions()" [value]="d.assigneeId" (valueChange)="set('assigneeId', $event)" />
               </div>
               <div>
                 <label class="label" for="tp-priority">Prioridad</label>
-                <ng-select
-                  labelForId="tp-priority"
-                  bindValue="id"
-                  bindLabel="label"
-                  placeholder="Sin prioridad"
-                  appendTo="body"
-                  [items]="priorityOptions"
-                  [searchable]="false"
-                  [ngModel]="d.priority"
-                  (ngModelChange)="set('priority', $event)"
-                />
+                <app-priority-select inputId="tp-priority" [value]="d.priority" (valueChange)="set('priority', $event)" />
               </div>
               <div>
                 <label class="label" for="tp-module">Módulo</label>
-                <ng-select
-                  labelForId="tp-module"
-                  bindValue="id"
-                  bindLabel="fullName"
-                  placeholder="Sin módulo"
-                  appendTo="body"
-                  [items]="moduleOptions()"
-                  [ngModel]="d.moduleId"
-                  (ngModelChange)="set('moduleId', $event)"
-                />
+                <app-module-select inputId="tp-module" [items]="moduleOptions()" [value]="d.moduleId" (valueChange)="set('moduleId', $event)" />
               </div>
               <div class="col-span-2">
                 <label class="label" for="tp-types">Tipos de soporte</label>
-                <!-- The list stays open after each choice: a case often takes more than one. -->
-                <ng-select
-                  labelForId="tp-types"
-                  bindValue="id"
-                  bindLabel="name"
-                  placeholder="Sin tipo de soporte"
-                  appendTo="body"
-                  [items]="typeOptions()"
-                  [multiple]="true"
-                  [closeOnSelect]="false"
-                  [ngModel]="d.supportTypeIds"
-                  (ngModelChange)="set('supportTypeIds', $event)"
-                >
-                  <ng-template ng-label-tmp let-item="item" let-clear="clear">
-                    <app-type-chip [type]="item" removable (removed)="clear(item)" />
-                  </ng-template>
-                  <ng-template ng-option-tmp let-item="item">
-                    <app-type-chip [type]="item" />
-                  </ng-template>
-                </ng-select>
+                <app-support-type-select inputId="tp-types" multiple [items]="typeOptions()" [value]="d.supportTypeIds" (valueChange)="set('supportTypeIds', $event)" />
               </div>
               <div class="col-span-2 rounded-control border border-line px-3 py-2.5">
                 <div class="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2">
@@ -402,196 +207,50 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
               </div>
             </section>
 
-            <section class="rounded-card border border-line p-3">
-              <h2 class="section-title mb-2">Tiempos</h2>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="label" for="tp-estimated">Estimado (minutos)</label>
-                  <input
-                    #estimatedBox
-                    id="tp-estimated"
-                    class="input aria-[invalid=true]:border-danger"
-                    type="number"
-                    min="0"
-                    max="1000000"
-                    step="5"
-                    [ngModel]="d.estimatedMinutes"
-                    (ngModelChange)="set('estimatedMinutes', $event)"
-                    (input)="watchMinutes()"
-                    (keyup)="watchMinutes()"
-                    (change)="tidyMinutes()"
-                    [attr.aria-invalid]="problems().estimatedMinutes ? 'true' : null"
-                    [attr.aria-describedby]="problems().estimatedMinutes ? 'tp-estimated-error' : null"
-                  />
-                  @if (problems().estimatedMinutes; as problem) {
-                    <p class="field-error" id="tp-estimated-error"><i class="mdi mdi-alert-circle-outline text-danger" aria-hidden="true"></i> {{ problem }}</p>
-                  }
-                </div>
-                <div>
-                  <label class="label" for="tp-spent">Real (minutos)</label>
-                  <input
-                    #spentBox
-                    id="tp-spent"
-                    class="input aria-[invalid=true]:border-danger"
-                    type="number"
-                    min="0"
-                    max="1000000"
-                    step="5"
-                    [ngModel]="d.spentMinutes"
-                    (ngModelChange)="set('spentMinutes', $event)"
-                    (input)="watchMinutes()"
-                    (keyup)="watchMinutes()"
-                    (change)="tidyMinutes()"
-                    [attr.aria-invalid]="problems().spentMinutes ? 'true' : null"
-                    [attr.aria-describedby]="problems().spentMinutes ? 'tp-spent-error' : null"
-                  />
-                  @if (problems().spentMinutes; as problem) {
-                    <p class="field-error" id="tp-spent-error"><i class="mdi mdi-alert-circle-outline text-danger" aria-hidden="true"></i> {{ problem }}</p>
-                  }
-                </div>
-              </div>
-              <!-- The timer runs on the stored case and acts at once, whatever the draft holds (see timer). -->
-              <div class="mt-3 flex flex-wrap items-center gap-2">
-                @if (t.timerStartedAt) {
-                  <button type="button" class="btn btn-danger" [disabled]="spentUnsaved()" (click)="timer('stop')">
-                    <i class="mdi mdi-stop" aria-hidden="true"></i> Detener cronómetro
-                  </button>
-                  @if (spentUnsaved()) {
-                    <span class="text-xs text-muted" id="tp-timer-hint">Actualiza o descarta el cambio en «Real (minutos)» para detenerlo.</span>
-                  } @else {
-                    <span class="text-xs text-muted">En marcha desde {{ formatDateTime(t.timerStartedAt) }}</span>
-                  }
-                } @else {
-                  <button type="button" class="btn btn-soft" [disabled]="t.status === 'RESOLVED'" (click)="timer('start')">
-                    <i class="mdi mdi-play" aria-hidden="true"></i> Iniciar cronómetro
-                  </button>
-                  <span class="text-xs text-muted">Acumulado: {{ formatMinutes(t.spentMinutes) }}</span>
-                }
-              </div>
-              <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                <dt class="text-muted">Fecha límite (SLA)</dt>
-                <dd [class.text-danger]="t.overdue">{{ t.dueAt ? formatDateTime(t.dueAt) : 'Sin prioridad, sin fecha límite' }}</dd>
-                @if (t.resolvedAt) {
-                  <dt class="text-muted">Resuelto</dt>
-                  <dd>{{ formatDateTime(t.resolvedAt) }}</dd>
-                }
-              </dl>
-            </section>
+            <app-ticket-times
+              [ticket]="t"
+              [estimated]="d.estimatedMinutes"
+              (estimatedChange)="set('estimatedMinutes', $event)"
+              [spent]="d.spentMinutes"
+              (spentChange)="set('spentMinutes', $event)"
+              [(notNumber)]="notNumber"
+              [problems]="problems()"
+              [spentUnsaved]="spentUnsaved()"
+              (tidy)="tidyMinutes()"
+              (timer)="timer($event)"
+            />
 
-            <section>
-              <h2 class="section-title mb-2">Observaciones</h2>
-              <div class="flex gap-2">
-                <textarea
-                  class="input min-h-10 resize-y"
-                  rows="2"
-                  placeholder="Nueva observación (Ctrl+Enter para guardar)"
-                  aria-label="Nueva observación"
-                  maxlength="5000"
-                  [(ngModel)]="noteText"
-                  (keydown.control.enter)="addNote()"
-                ></textarea>
-                <button type="button" class="btn btn-primary self-start" [disabled]="!noteText().trim()" (click)="addNote()">Agregar</button>
-              </div>
-              <ul class="mt-3 space-y-2">
-                @for (note of t.notes; track note.id) {
-                  <li class="group rounded-control bg-elevated px-3 py-2">
-                    <div class="flex items-center gap-2 text-2xs text-muted">
-                      <span>{{ formatDateTime(note.createdAt) }}</span>
-                      @if (note.authorName) {
-                        <span>· {{ note.authorName }}</span>
-                      }
-                      <!--
-                        Hidden until the note is hovered only where hovering exists: a touch screen always shows it.
-                        The padding, taken back by the margins, gives a finger more than the icon to hit.
-                      -->
-                      <button
-                        type="button"
-                        class="-my-1.5 -mr-1.5 ml-auto p-1.5 can-hover:opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-danger"
-                        (click)="removeNote(note.id)"
-                        aria-label="Eliminar observación"
-                      >
-                        <i class="mdi mdi-trash-can-outline" aria-hidden="true"></i>
-                      </button>
-                    </div>
-                    <p class="mt-0.5 whitespace-pre-line">{{ note.text }}</p>
-                  </li>
-                } @empty {
-                  <li class="text-xs text-muted">Sin observaciones.</li>
-                }
-              </ul>
-            </section>
+            <app-ticket-notes [notes]="t.notes" [(text)]="noteText" (add)="addNote()" (remove)="removeNote($event)" />
 
-            <section class="rounded-card border border-line p-3">
-              <div class="mb-2 flex flex-wrap items-center gap-2">
-                <h2 class="section-title mr-auto">Respuesta para el cliente</h2>
-                <!-- Not with unsaved changes: the AI writes from the stored case (see generateReply). -->
-                <button
-                  type="button"
-                  class="btn btn-soft px-2 py-1 text-xs"
-                  [disabled]="replying() || !catalogs.aiReady() || unsaved()"
-                  [title]="replyHelp()"
-                  (click)="generateReply(true)"
-                >
-                  <i class="mdi" [class]="replying() ? 'mdi-loading mdi-spin' : 'mdi-creation-outline'" aria-hidden="true"></i>
-                  {{ replying() ? 'Redactando…' : t.customerReply ? 'Volver a generar' : 'Generar con IA' }}
-                </button>
-                <button type="button" class="btn btn-primary px-2 py-1 text-xs" [disabled]="!d.customerReply.trim()" (click)="copyReply(d.customerReply)">
-                  <i class="mdi" [class]="copied() ? 'mdi-check' : 'mdi-content-copy'" aria-hidden="true"></i>
-                  {{ copied() ? 'Copiado' : 'Copiar' }}
-                </button>
-              </div>
-              <textarea
-                class="input min-h-28 resize-y"
-                aria-label="Respuesta para el cliente"
-                placeholder="Mensaje para quien pidió el soporte. Se redacta con IA al resolver el caso, o escríbelo aquí."
-                maxlength="5000"
-                [ngModel]="d.customerReply"
-                (ngModelChange)="set('customerReply', $event)"
-              ></textarea>
-              <p class="mt-1 text-2xs text-muted">
-                Revisa el mensaje antes de enviarlo. Puedes editarlo; se guarda con el caso al pulsar Actualizar.
-                @if (unsaved() && catalogs.aiReady()) {
-                  Para redactarlo con IA, actualiza o descarta antes los cambios: la IA lee el caso guardado.
-                }
-              </p>
-            </section>
+            <app-ticket-reply
+              [reply]="d.customerReply"
+              (replyChange)="set('customerReply', $event)"
+              [storedReply]="t.customerReply"
+              [replying]="replying()"
+              [aiReady]="catalogs.aiReady()"
+              [unsaved]="unsaved()"
+              (generate)="generateReply(true)"
+            />
 
             <app-ticket-attachments [ticketId]="t.id" [attachments]="t.attachments" />
 
-            <details class="rounded-card border border-line px-3 py-2">
-              <summary class="section-title cursor-pointer">Historial de cambios ({{ t.history.length }})</summary>
-              <ul class="mt-2 space-y-1 text-xs">
-                @for (h of t.history; track h.id) {
-                  <li>
-                    <span class="text-muted">{{ formatDateTime(h.createdAt) }} · {{ h.userName ?? 'Sistema' }}:</span>
-                    {{ h.field }}
-                    @if (h.oldValue || h.newValue) {
-                      <span>de «{{ h.oldValue ?? '—' }}» a «{{ h.newValue ?? '—' }}»</span>
-                    } @else {
-                      <span>modificada</span>
-                    }
-                  </li>
-                } @empty {
-                  <li class="text-muted">Sin cambios registrados.</li>
-                }
-              </ul>
-            </details>
+            <app-ticket-history [history]="t.history" />
 
             <div class="flex flex-wrap gap-2">
               <!-- No question asked: a case that was archived is brought back with the same button. -->
               <button type="button" class="btn btn-soft" [disabled]="archiving()" (click)="archive(!t.archivedAt, $event)">
-                <i class="mdi" [class]="t.archivedAt ? 'mdi-archive-arrow-up-outline' : 'mdi-archive-arrow-down-outline'" aria-hidden="true"></i>
+                <app-icon [name]="t.archivedAt ? 'archive-arrow-up-outline' : 'archive-arrow-down-outline'" />
                 {{ t.archivedAt ? 'Desarchivar' : 'Archivar' }}
               </button>
               <button type="button" class="btn btn-danger" (click)="remove()">
-                <i class="mdi mdi-trash-can-outline" aria-hidden="true"></i> Eliminar caso
+                <app-icon name="trash-can-outline" /> Eliminar caso
               </button>
             </div>
           </div>
 
           @if (behind()) {
             <p class="flex flex-wrap items-center gap-x-3 border-t border-line bg-warning/10 px-4 py-1.5 text-xs" role="status">
-              <span><i class="mdi mdi-alert-outline text-warning" aria-hidden="true"></i> Este caso cambió en otra pantalla.</span>
+              <span><app-icon name="alert-outline" class="text-warning" /> Este caso cambió en otra pantalla.</span>
               <button type="button" class="py-1 font-medium underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="saving()" (click)="reset()">
                 Ver la versión actual
               </button>
@@ -604,7 +263,7 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
           -->
           <footer class="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
             <button type="button" class="btn btn-primary" [disabled]="!canSave()" (click)="update()">
-              <i class="mdi" [class]="saving() ? 'mdi-loading mdi-spin' : 'mdi-content-save-outline'" aria-hidden="true"></i>
+              <app-icon [name]="saving() ? 'loading' : 'content-save-outline'" />
               {{ saving() ? 'Guardando…' : 'Actualizar' }}
             </button>
             @if (unsaved()) {
@@ -612,7 +271,7 @@ function offered<T extends { id: number }>(catalog: readonly (T & { active: bool
             }
             <p class="ml-auto text-xs text-muted" role="status">
               @if (unsaved()) {
-                <i class="mdi mdi-circle-medium text-warning" aria-hidden="true"></i> Cambios sin guardar
+                <app-icon name="circle-medium" class="text-warning" /> Cambios sin guardar
               }
             </p>
           </footer>
@@ -652,17 +311,17 @@ export class TicketPanel {
    * `behind` it.
    */
   private readonly base = signal<Draft | null>(null);
-  /** Number of the last read started, and how many saves of the case were shown (see read). */
-  private reads = 0;
+  /** The reads of the case, of which only the latest counts, and how many saves of the case were shown (see read). */
+  private readonly reads = latest();
   private saves = 0;
   /** No read of the case the panel was given has been shown yet. */
   private unread = true;
   /**
-   * Counts the cases the panel was given. What is asked for one of them (a save, a question to
-   * the person) keeps the number: answered under another one, the form on screen is not the one
-   * it left. Not the id of the case: the panel can be back on the same case, with its form made again.
+   * A turn for each case the panel was given. What is asked for one of them (a save, a question to
+   * the person) keeps its turn: answered under another one, the form on screen is not the one it
+   * left. Not the id of the case: the panel can be back on the same case, with its form made again.
    */
-  private visit = 0;
+  private readonly visits = latest();
   /** The question about leaving the case that is on screen, so that it is asked once (see mayLeave). */
   private leaving: Promise<boolean> | null = null;
 
@@ -672,53 +331,28 @@ export class TicketPanel {
    */
   protected readonly timeHalfTyped = signal(false);
   private readonly timeBox = viewChild<ElementRef<HTMLInputElement>>('caseTime');
-  /**
-   * The fields of minutes that hold a text that is not a number ("30e", "45 min"). The browser
-   * reports such a field as empty too, which in the draft is a case without an estimate, or
-   * with no time spent: saved like that, the case would lose the minutes it has.
-   */
-  private readonly notNumber = signal<Record<MinutesField, boolean>>({ estimatedMinutes: false, spentMinutes: false });
-  private readonly estimatedBox = viewChild<ElementRef<HTMLInputElement>>('estimatedBox');
-  private readonly spentBox = viewChild<ElementRef<HTMLInputElement>>('spentBox');
+  /** The fields of minutes that hold a text that is not a number, as the "Tiempos" block tells (see NotNumber). */
+  protected readonly notNumber = signal<NotNumber>(NO_NOT_NUMBER);
+  private readonly times = viewChild(TicketTimes);
+  /** What the fields hold besides the draft. */
+  private readonly unreadable = computed<Unreadable>(() => ({ timeHalfTyped: this.timeHalfTyped(), notNumber: this.notNumber() }));
 
   /** What "Actualizar" would send of the case: the fields the draft changes, and nothing else. */
   private readonly changes = computed<TicketInput>(() => {
     const draft = this.draft();
     const base = this.base();
-    if (!draft || !base) return {};
-    const values = valuesOf(draft);
-    return Object.fromEntries(changed(draft, base).map((field) => [field, values[field]]));
+    return draft && base ? changesOf(draft, base) : {};
   });
-  /**
-   * The fields of the form hold something the case does not have. Besides what would be sent,
-   * the promise switch turned on with no date yet, a time half typed and minutes that are not a
-   * number: nothing to save, but the person's own, which the form must not lose by following
-   * the case.
-   */
+  /** The fields of the form hold something the case does not have (see isDirty). */
   private readonly dirty = computed(() => {
     const draft = this.draft();
     const base = this.base();
-    const notNumber = this.notNumber();
-    return (
-      !!draft &&
-      !!base &&
-      (Object.keys(this.changes()).length > 0 || draft.promiseOn !== base.promiseOn || this.timeHalfTyped() || notNumber.estimatedMinutes || notNumber.spentMinutes)
-    );
+    return !!draft && !!base && isDirty(draft, base, this.unreadable());
   });
   /** What keeps the draft from being saved as it stands. Each is said next to its field. */
   protected readonly problems = computed<Problems>(() => {
     const draft = this.draft();
-    const problems: Problems = {};
-    if (!draft) return problems;
-    // Empty while a day is being typed, before 1900 while it is the year.
-    if (draft.date < OLDEST_DATE) problems.date = 'Escribe la fecha completa.';
-    if (this.timeHalfTyped()) problems.time = 'Completa la hora o quítala.';
-    if (!draft.description.trim()) problems.description = 'La descripción no puede quedar vacía.';
-    if (draft.promiseOn && draft.promisedDate < OLDEST_DATE) problems.promisedDate = 'Elige la fecha prometida';
-    const notNumber = this.notNumber();
-    if (notNumber.estimatedMinutes) problems.estimatedMinutes = 'Escribe solo el número de minutos.';
-    if (notNumber.spentMinutes) problems.spentMinutes = 'Escribe solo el número de minutos.';
-    return problems;
+    return draft ? problemsOf(draft, this.unreadable()) : {};
   });
 
   /** "Nueva observación": what is typed there is added with its button, or with "Actualizar". */
@@ -751,17 +385,9 @@ export class TicketPanel {
    */
   private readonly replyingFor = signal<number | null>(null);
   protected readonly replying = computed(() => this.replyingFor() !== null && this.replyingFor() === this.caseId());
-  protected readonly replyHelp = computed(() => {
-    if (!this.catalogs.aiReady()) return 'Activa un proveedor en Configuración > IA';
-    return this.unsaved() ? 'Actualiza o descarta los cambios primero: la IA redacta con el caso guardado' : 'Redacta el mensaje con el caso y sus observaciones';
-  });
-  protected readonly copied = signal(false);
 
   private readonly attachments = viewChild(TicketAttachments);
 
-  protected readonly statusLabel = STATUS_LABEL;
-  protected readonly statusOptions = STATUSES.map((id) => ({ id, label: STATUS_LABEL[id] }));
-  protected readonly priorityOptions = PRIORITIES.map((id) => ({ id, label: PRIORITY_LABEL[id] }));
   // What each select offers: see offered.
   protected readonly companyOptions = computed(() => {
     const ticket = this.stored();
@@ -781,7 +407,6 @@ export class TicketPanel {
   protected readonly promiseClass = PROMISE_CLASS;
   protected readonly promiseText = promiseText;
   protected readonly formatDateTime = formatDateTime;
-  protected readonly formatMinutes = formatMinutes;
 
   constructor() {
     effect(() => {
@@ -843,7 +468,7 @@ export class TicketPanel {
     // it would be added to another one.
     this.noteText.set('');
     this.timeHalfTyped.set(false);
-    this.notNumber.set({ estimatedMinutes: false, spentMinutes: false });
+    this.notNumber.set(NO_NOT_NUMBER);
     this.stored.set(null);
     this.draft.set(null);
     this.base.set(null);
@@ -852,7 +477,7 @@ export class TicketPanel {
 
   /** The form on screen is about to go, with the case or with the panel: nothing answered later is its own. */
   private leave(): void {
-    this.visit++;
+    this.visits.next();
     this.saving.set(false);
     this.archiving.set(false);
   }
@@ -887,24 +512,24 @@ export class TicketPanel {
     // What this version brings to the form. For something done here, what it changed in the
     // stored case: a form that is behind stays behind in everything else. Read from elsewhere
     // with nothing unsaved in the form, all that the form does not have yet.
-    const brought = changed(fields, own ? draftOf(before) : base);
-    const mine = changed(draft, base);
-    this.base.set(brought.reduce((form, field) => withField(form, fields, field), base));
-    this.draft.set(brought.filter((field) => !mine.includes(field)).reduce((form, field) => withField(form, fields, field), draft));
+    const form = withVersion({ draft, base }, fields, own ? draftOf(before) : base);
+    this.base.set(form.base);
+    this.draft.set(form.draft);
   }
 
   /**
    * Reads the case: when the panel is given it, and again after someone else (or an assistant)
-   * changed it. All the reads are numbered together, the first one too: it can be answered
-   * after a newer read, or after a save, and must not put the older case back on screen.
+   * changed it. All the reads take turns together, the first one too: it can be answered after
+   * a newer read, or after a save, and must not put the older case back on screen. A newer read
+   * cancels the one before.
    */
   private async read(id: number): Promise<void> {
-    const read = ++this.reads;
+    const read = this.reads.next();
     const saves = this.saves;
     // The answer counts only while the panel shows the same case and no newer read started.
-    const current = (): boolean => id === this.caseId() && read === this.reads;
+    const current = (): boolean => id === this.caseId() && read.current();
     try {
-      const ticket = await this.api.ticket(id);
+      const ticket = await this.api.ticket(id, read.signal);
       if (!current()) return;
       // A save answered meanwhile may be newer than this read, which would undo it on screen.
       // Dropping the read is not enough: that save may in turn be older than the change that
@@ -964,54 +589,13 @@ export class TicketPanel {
   }
 
   /**
-   * Called with what the person does in the two fields of minutes, to tell whether one holds a
-   * text that is not a number. With every key too, as for the time: a text that starts in an
-   * empty field leaves it empty for the browser, which may then report no change.
-   */
-  protected watchMinutes(): void {
-    const held = this.notNumber();
-    const now = {
-      estimatedMinutes: !!this.estimatedBox()?.nativeElement.validity.badInput,
-      spentMinutes: !!this.spentBox()?.nativeElement.validity.badInput,
-    };
-    if (now.estimatedMinutes !== held.estimatedMinutes || now.spentMinutes !== held.spentMinutes) this.notNumber.set(now);
-  }
-
-  /** A text that is not a number is in its field alone, which reported it as empty: the draft never had it to give up. */
-  private emptyNotNumbers(): void {
-    const held = this.notNumber();
-    if (!held.estimatedMinutes && !held.spentMinutes) return;
-    const estimated = this.estimatedBox()?.nativeElement;
-    const spent = this.spentBox()?.nativeElement;
-    if (held.estimatedMinutes && estimated) estimated.value = '';
-    if (held.spentMinutes && spent) spent.value = '';
-    this.notNumber.set({ estimatedMinutes: false, spentMinutes: false });
-  }
-
-  /**
-   * On leaving a number field: shows the minutes as they would be stored ("30.4" is 30, "-5" is
-   * zero, and "Real" emptied goes back to zero), so that what the field shows is what is saved.
-   * A text that is not a number stays as it was typed, to be corrected: the zero of "Real"
-   * would take its place without a word.
+   * On leaving a field of minutes: it shows them as they would be stored (see tidied), so that what
+   * the field shows is what is saved.
    */
   protected tidyMinutes(): void {
-    this.watchMinutes();
     const notNumber = this.notNumber();
-    this.draft.update(
-      (draft) =>
-        draft && {
-          ...draft,
-          estimatedMinutes: wholeMinutes(draft.estimatedMinutes),
-          spentMinutes: notNumber.spentMinutes ? draft.spentMinutes : (wholeMinutes(draft.spentMinutes) ?? 0),
-        },
-    );
+    this.draft.update((draft) => draft && tidied(draft, notNumber));
   }
-
-  /**
-   * "Crear empresa «X»" in the company select: the company joins the catalog at once, and the
-   * select chooses it in the draft. The case gets it like any other change, with "Actualizar".
-   */
-  protected readonly createCompany = companyCreator();
 
   /**
    * "Actualizar": saves what the form holds. First the draft, as one save with only the fields
@@ -1030,7 +614,7 @@ export class TicketPanel {
     const input = this.changes();
     const fields = Object.keys(input).length > 0;
     const note = this.noteText().trim();
-    const visit = this.visit;
+    const visit = this.visits.now();
     this.saving.set(true);
     try {
       let resolved = false;
@@ -1038,13 +622,13 @@ export class TicketPanel {
         // The stored case comes back through its "saved" event (see the constructor).
         const updated = await this.api.updateTicket(id, input);
         this.toast.ok('Caso actualizado');
-        if (visit === this.visit) this.showSaved(sent);
+        if (visit.current()) this.showSaved(sent);
         resolved = input.status === 'RESOLVED' && !updated.customerReply;
       }
       // The observation as it was when the button was pressed. Not once its box holds something
       // else: the person went on writing it, or added it with its own button meanwhile. Nor
       // once the form is gone, with what they chose to leave unsaved.
-      if (note && visit === this.visit && this.noteText().trim() === note) {
+      if (note && visit.current() && this.noteText().trim() === note) {
         try {
           await this.postNote(id, note);
           // With no field to save, this is all "Actualizar" did.
@@ -1060,7 +644,7 @@ export class TicketPanel {
     } catch (error) {
       this.toast.error(error);
     } finally {
-      if (visit === this.visit) this.saving.set(false);
+      if (visit.current()) this.saving.set(false);
     }
   }
 
@@ -1072,9 +656,9 @@ export class TicketPanel {
     const stored = this.stored();
     const draft = this.draft();
     if (!stored || !draft) return;
-    const fields = draftOf(stored);
-    this.base.set(fields);
-    this.draft.set(changed(draft, sent).reduce((form, field) => withField(form, draft, field), fields));
+    const form = afterSave(draftOf(stored), draft, sent);
+    this.base.set(form.base);
+    this.draft.set(form.draft);
   }
 
   /**
@@ -1088,7 +672,7 @@ export class TicketPanel {
     if (!stored || this.saving()) return;
     const fields = draftOf(stored);
     this.emptyHalfTypedTime();
-    this.emptyNotNumbers();
+    this.times()?.emptyNotNumbers();
     this.draft.set(fields);
     this.base.set(fields);
   }
@@ -1122,8 +706,8 @@ export class TicketPanel {
 
   /** The button that closes, a press outside the panel and Escape. */
   protected async close(): Promise<void> {
-    const visit = this.visit;
-    if ((await this.mayLeave()) && visit === this.visit) this.closed.emit();
+    const visit = this.visits.now();
+    if ((await this.mayLeave()) && visit.current()) this.closed.emit();
   }
 
   /** Escape closes an enlarged attachment first, then the panel. */
@@ -1158,10 +742,10 @@ export class TicketPanel {
     if (id === null || this.replyingFor() === id || !this.catalogs.aiReady()) return;
     if (manual) {
       if (this.unsaved()) return;
-      const visit = this.visit;
+      const visit = this.visits.now();
       const replace = !this.stored()?.customerReply || (await this.confirm.ask({ title: '¿Reemplazar la respuesta actual por una nueva?', confirmLabel: 'Reemplazar' }, this.destroyRef));
       // The question was on screen for a while: the panel may be on another case by now.
-      if (!replace || visit !== this.visit || this.replyingFor() === id) return;
+      if (!replace || !visit.current() || this.replyingFor() === id) return;
     }
     this.replyingFor.set(id);
     try {
@@ -1171,15 +755,6 @@ export class TicketPanel {
     } finally {
       // Unless a reply for another case started meanwhile: that one is still being written.
       if (this.replyingFor() === id) this.replyingFor.set(null);
-    }
-  }
-
-  protected async copyReply(text: string): Promise<void> {
-    if (await copyText(text.trim())) {
-      this.copied.set(true);
-      setTimeout(() => this.copied.set(false), 2000);
-    } else {
-      this.toast.error('No se pudo copiar. Selecciona el texto y usa Ctrl+C.');
     }
   }
 
@@ -1233,8 +808,8 @@ export class TicketPanel {
 
   protected async removeNote(noteId: number): Promise<void> {
     const id = this.caseId();
-    const visit = this.visit;
-    if (id === null || !(await this.confirm.ask({ title: '¿Eliminar esta observación?', confirmLabel: 'Eliminar', danger: true }, this.destroyRef)) || visit !== this.visit) return;
+    const visit = this.visits.now();
+    if (id === null || !(await this.confirm.ask({ title: '¿Eliminar esta observación?', confirmLabel: 'Eliminar', danger: true }, this.destroyRef)) || !visit.current()) return;
     try {
       await this.api.deleteNote(id, noteId);
     } catch (error) {
@@ -1260,7 +835,7 @@ export class TicketPanel {
   protected async archive(archived: boolean, press: MouseEvent): Promise<void> {
     const id = this.caseId();
     if (id === null || this.archiving() || press.detail > 1) return;
-    const visit = this.visit;
+    const visit = this.visits.now();
     this.archiving.set(true);
     try {
       await this.api.updateTicket(id, { archived });
@@ -1268,14 +843,14 @@ export class TicketPanel {
     } catch (error) {
       this.toast.error(error);
     } finally {
-      if (visit === this.visit) this.archiving.set(false);
+      if (visit.current()) this.archiving.set(false);
     }
   }
 
   protected async remove(): Promise<void> {
     const ticket = this.stored();
     if (!ticket) return;
-    const visit = this.visit;
+    const visit = this.visits.now();
     const confirmed = await this.confirm.ask(
       {
         title: `¿Eliminar el caso ${ticket.code}?`,
@@ -1285,7 +860,7 @@ export class TicketPanel {
       },
       this.destroyRef,
     );
-    if (!confirmed || visit !== this.visit) return;
+    if (!confirmed || !visit.current()) return;
     try {
       // The "removed" event closes this panel (see the constructor).
       await this.api.deleteTicket(ticket.id);

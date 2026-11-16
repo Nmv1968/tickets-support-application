@@ -6,12 +6,8 @@ import type { ComponentFixture } from '@angular/core/testing';
 import type { ImportResult, ImportRow } from '../../core/api';
 import { Toast } from '../../core/toast';
 import { chooseOption, ngSelect, openSelect, selectedTexts } from '../../testing/ng-select';
+import { nextTask, toasts } from '../../testing/screen';
 import { ImportDialog } from './import-dialog';
-
-/** Lets the promise chains that follow an answered request run. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve));
-}
 
 // The template is how a person gets the format the import reads without guessing it.
 describe('ImportDialog, the template to fill in', () => {
@@ -46,7 +42,7 @@ describe('ImportDialog, the template to fill in', () => {
     const request = http.expectOne({ method: 'GET', url: '/api/import/template' });
     expect(request.request.responseType).toBe('blob');
     request.flush(new Blob(['xlsx']));
-    await settle();
+    await nextTask();
     fixture.detectChanges();
 
     expect(saved.length).toBe(1);
@@ -66,7 +62,7 @@ describe('ImportDialog, the template to fill in', () => {
         statusText: 'Server Error',
       });
     // The error body arrives as a file and is read back before the message is shown: that takes more than one turn.
-    for (let turn = 0; turn < 50 && !toast.calls.count(); turn++) await settle();
+    for (let turn = 0; turn < 50 && !toast.calls.count(); turn++) await nextTask();
     fixture.detectChanges();
 
     expect(saved).toEqual([]);
@@ -77,7 +73,7 @@ describe('ImportDialog, the template to fill in', () => {
   it('does not touch the file chosen for the import', async () => {
     button().click();
     http.expectOne('/api/import/template').flush(new Blob(['xlsx']));
-    await settle();
+    await nextTask();
     fixture.detectChanges();
 
     // No preview was asked for and the import button still waits for a file.
@@ -172,7 +168,7 @@ describe('ImportDialog, the preview of a sheet', () => {
   /** Lets what was answered, or done on the page, reach the screen. */
   async function show(): Promise<void> {
     fixture.detectChanges();
-    await settle();
+    await nextTask();
     fixture.detectChanges();
   }
 
@@ -236,7 +232,6 @@ describe('ImportDialog, the preview of a sheet', () => {
   /** The headers of the table of the first rows to import, the last table of the preview. */
   const sampleHeaders = (): string[] => Array.from(Array.from(el.querySelectorAll('table')).at(-1)?.querySelectorAll('thead th') ?? [], (header) => header.textContent?.trim() ?? '');
   const sampleCells = (): string[] => Array.from(Array.from(el.querySelectorAll('table')).at(-1)?.querySelectorAll('tbody td') ?? [], (cell) => cell.textContent?.trim() ?? '');
-  const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
 
   it('is asked for as soon as a file is chosen, and stores nothing: neither cases nor what the catalogs lack', async () => {
     expect(confirm().disabled).toBeTrue();
@@ -461,17 +456,16 @@ describe('ImportDialog, the preview of a sheet', () => {
       });
 
       // Checked and unchecked at once: the first answer may take longer than the second.
-      it('shows the preview asked for last, also when the answer to an older one arrives after it', async () => {
+      it('shows the preview asked for last: the older one is cancelled, its answer never arrives', async () => {
         await preview(WITH_UNKNOWN);
         pressCreateBox();
         const creating = request();
         expect(creating.request.params.get('createMissing')).toBe('1');
         pressCreateBox();
         const plain = http.expectOne((sent) => sent.url === '/api/import' && !sent.params.has('createMissing'));
+        expect(creating.cancelled).toBeTrue();
 
         plain.flush(WITH_UNKNOWN);
-        await show();
-        creating.flush(CREATING);
         await show();
 
         expect(createBox()!.checked).toBeFalse();
@@ -653,6 +647,27 @@ describe('ImportDialog, the preview of a sheet', () => {
 
   // A browser says nothing when the file picked is the one the field already has. After the
   // rows the preview rejected are corrected in the sheet, that is the file a person picks.
+  it('of a file replaced by another before it arrives is cancelled: the preview is the one of the other file', async () => {
+    chooseFile('vieja.xlsx');
+    const old = request();
+    chooseFile('nueva.xlsx');
+    const fresh = request();
+    expect(old.cancelled).toBeTrue();
+    expect(((fresh.request.body as FormData).get('file') as File).name).toBe('nueva.xlsx');
+
+    fresh.flush(result({ toCreate: 4 }));
+    await show();
+    expect(tile('Casos a importar')).toBe('4');
+    expect(confirm().textContent?.trim()).toBe('Importar 4 casos');
+  });
+
+  it('is cancelled when the dialog goes away before it arrives', () => {
+    chooseFile();
+    const asked = request();
+    fixture.destroy();
+    expect(asked.cancelled).toBeTrue();
+  });
+
   it('is dropped with its file as the file picker opens, so the same file chosen again, corrected, gets a preview', async () => {
     await preview(WITH_UNKNOWN);
     // The press that opens the picker. Its default is held back: no picker opens in a test.

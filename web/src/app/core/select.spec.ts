@@ -1,14 +1,16 @@
-import { Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import type { ComponentFixture } from '@angular/core/testing';
-import { TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
+import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
 import { chooseOption, clearSelect, closeSelect, ngSelect, openSelect, optionTexts, removeChosen, selectedTexts, typeInSelect } from '../testing/ng-select';
+import { BackdropClick } from './backdrop-click';
 import { SELECT } from './select';
 import { TypeChip } from './type-chip';
 
 /** A form with the kinds of select the app has, next to a plain text field. */
 @Component({
   imports: [FormsModule, ...SELECT, TypeChip],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'escapes = escapes + 1' },
   template: `
     <div class="w-80">
@@ -335,14 +337,27 @@ describe('ng-select in the app', () => {
       press(company());
       expect(host.escapes).toBe(1);
     }));
+
+    // The key is heard by a listener of its own, outside any template, and the app has no zone
+    // to tell Angular of it: the list on screen closes because ng-select keeps it in a signal.
+    it('closes the open list on screen by itself, with nobody checking the screen', fakeAsync(() => {
+      openSelect(company());
+      render();
+
+      company().querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      tick();
+
+      expect(document.querySelector('.ng-dropdown-panel')).toBeNull();
+    }));
   });
 });
 
 /** A select in a dialog that scrolls and that a click on its backdrop closes, as the dialogs and the case panel of the app. */
 @Component({
-  imports: [FormsModule, ...SELECT],
+  imports: [FormsModule, ...SELECT, BackdropClick],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div [class]="backdrop()" (click)="onBackdrop($event)">
+    <div [class]="backdrop()" (appBackdropClick)="closes = closes + 1">
       <div class="card w-80" role="dialog">
         <div id="form" class="h-40 overflow-auto">
           <div class="h-24"></div>
@@ -363,10 +378,6 @@ class DialogHost {
   /** Times a click on the backdrop asked to close the dialog. */
   closes = 0;
   saves = 0;
-
-  onBackdrop(event: MouseEvent): void {
-    if (event.target === event.currentTarget) this.closes++;
-  }
 }
 
 describe('ng-select in a dialog or a panel', () => {
@@ -454,6 +465,18 @@ describe('ng-select in a dialog or a panel', () => {
 
       form().scrollTop = 30;
       scrolled(form());
+      expect(list()).toBeNull();
+    }));
+
+    // Every scroll of the page is heard outside Angular, and the app has no zone: closing the
+    // list is what draws it closed, as in the app, where nobody checks the screen after a scroll.
+    it('closes the list on screen by itself, with nobody checking the screen', fakeAsync(() => {
+      open();
+
+      form().scrollTop = 30;
+      form().dispatchEvent(new Event('scroll'));
+      tick();
+
       expect(list()).toBeNull();
     }));
 

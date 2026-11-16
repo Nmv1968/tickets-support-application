@@ -1,5 +1,5 @@
 import { DOCUMENT } from '@angular/common';
-import { DestroyRef, Directive, ElementRef, NgZone, inject } from '@angular/core';
+import { DestroyRef, Directive, ElementRef, inject } from '@angular/core';
 import {
   NgLabelTemplateDirective,
   NgOptionComponent,
@@ -35,6 +35,7 @@ const BACKDROP = '.modal-backdrop, .panel-backdrop';
  *   select was when it opened (from the body, in most of them) and does not follow it.
  */
 @Directive({
+  // eslint-disable-next-line @angular-eslint/directive-selector -- ng-select's own tag, on purpose (see above).
   selector: 'ng-select',
   providers: [{ provide: NgSelectConfig, useValue: SELECT_TEXTS }],
 })
@@ -43,7 +44,6 @@ export class SelectDefaults {
     const select = inject(NgSelectComponent);
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     const document = inject(DOCUMENT);
-    const zone = inject(NgZone);
 
     // On the way down to the search box: on the way up ng-select has already closed the list,
     // and the key cannot be told apart from one pressed with the list closed.
@@ -87,15 +87,14 @@ export class SelectDefaults {
       const before = scrolledAtOpen.get(target);
       if (!before) return;
       const [top, left] = scrollOf(target);
-      if (top !== before[0] || left !== before[1]) zone.run(() => select.close());
+      if (top !== before[0] || left !== before[1]) select.close();
     };
 
+    // Plain listeners: hearing every click and every scroll of the page checks no screen. Closing
+    // the list does, by itself: ng-select keeps whether it is open in a signal.
     host.addEventListener('keydown', onKeydown, true);
-    // Heard for every click and every scroll of the page: not a reason to check the whole screen.
-    zone.runOutsideAngular(() => {
-      document.addEventListener('click', onClick, true);
-      document.addEventListener('scroll', onScroll, true);
-    });
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('scroll', onScroll, true);
     inject(DestroyRef).onDestroy(() => {
       host.removeEventListener('keydown', onKeydown, true);
       document.removeEventListener('click', onClick, true);

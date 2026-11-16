@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Branding } from './branding';
+import { Icon } from './icon';
 
 const BOX = { sm: 'size-8', md: 'size-9', lg: 'size-11', xl: 'size-20' } as const;
 const ICON = { sm: 'text-lg', md: 'text-xl', lg: 'text-2xl', xl: 'text-5xl' } as const;
@@ -10,13 +11,14 @@ const ICON = { sm: 'text-lg', md: 'text-xl', lg: 'text-2xl', xl: 'text-5xl' } as
  */
 @Component({
   selector: 'app-logo',
+  imports: [Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[class]': 'box()' },
   template: `
     @if (branding.logoUrl(); as url) {
       <img class="size-full object-contain" [src]="url" alt="" />
     } @else {
-      <i class="mdi mdi-lifebuoy" [class]="icon()" aria-hidden="true"></i>
+      <app-icon name="lifebuoy" [class]="icon()" />
     }
   `,
 })

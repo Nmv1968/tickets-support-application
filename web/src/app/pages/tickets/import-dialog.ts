@@ -3,6 +3,9 @@ import { ChangeDetectionStrategy, Component, computed, inject, output, signal } 
 import { FormsModule } from '@angular/forms';
 import { Api } from '../../core/api';
 import type { ImportResult, ImportUnknown } from '../../core/api';
+import { BackdropClick } from '../../core/backdrop-click';
+import { Icon } from '../../core/icon';
+import { latest } from '../../core/loading';
 import { SELECT } from '../../core/select';
 import { Toast } from '../../core/toast';
 import { PRIORITY_LABEL, STATUS_LABEL, downloadBlob, errorMessage, formatCaseDate } from '../../core/ui';
@@ -88,17 +91,17 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
  */
 @Component({
   selector: 'app-import-dialog',
-  imports: [FormsModule, A11yModule, ...SELECT],
+  imports: [FormsModule, A11yModule, BackdropClick, ...SELECT, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
-    <div class="modal-backdrop" (click)="onBackdrop($event)">
+    <div class="modal-backdrop" (appBackdropClick)="closed.emit()">
       <div class="card flex max-h-full w-full max-w-2xl flex-col" role="dialog" aria-modal="true" aria-labelledby="import-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
         <header class="flex items-center gap-2 border-b border-line px-4 py-3">
-          <i class="mdi mdi-file-import-outline text-xl text-primary" aria-hidden="true"></i>
+          <app-icon name="file-import-outline" class="text-xl text-primary" />
           <h2 id="import-title" class="font-semibold">Importar hoja de casos</h2>
           <button type="button" class="btn btn-ghost ml-auto px-2" (click)="closed.emit()" aria-label="Cerrar">
-            <i class="mdi mdi-close text-lg" aria-hidden="true"></i>
+            <app-icon name="close" class="text-lg" />
           </button>
         </header>
 
@@ -110,13 +113,13 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
           </p>
 
           <div class="flex flex-wrap items-center gap-3 rounded-control border border-line px-3 py-2.5">
-            <i class="mdi mdi-file-excel-outline text-2xl text-success" aria-hidden="true"></i>
+            <app-icon name="file-excel-outline" class="text-2xl text-success" />
             <p class="min-w-48 flex-1 text-xs text-muted">
               <strong class="block text-sm text-ink">¿Vas a armar la hoja desde cero?</strong>
               Usa la plantilla: trae las columnas listas, la fecha como fecha y listas para elegir entre las empresas, los responsables, los módulos y los tipos de soporte registrados. Llénala y súbela aquí.
             </p>
             <button type="button" class="btn btn-soft" [disabled]="downloading()" (click)="downloadTemplate()">
-              <i class="mdi" [class]="downloading() ? 'mdi-loading mdi-spin' : 'mdi-download'" aria-hidden="true"></i>
+              <app-icon [name]="downloading() ? 'loading' : 'download'" />
               Descargar plantilla
             </button>
           </div>
@@ -333,9 +336,9 @@ export class ImportDialog {
   protected readonly preview = signal<ImportResult | null>(null);
   protected readonly error = signal('');
   private file: File | null = null;
-  /** A preview is on its way, and its number among the ones asked for (see analyze). */
+  /** A preview is on its way. Only the one asked for last counts (see analyze). */
   private readonly previewing = signal(false);
-  private previews = 0;
+  private readonly previews = latest();
   /** The import itself is on its way. */
   private readonly importing = signal(false);
   protected readonly busy = computed(() => this.previewing() || this.importing());
@@ -385,11 +388,6 @@ export class ImportDialog {
     }
   }
 
-  /** Returns nothing on purpose: a handler that evaluates to false makes Angular cancel the click (see AiDraftDialog). */
-  protected onBackdrop(event: MouseEvent): void {
-    if (event.target === event.currentTarget) this.closed.emit();
-  }
-
   /**
    * The file field is about to ask for a file: the one it had is forgotten, with its preview.
    * A browser says nothing when the file chosen is the one the field already has, and that is
@@ -431,24 +429,25 @@ export class ImportDialog {
    * focus of whoever pressed it with the keyboard.
    */
   private async analyze(keep = false): Promise<void> {
-    // Only the answer to the latest preview is shown: an older one, for another file or other
-    // options, can arrive after it, and the button would then say one thing and import another.
-    const asked = ++this.previews;
+    // Only the answer to the latest preview is shown, and the one before is cancelled: an older
+    // one, for another file or other options, can arrive after it, and the button would then say
+    // one thing and import another.
+    const asked = this.previews.next();
     const file = this.file;
     if (!keep || !file) this.preview.set(null);
     this.error.set('');
     this.previewing.set(file !== null);
     if (!file) return;
     try {
-      const preview = await this.api.importFile(file, true, this.dateOrder(), this.createMissing());
-      if (asked === this.previews) this.preview.set(preview);
+      const preview = await this.api.importFile(file, true, this.dateOrder(), this.createMissing(), asked.signal);
+      if (asked.current()) this.preview.set(preview);
     } catch (error) {
-      if (asked !== this.previews) return;
+      if (!asked.current()) return;
       // A preview kept on screen is of other options than the ones the import would now use.
       this.preview.set(null);
       this.error.set(errorMessage(error));
     } finally {
-      if (asked === this.previews) this.previewing.set(false);
+      if (asked.current()) this.previewing.set(false);
     }
   }
 

@@ -5,10 +5,13 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../core/api';
 import type { Ticket, TicketStatus } from '../core/api';
+import { AssigneeSelect } from '../core/case-selects';
 import { Catalogs } from '../core/catalogs';
-import { SELECT } from '../core/select';
+import { Icon } from '../core/icon';
+import { liveResource } from '../core/loading';
 import { TicketEvents } from '../core/ticket-events';
 import type { TicketEvent } from '../core/ticket-events';
+import { StatusBadge } from '../core/status-badge';
 import { TicketFlags } from '../core/ticket-flags';
 import { Toast } from '../core/toast';
 import { TypeChip } from '../core/type-chip';
@@ -25,32 +28,22 @@ const OPEN_LIMIT = 500;
  */
 @Component({
   selector: 'app-board',
-  imports: [FormsModule, CdkDropListGroup, CdkDropList, CdkDrag, ...SELECT, TicketFlags, TypeChip, TicketPanel],
+  imports: [FormsModule, CdkDropListGroup, CdkDropList, CdkDrag, AssigneeSelect, StatusBadge, TicketFlags, TypeChip, TicketPanel, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex h-full flex-col gap-3 p-3 md:p-5">
       <div class="flex flex-wrap items-center gap-2">
         <h1 class="mr-auto text-lg font-semibold">Tablero</h1>
         <input class="input w-56" type="search" placeholder="Buscar en el tablero" aria-label="Buscar en el tablero" [(ngModel)]="search" />
-        <!-- Its list hangs from the body: inside the page it would be cut where the page scrolls. -->
-        <ng-select
-          class="w-56"
-          ariaLabel="Filtrar por responsable"
-          bindValue="id"
-          bindLabel="name"
-          placeholder="Responsable: todos"
-          appendTo="body"
-          [items]="assigneeOptions()"
-          [(ngModel)]="assignee"
-        />
-        <button type="button" class="btn btn-soft px-2.5" (click)="load()" aria-label="Actualizar">
-          <i class="mdi mdi-refresh text-base" [class.mdi-spin]="loading()" aria-hidden="true"></i>
+        <app-assignee-select class="w-56" ariaLabel="Filtrar por responsable" placeholder="Responsable: todos" [items]="catalogs.assigneeFilterOptions()" [(value)]="assignee" />
+        <button type="button" class="btn btn-soft px-2.5" (click)="board.refresh()" aria-label="Actualizar">
+          <app-icon name="refresh" class="text-base" [spin]="loading()" />
         </button>
       </div>
 
       @if (openLeftOut() > 0) {
         <p class="rounded-control bg-warning/10 px-3 py-2 text-xs" role="status">
-          <i class="mdi mdi-alert-outline text-warning" aria-hidden="true"></i>
+          <app-icon name="alert-outline" class="text-warning" />
           El tablero muestra solo los {{ openLimit }} casos abiertos más recientes. Faltan {{ openLeftOut() }} más antiguos: búscalos en la lista de Casos.
         </p>
       }
@@ -59,7 +52,7 @@ const OPEN_LIMIT = 500;
         @for (column of columns(); track column.status) {
           <section class="flex w-80 shrink-0 flex-col rounded-card bg-elevated md:w-auto md:flex-1" [attr.aria-label]="statusLabel[column.status]">
             <header class="flex items-center gap-2 px-3 py-2.5">
-              <span class="badge" [class]="'st-' + column.status">{{ statusLabel[column.status] }}</span>
+              <span appStatusBadge [status]="column.status"></span>
               <span class="text-xs text-muted">{{ column.tickets.length }}</span>
               @if (column.status === 'RESOLVED') {
                 <span class="ml-auto text-2xs text-muted">últimos {{ resolvedShown }}</span>
@@ -73,14 +66,17 @@ const OPEN_LIMIT = 500;
               (cdkDropListDropped)="drop($event)"
             >
               @for (t of column.tickets; track t.id) {
+                <!-- A button to the keyboard and to who hears the page: Enter and Space open the case. Space would otherwise scroll the column. -->
                 <article
                   class="card cursor-grab p-2.5 active:cursor-grabbing"
                   cdkDrag
                   [cdkDragData]="t"
                   [cdkDragStartDelay]="{ touch: 200, mouse: 0 }"
+                  role="button"
                   tabindex="0"
                   (click)="openId.set(t.id)"
                   (keydown.enter)="openId.set(t.id)"
+                  (keydown.space)="$event.preventDefault(); openId.set(t.id)"
                 >
                   <div class="flex items-center gap-1.5 text-xs">
                     <span class="font-mono text-primary">{{ t.code }}</span>
@@ -97,10 +93,10 @@ const OPEN_LIMIT = 500;
                     </div>
                   }
                   <div class="mt-1.5 flex items-center gap-1 text-xs text-muted">
-                    <i class="mdi mdi-account-outline" aria-hidden="true"></i>
+                    <app-icon name="account-outline" />
                     <span class="truncate">{{ t.assigneeName ?? 'Sin asignar' }}</span>
                     @if (t.notesCount) {
-                      <span class="ml-auto"><i class="mdi mdi-comment-text-outline" aria-hidden="true"></i> {{ t.notesCount }}</span>
+                      <span class="ml-auto"><app-icon name="comment-text-outline" /> {{ t.notesCount }}</span>
                     }
                   </div>
                 </article>
@@ -129,15 +125,27 @@ export class BoardPage {
   protected readonly resolvedShown = RESOLVED_SHOWN;
   protected readonly openLimit = OPEN_LIMIT;
 
-  private readonly tickets = signal<Ticket[]>([]);
+  /** The cases of the board, read again with "Actualizar" and when cases change (see liveResource). */
+  protected readonly board = liveResource({
+    load: async (_, abort) => {
+      // Neither request asks for archived cases, and the API lists none unless asked.
+      const [open, resolved] = await Promise.all([
+        // In the API's default order, highest ticket numbers first: past the limit, the oldest are left out.
+        this.api.tickets({ status: 'UNRESOLVED,PENDING', pageSize: OPEN_LIMIT }, abort),
+        // Highest ticket numbers first: the most recent resolved cases.
+        this.api.tickets({ status: 'RESOLVED', pageSize: RESOLVED_SHOWN, dir: 'desc' }, abort),
+      ]);
+      return { tickets: [...open.items, ...resolved.items], openLeftOut: open.total - open.items.length };
+    },
+    failed: (error) => this.toast.error(error),
+  });
+  private readonly tickets = computed(() => this.board.value()?.tickets ?? []);
   /** Open cases that did not fit in one request. Above zero, the board is incomplete and says so. */
-  protected readonly openLeftOut = signal(0);
-  protected readonly loading = signal(true);
+  protected readonly openLeftOut = computed(() => this.board.value()?.openLeftOut ?? 0);
+  protected readonly loading = this.board.loading;
   protected readonly search = signal('');
   /** The responsible whose cases are shown, or `none` for the cases nobody has. Null: everyone's. */
   protected readonly assignee = signal<number | 'none' | null>(null);
-  /** Everyone of the catalog, active or not (their cases are still theirs), and the cases nobody has. */
-  protected readonly assigneeOptions = computed<{ id: number | 'none'; name: string }[]>(() => [{ id: 'none', name: 'Sin asignar' }, ...this.catalogs.assignees()]);
   protected readonly openId = signal<number | null>(null);
   protected readonly replyOnOpen = signal(false);
 
@@ -151,11 +159,7 @@ export class BoardPage {
     return STATUSES.map((status) => ({ status, tickets: visible.filter((t) => t.status === status) }));
   });
 
-  private loadSequence = 0;
-
   constructor() {
-    void this.load();
-
     // Changes to cases, made on this screen, in the case panel or elsewhere (see TicketEvents).
     inject(TicketEvents)
       .events.pipe(takeUntilDestroyed())
@@ -173,33 +177,11 @@ export class BoardPage {
     } else {
       // A case that is not on the board (new, reopened, or brought back from the archive), or
       // cases changed elsewhere: the columns are read again.
-      void this.load();
+      this.board.refresh();
       return;
     }
     // Columns already on their way may have been read before this change and would undo it.
-    if (this.loading()) void this.load();
-  }
-
-  protected async load(): Promise<void> {
-    // Only the answer to the latest request is shown: an older one can arrive after it.
-    const sequence = ++this.loadSequence;
-    this.loading.set(true);
-    try {
-      // Neither request asks for archived cases, and the API lists none unless asked.
-      const [open, resolved] = await Promise.all([
-        // In the API's default order, highest ticket numbers first: past the limit, the oldest are left out.
-        this.api.tickets({ status: 'UNRESOLVED,PENDING', pageSize: OPEN_LIMIT }),
-        // Highest ticket numbers first: the most recent resolved cases.
-        this.api.tickets({ status: 'RESOLVED', pageSize: RESOLVED_SHOWN, dir: 'desc' }),
-      ]);
-      if (sequence !== this.loadSequence) return;
-      this.tickets.set([...open.items, ...resolved.items]);
-      this.openLeftOut.set(open.total - open.items.length);
-    } catch (error) {
-      this.toast.error(error);
-    } finally {
-      if (sequence === this.loadSequence) this.loading.set(false);
-    }
+    if (this.loading()) this.board.refresh();
   }
 
   protected async drop(event: CdkDragDrop<TicketStatus, TicketStatus, Ticket>): Promise<void> {
@@ -224,11 +206,11 @@ export class BoardPage {
   }
 
   private replace(updated: Ticket): void {
-    this.tickets.update((tickets) => tickets.map((t) => (t.id === updated.id ? updated : t)));
+    this.board.value.update((board) => board && { ...board, tickets: board.tickets.map((t) => (t.id === updated.id ? updated : t)) });
   }
 
   private remove(id: number): void {
-    this.tickets.update((tickets) => tickets.filter((t) => t.id !== id));
+    this.board.value.update((board) => board && { ...board, tickets: board.tickets.filter((t) => t.id !== id) });
   }
 
   protected closePanel(): void {

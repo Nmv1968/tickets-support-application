@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, 
 import { Api } from '../../core/api';
 import type { Attachment } from '../../core/api';
 import { Confirm } from '../../core/confirm';
+import { Icon } from '../../core/icon';
 import { Toast } from '../../core/toast';
 import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
 
@@ -13,6 +14,7 @@ import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
  */
 @Component({
   selector: 'app-ticket-attachments',
+  imports: [Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block', '(document:paste)': 'onPaste($event)' },
   template: `
@@ -20,7 +22,7 @@ import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
       <div class="mb-2 flex items-center gap-2">
         <h2 class="section-title">Adjuntos</h2>
         <label class="btn btn-soft ml-auto cursor-pointer px-2 py-1 text-xs">
-          <i class="mdi mdi-paperclip" aria-hidden="true"></i> Adjuntar
+          <app-icon name="paperclip" /> Adjuntar
           <input type="file" class="sr-only" multiple (change)="onFiles($event)" />
         </label>
       </div>
@@ -31,14 +33,14 @@ import { downloadBlob, formatBytes, pastedImages } from '../../core/ui';
               @if (thumbs()[a.id]; as url) {
                 <img class="size-full object-cover" [src]="url" [alt]="a.filename" />
               } @else {
-                <span class="grid size-full place-items-center text-muted"><i class="mdi mdi-file-outline text-2xl" aria-hidden="true"></i></span>
+                <span class="grid size-full place-items-center text-muted"><app-icon name="file-outline" class="text-2xl" /></span>
               }
             </button>
             <div class="flex items-center gap-1 px-1.5 py-1 text-2xs">
               <span class="flex-1 truncate" [title]="a.filename">{{ a.filename }}</span>
               <span class="text-muted">{{ formatBytes(a.size) }}</span>
               <button type="button" class="hover:text-danger" (click)="removeAttachment(a)" [attr.aria-label]="'Eliminar ' + a.filename">
-                <i class="mdi mdi-close" aria-hidden="true"></i>
+                <app-icon name="close" />
               </button>
             </div>
           </div>

@@ -3,6 +3,7 @@ import { Api } from '../../core/api';
 import { AppLogo } from '../../core/app-logo';
 import { Branding } from '../../core/branding';
 import { Confirm } from '../../core/confirm';
+import { Icon } from '../../core/icon';
 import { Toast } from '../../core/toast';
 import { errorMessage, toSmallPng } from '../../core/ui';
 
@@ -12,7 +13,7 @@ const LOGO_SIDE = 256;
 /** The company logo: upload one, see it as it will look, or go back to the default icon. */
 @Component({
   selector: 'app-branding-tab',
-  imports: [AppLogo],
+  imports: [AppLogo, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="card max-w-2xl space-y-4 p-4">
@@ -29,7 +30,7 @@ const LOGO_SIDE = 256;
         <div class="min-w-48 flex-1 space-y-2">
           <div class="flex flex-wrap gap-2">
             <button type="button" class="btn btn-primary" [disabled]="busy()" (click)="picker.click()">
-              <i class="mdi" [class]="busy() ? 'mdi-loading mdi-spin' : 'mdi-upload'" aria-hidden="true"></i>
+              <app-icon [name]="busy() ? 'loading' : 'upload'" />
               {{ branding.logoUrl() ? 'Cambiar imagen' : 'Subir imagen' }}
             </button>
             @if (branding.logoUrl()) {

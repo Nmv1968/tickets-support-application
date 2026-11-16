@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, booleanAttribute, computed, input, output } from '@angular/core';
 
-const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+/** A colour as the app stores it: `#rrggbb`. */
+export const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 /** Relative luminance of a `#rrggbb` colour, from 0 (black) to 1 (white), as WCAG defines it. */
 export function luminance(hex: string): number {

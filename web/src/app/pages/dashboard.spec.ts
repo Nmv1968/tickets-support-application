@@ -6,8 +6,9 @@ import { TestBed } from '@angular/core/testing';
 import { Chart } from 'chart.js';
 import type { Dashboard } from '../core/api';
 import { Theme } from '../core/theme';
-import { Toast } from '../core/toast';
+import { TicketEvents } from '../core/ticket-events';
 import { todayIso } from '../core/ui';
+import { buttonIn, nextTask, toasts } from '../testing/screen';
 import { DashboardPage } from './dashboard';
 
 const DATA: Dashboard = {
@@ -26,11 +27,6 @@ const DATA: Dashboard = {
   ],
   monthly: [],
 };
-
-/** Lets the promise chains that follow an answered request run. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve));
-}
 
 // Drawn for real, with the colours the stylesheet gives (the test page loads styles.css): the
 // charts take them from its variables, so a constant here would not notice a variable that is gone.
@@ -60,7 +56,7 @@ describe('DashboardPage', () => {
 
   /** Lets what was answered reach the screen. Not `whenStable`: a test may have another read still on its way. */
   async function show(): Promise<void> {
-    await settle();
+    await nextTask();
     fixture.detectChanges();
   }
 
@@ -89,13 +85,8 @@ describe('DashboardPage', () => {
     return card?.querySelector('.text-2xl')?.textContent?.trim() ?? '';
   }
 
+  const button = (text: string): HTMLButtonElement => buttonIn(el, text);
   const archivedBox = (): HTMLInputElement => el.querySelector<HTMLInputElement>('input[type=checkbox]')!;
-
-  function button(text: string): HTMLButtonElement {
-    const found = Array.from(el.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === text);
-    if (!found) throw new Error(`No "${text}" button on screen`);
-    return found;
-  }
 
   /** A day picked in a date field of the period. */
   function pick(field: 'Desde' | 'Hasta', day: string): void {
@@ -104,8 +95,6 @@ describe('DashboardPage', () => {
     input.dispatchEvent(new Event('input'));
     fixture.detectChanges();
   }
-
-  const toasts = (): string[] => TestBed.inject(Toast).items().map((item) => item.text);
 
   describe('"Casos por prioridad"', () => {
     /** The colour of each slice of the chart on screen. */
@@ -178,6 +167,44 @@ describe('DashboardPage', () => {
     });
   });
 
+  describe('the numbers', () => {
+    const fewer = { ...DATA, totals: { ...DATA.totals, total: 3 } };
+
+    it('are read again when cases change, here or elsewhere, and the ones on screen stay meanwhile', async () => {
+      await open();
+      TestBed.inject(TicketEvents).outdated(null);
+      fixture.detectChanges();
+      const again = read();
+      expect(indicator('Total')).toBe('5');
+
+      again.flush(fewer);
+      await show();
+      expect(indicator('Total')).toBe('3');
+    });
+
+    it('of another period: the ones on screen stay until they arrive', async () => {
+      await open();
+      pick('Desde', '2026-01-01');
+      const ranged = read();
+      expect(indicator('Total')).toBe('5');
+
+      ranged.flush(fewer);
+      await show();
+      expect(indicator('Total')).toBe('3');
+    });
+
+    it('that cannot be read: says why, and leaves the ones on screen', async () => {
+      await open();
+      TestBed.inject(TicketEvents).outdated(null);
+      fixture.detectChanges();
+      read().flush({ message: 'Error interno' }, { status: 500, statusText: 'Server Error' });
+      await show();
+
+      expect(toasts()).toEqual(['Error interno']);
+      expect(indicator('Total')).toBe('5');
+    });
+  });
+
   describe('archived cases', () => {
     it('count, with the box "Incluir archivados" checked, until the person unchecks it: the numbers are then read without them', async () => {
       create();
@@ -222,7 +249,7 @@ describe('DashboardPage', () => {
     });
 
     // The first read counts them and may take longer than the one that leaves them out.
-    it('the numbers on screen are the ones asked for last, also when an older answer arrives after them', async () => {
+    it('the numbers on screen are the ones asked for last: the older read is cancelled, its answer never arrives', async () => {
       create();
       const withArchived = read();
       // The page is on screen, and the box is unchecked before the numbers arrive.
@@ -230,14 +257,12 @@ describe('DashboardPage', () => {
       archivedBox().click();
       fixture.detectChanges();
       const without = read();
+      expect(withArchived.cancelled).toBeTrue();
 
       without.flush({ ...DATA, totals: { ...DATA.totals, total: 3 } });
       await show();
       expect(indicator('Total')).toBe('3');
-
-      withArchived.flush(DATA);
-      await show();
-      expect(indicator('Total')).toBe('3');
+      expect(toasts()).toEqual([]);
     });
   });
 
@@ -266,7 +291,7 @@ describe('DashboardPage', () => {
         // Every case of every date, archived or not: what the screen shows as it opens.
         expect(request.request.params.keys()).toEqual([]);
         request.flush(new Blob([format]));
-        await settle();
+        await nextTask();
         fixture.detectChanges();
       }
 
@@ -293,7 +318,7 @@ describe('DashboardPage', () => {
       expect(request.request.params.get('to')).toBe('2026-06-30');
       expect(request.request.params.get('archived')).toBe('exclude');
       request.flush(new Blob(['pdf']));
-      await settle();
+      await nextTask();
     });
 
     it('keeps both buttons waiting while a file is generated, and the one pressed says so', async () => {
@@ -303,14 +328,14 @@ describe('DashboardPage', () => {
 
       const generating = button('Generando…');
       expect(generating.disabled).toBeTrue();
-      expect(generating.querySelector('.mdi-spin')).not.toBeNull();
+      expect(generating.querySelector('app-icon[data-icon=loading]')).not.toBeNull();
       expect(button('PDF').disabled).toBeTrue();
       // Pressed meanwhile, neither asks for another file.
       generating.click();
       button('PDF').click();
 
       download('xlsx').flush(new Blob(['xlsx']));
-      await settle();
+      await nextTask();
       fixture.detectChanges();
       expect(button('Excel').disabled).toBeFalse();
       expect(button('PDF').disabled).toBeFalse();
@@ -324,7 +349,7 @@ describe('DashboardPage', () => {
       fixture.detectChanges();
       download('xlsx').flush(new Blob([JSON.stringify({ message: refusal })], { type: 'application/json' }), { status: 400, statusText: 'Bad Request' });
       // The error body arrives as a file and is read back before the message is shown: that takes more than one turn.
-      for (let turn = 0; turn < 50 && !toasts().length; turn++) await settle();
+      for (let turn = 0; turn < 50 && !toasts().length; turn++) await nextTask();
       fixture.detectChanges();
 
       expect(toasts()).toEqual([refusal]);
