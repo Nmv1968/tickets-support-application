@@ -87,6 +87,9 @@ jobs:
       - run: npx tsc --noEmit -p tsconfig.spec.json
       # ESLint with angular-eslint (eslint.config.mjs), without --fix.
       - run: npm run lint
+      # Liberation Sans has the metrics of Arial, the font the specs draw with (src/test.ts), so
+      # the specs that measure a layout get the same numbers as on Windows.
+      - run: sudo apt-get install -y --no-install-recommends fonts-liberation
       # Karma with the Google Chrome of the runner, without a window.
       - run: npm run test:ci
       - run: npx ng build

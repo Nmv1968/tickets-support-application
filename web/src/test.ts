@@ -16,6 +16,17 @@ import { restoreScreen } from './app/testing/viewport';
 @NgModule({ providers: [provideZonelessChangeDetection(), provideCheckNoChangesConfig({ exhaustive: true })] })
 class ZonelessTesting {}
 
+/*
+ * One font for the specs on every machine. The app asks for "Segoe UI" first, which Linux does not
+ * have: there Chrome fell back to a wider font, names went to a second line, and the specs that
+ * measure a layout (a chip, the header of a short screen, a select of three lines) got other
+ * numbers than on Windows. Arial, and on Linux Liberation Sans, which has its metrics, draw text the
+ * same width on both. Outside every layer, so above the theme's `--font-sans`.
+ */
+const testFont = document.createElement('style');
+testFont.textContent = ':root { --font-sans: Arial, "Liberation Sans", sans-serif; }';
+document.head.appendChild(testFont);
+
 getTestBed().initTestEnvironment([BrowserTestingModule, ZonelessTesting], platformBrowserTesting(), {
   errorOnUnknownElements: true,
   errorOnUnknownProperties: true,
