@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { Logger, UnauthorizedException } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import * as ts from 'typescript';
+import { SESSION_OVER_MESSAGE } from '../common/auth';
 import type { PrismaService } from '../prisma.service';
 import { EventsController, HEARTBEAT_MS } from './events.controller';
 import { EventsService } from './events.service';
@@ -184,9 +186,25 @@ describe('the stream of events', () => {
   });
 
   // JwtGuard has accepted it a moment before; it can only fail here if it expired in between.
-  it('answers 401 to a token it cannot read', async () => {
-    await expect(controller.stream('Bearer basura')).rejects.toBeInstanceOf(UnauthorizedException);
-    await expect(controller.stream(undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+  it('answers 401 in Spanish to a token it cannot read', async () => {
+    await expect(controller.stream('Bearer basura')).rejects.toEqual(new UnauthorizedException(SESSION_OVER_MESSAGE));
+    await expect(controller.stream(undefined)).rejects.toEqual(new UnauthorizedException(SESSION_OVER_MESSAGE));
+  });
+
+  // The server waits for every answer in progress before it closes: a stream left open would keep
+  // the API from stopping until `docker stop` killed it.
+  it('ends every stream when the API closes, and one opened after it at once', async () => {
+    const ana = await open(await tokenOf(5, 2));
+    const luis = await open(await tokenOf(6, 0));
+
+    events.beforeApplicationShutdown();
+
+    expect(ana.ended()).toBe(true);
+    expect(luis.ended()).toBe(true);
+    const late = await open(await tokenOf(5, 2));
+    expect(late.ended()).toBe(true);
+    expect(late.seen).toEqual([]);
+    expect(db.user.findUnique).not.toHaveBeenCalled();
   });
 });
 
@@ -202,7 +220,54 @@ describe('the places that end the sessions of a user', () => {
 
   it('tell the streams of events, every one of them', () => {
     // The ones of today, which the search must find: a search that finds none would check nothing.
-    expect(writers.map(({ file }) => file)).toEqual(expect.arrayContaining(['auth/auth.controller.ts', 'seed.service.ts', 'users/users.controller.ts']));
+    expect(writers.map(({ file }) => file)).toEqual(expect.arrayContaining(['auth/auth.service.ts', 'seed.service.ts', 'users/users.service.ts']));
     for (const { file, text } of writers) expect({ file, tells: /\.sessionsEnded\(/.test(text) }).toEqual({ file, tells: true });
+  });
+
+  /**
+   * Every place a source writes `tokenVersion`, as `file: code`: a field of an object given a value
+   * (`{ tokenVersion: { increment: 1 } }`, `{ tokenVersion: 0 }`, `{ tokenVersion }`), an assignment
+   * to it (`user.tokenVersion = ...`, `++`), and any text that names it, as the SQL of a raw query
+   * would (`SET "tokenVersion" = ...`). Reading it is not writing it: `select: { tokenVersion: true
+   * }`, `user.tokenVersion !== payload.ver`, a type that declares it.
+   */
+  function tokenVersionWrites(): string[] {
+    const found: string[] = [];
+    for (const { file, text } of sources) {
+      const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+      const named = (name: ts.Node): boolean => (ts.isIdentifier(name) || ts.isStringLiteral(name)) && name.text === 'tokenVersion';
+      const target = (node: ts.Expression): boolean =>
+        (ts.isPropertyAccessExpression(node) && named(node.name)) || (ts.isElementAccessExpression(node) && named(node.argumentExpression));
+      const assigns = (node: ts.BinaryExpression): boolean =>
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && target(node.left);
+      const steps = (node: ts.PrefixUnaryExpression | ts.PostfixUnaryExpression): boolean =>
+        (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) && target(node.operand);
+      // A text, not the name of a field written as one ('tokenVersion': ..., user['tokenVersion']).
+      const names = (node: ts.Node): boolean =>
+        (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) &&
+        node.text.includes('tokenVersion') &&
+        !(ts.isPropertyAssignment(node.parent) && node.parent.name === node) &&
+        !(ts.isElementAccessExpression(node.parent) && node.parent.argumentExpression === node);
+      const visit = (node: ts.Node): void => {
+        if (
+          (ts.isPropertyAssignment(node) && named(node.name) && node.initializer.kind !== ts.SyntaxKind.TrueKeyword) ||
+          (ts.isShorthandPropertyAssignment(node) && named(node.name)) ||
+          (ts.isBinaryExpression(node) && assigns(node)) ||
+          ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && steps(node)) ||
+          names(node)
+        ) {
+          found.push(`${file}: ${node.getText(source)}`);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    return found;
+  }
+
+  // A write of its own, without END_SESSIONS, is a place that ends sessions the test above never
+  // sees: the streams of those sessions would stay open. END_SESSIONS itself is the one write.
+  it('write tokenVersion only through END_SESSIONS', () => {
+    expect(tokenVersionWrites()).toEqual(['common/session-token.ts: tokenVersion: { increment: 1 }']);
   });
 });

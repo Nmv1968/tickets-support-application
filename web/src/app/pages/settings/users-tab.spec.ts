@@ -1,5 +1,4 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import type { HttpTestingController } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
@@ -7,8 +6,10 @@ import type { User } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { Catalogs } from '../../core/catalogs';
 import { answerCatalogs } from '../../testing/catalogs';
+import { httpTestBed } from '../../testing/http';
 import { chooseOption, ngSelect, optionTexts, openSelect, selectedTexts } from '../../testing/ng-select';
 import { buttonIn, toasts } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { UsersTab } from './users-tab';
 
 // A user is someone who can log in, and nothing else. The tab used to say which responsible each
@@ -24,8 +25,7 @@ describe('UsersTab, the users in Configuración', () => {
   const zoe: User = { id: 3, username: 'zoe', name: 'Zoe', active: false, canLogin: true, role: 'AGENT' };
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed(provideRouter([]));
     TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana Torres', role: 'ADMIN' });
     const catalogs = TestBed.inject(Catalogs);
     catalogs.users.set([ana, bot, zoe]);
@@ -55,7 +55,7 @@ describe('UsersTab, the users in Configuración', () => {
   }
 
   const rows = (): HTMLElement[] => [...el.querySelectorAll<HTMLElement>('tbody tr')];
-  const cells = (row: HTMLElement): string[] => [...row.querySelectorAll('td')].map((cell) => cell.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+  const cells = (row: HTMLElement): string[] => [...row.querySelectorAll('td')].map((cell) => textOf(cell));
 
   function fill(id: string, value: string): void {
     const input = el.querySelector<HTMLInputElement>(`#${id}`)!;
@@ -96,7 +96,7 @@ describe('UsersTab, the users in Configuración', () => {
   it('says that a new password, another role or a deactivation ends the sessions of that person', fakeAsync(() => {
     open();
 
-    expect(el.textContent?.replace(/\s+/g, ' ')).toContain('Una contraseña nueva, otro rol o desactivar a alguien cierra las sesiones que tenga abiertas.');
+    expect(textOf(el)).toContain('Una contraseña nueva, otro rol o desactivar a alguien cierra las sesiones que tenga abiertas.');
   }));
 
   describe('the role of a user', () => {

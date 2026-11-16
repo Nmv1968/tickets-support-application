@@ -12,13 +12,18 @@ import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma.service';
-import { verifiedPayload } from './session-token';
+import { sessionStands, verifiedPayload } from './session-token';
 
 export interface AuthUser {
   id: number;
   username: string;
   name: string;
   role: Role;
+}
+
+/** The user of a session, from the user as stored: what the routes know of who is logged in. */
+export function authUser(user: AuthUser): AuthUser {
+  return { id: user.id, username: user.username, name: user.name, role: user.role };
 }
 
 type AuthedRequest = Request & { user?: AuthUser };
@@ -29,6 +34,15 @@ const ADMIN_ONLY = 'adminOnly';
 /** What an agent reads when a route is only for administrators. */
 export const ADMIN_ONLY_MESSAGE = 'Solo un administrador puede hacer esto.';
 
+/**
+ * The 401 of a request without a session that stands: no token, one this API did not sign, one
+ * expired, or one of sessions the API has ended. The web goes back to the login screen with it.
+ */
+export const SESSION_OVER_MESSAGE = 'La sesión terminó o no es válida. Vuelve a ingresar.';
+
+/** The 401 of `SESSION_OVER_MESSAGE`. Nest's own says `Unauthorized`. */
+export const sessionOver = (): UnauthorizedException => new UnauthorizedException(SESSION_OVER_MESSAGE);
+
 /** Marks a route that does not need a login token. */
 export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(IS_PUBLIC, true);
 
@@ -37,7 +51,7 @@ export const AdminOnly = (): MethodDecorator & ClassDecorator => SetMetadata(ADM
 
 export const CurrentUser = createParamDecorator((_data: unknown, ctx: ExecutionContext): AuthUser => {
   const user = ctx.switchToHttp().getRequest<AuthedRequest>().user;
-  if (!user) throw new UnauthorizedException();
+  if (!user) throw sessionOver();
   return user;
 });
 
@@ -59,7 +73,7 @@ export class JwtGuard implements CanActivate {
 
     const req = ctx.switchToHttp().getRequest<AuthedRequest>();
     const payload = await verifiedPayload(this.jwt, req.headers.authorization);
-    if (!payload) throw new UnauthorizedException();
+    if (!payload) throw sessionOver();
 
     // The role is read here, with the rest of the user, and never taken from the token: a token
     // signed before an administrator changed it would still say the old one.
@@ -67,9 +81,9 @@ export class JwtGuard implements CanActivate {
       where: { id: payload.sub },
       select: { id: true, username: true, name: true, active: true, role: true, tokenVersion: true },
     });
-    if (!user?.active || user.tokenVersion !== payload.ver) throw new UnauthorizedException();
+    if (!sessionStands(user, payload)) throw sessionOver();
 
-    req.user = { id: user.id, username: user.username, name: user.name, role: user.role };
+    req.user = authUser(user);
     return true;
   }
 }
@@ -85,7 +99,7 @@ export class RolesGuard implements CanActivate {
   canActivate(ctx: ExecutionContext): boolean {
     if (!this.reflector.getAllAndOverride<boolean>(ADMIN_ONLY, [ctx.getHandler(), ctx.getClass()])) return true;
     const user = ctx.switchToHttp().getRequest<AuthedRequest>().user;
-    if (!user) throw new UnauthorizedException();
+    if (!user) throw sessionOver();
     if (user.role !== Role.ADMIN) throw new ForbiddenException(ADMIN_ONLY_MESSAGE);
     return true;
   }

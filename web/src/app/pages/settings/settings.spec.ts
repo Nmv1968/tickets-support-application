@@ -1,11 +1,11 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import type { HttpTestingController } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { AuthUser } from '../../core/api';
 import { Auth } from '../../core/auth';
 import { answerCatalogs } from '../../testing/catalogs';
+import { httpTestBed } from '../../testing/http';
 import { buttonIn, toasts } from '../../testing/screen';
 import { SettingsPage } from './settings';
 
@@ -26,8 +26,7 @@ describe('SettingsPage, the tabs of Configuración', () => {
   }
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed(provideRouter([]));
   });
 
   afterEach(() => http.verify());

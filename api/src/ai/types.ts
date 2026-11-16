@@ -35,6 +35,9 @@ export function cleanBaseUrl(value: string | null | undefined): string | null {
   return value?.trim().replace(/\/+$/, '') || null;
 }
 
+/** What the user reads when a provider that needs the URL of its server (`needsBaseUrl`) has none. */
+export const NO_BASE_URL = 'Falta la URL del servidor.';
+
 export interface AiModelInfo {
   id: string;
   name: string;

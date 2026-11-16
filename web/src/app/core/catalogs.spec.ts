@@ -1,8 +1,8 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import type { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { answerCatalogs } from '../testing/catalogs';
 import type { CatalogsAnswer } from '../testing/catalogs';
+import { httpTestBed } from '../testing/http';
 import { toasts } from '../testing/screen';
 import type { Assignee, Company, SupportType, SystemModule } from './api';
 import { Catalogs, companyCreator, findByName, offered } from './catalogs';
@@ -20,8 +20,7 @@ describe('Catalogs', () => {
   const module = (id: number, name: string, active = true): SystemModule => ({ id, name, parentId: null, active, fullName: name });
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     catalogs = TestBed.inject(Catalogs);
   });
 

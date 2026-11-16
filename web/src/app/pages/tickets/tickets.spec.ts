@@ -12,6 +12,7 @@ import { Confirm } from '../../core/confirm';
 import { TicketEvents } from '../../core/ticket-events';
 import { todayIso } from '../../core/ui';
 import { ASSIGNEES, COMPANIES, FAILURE, MODULES, SUPPORT_TYPES, TRAINING, ticket, ticketPage } from '../../testing/fixtures';
+import { httpTestBed } from '../../testing/http';
 import { clearSelect, closeSelect, ngSelect, optionTexts, typeInSelect } from '../../testing/ng-select';
 import { paste, screenOf, toasts } from '../../testing/screen';
 import { DESKTOP, PHONE, ScreenWidth, provideScreenWidth } from '../../testing/screen-width';
@@ -55,8 +56,7 @@ describe('TicketsPage', () => {
 
   beforeEach(() => {
     forgetBrowserCopies();
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([]), provideScreenWidth(DESKTOP)] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed(provideRouter([]), provideScreenWidth(DESKTOP));
     events = TestBed.inject(TicketEvents);
     // The list is behind the login: there is always someone logged in.
     TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana', role: 'AGENT' });

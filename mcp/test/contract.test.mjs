@@ -13,7 +13,15 @@ const API_SRC = join(ROOT, 'api', 'src');
 const read = (...path) => readFileSync(join(ROOT, ...path), 'utf8').replace(/\r\n/g, '\n');
 const SERVER = read('mcp', 'server.mjs');
 const FAKE = read('mcp', 'test', 'fake-api.mjs');
-const TICKETS = read('api', 'src', 'tickets', 'tickets.service.ts');
+/**
+ * The source of the cases in the API, file after file: the input of a case, the filters of the
+ * list and the shapes of its answers are each in a file of their own in api/src/tickets.
+ */
+const TICKETS_SOURCES = readdirSync(join(API_SRC, 'tickets'))
+  .filter((file) => file.endsWith('.ts') && !file.endsWith('.spec.ts'))
+  .sort()
+  .map((file) => read('api', 'src', 'tickets', file));
+const TICKETS = TICKETS_SOURCES.join('\n');
 
 /** The text from `start` up to the first `end` after it. */
 function block(text, start, end) {
@@ -49,7 +57,7 @@ function apiRoutes() {
  */
 const fields = (source) => sorted(all(source, /(\w+)[?!]?:[^:\n]*;[ \t]*$/gm));
 
-/** The keys of the object a DTO function of tickets.service.ts returns, without the nested ones. */
+/** The keys of the object a DTO function of api/src/tickets returns, without the nested ones. */
 const dtoKeys = (name) => all(block(TICKETS, `function ${name}(`, '\n}\n'), /^ {4}(\w+):/gm);
 
 /** Values of a `const NAME = { label: 'VALUE', ... }` of server.mjs. */
@@ -122,10 +130,10 @@ describe('parameters and bodies', () => {
 
   test('the bodies of the catalogs, the notes, the files and the login', () => {
     const expected = [
-      ['api/src/companies/companies.controller.ts', 'export class CompanyInput {', ['name']],
-      ['api/src/assignees/assignees.controller.ts', 'export class AssigneeInput {', ['name']],
-      ['api/src/support-types/support-types.controller.ts', 'export class SupportTypeInput {', ['name', 'color']],
-      ['api/src/catalog/catalog.controller.ts', 'export class ModuleInput {', ['name', 'parentId']],
+      ['api/src/companies/companies.service.ts', 'export class CompanyInput {', ['name']],
+      ['api/src/assignees/assignees.service.ts', 'export class AssigneeInput {', ['name']],
+      ['api/src/support-types/support-types.service.ts', 'export class SupportTypeInput {', ['name', 'color']],
+      ['api/src/catalog/modules.service.ts', 'export class ModuleInput {', ['name', 'parentId']],
       ['api/src/tickets/tickets.controller.ts', 'export class NoteDto {', ['text']],
       ['api/src/auth/auth.controller.ts', 'class LoginDto {', ['username', 'password']],
     ];
@@ -141,9 +149,7 @@ describe('parameters and bodies', () => {
   test('the files server.mjs attaches fit the limits of the API, per file and per request', () => {
     const controller = read('api', 'src', 'tickets', 'attachments.controller.ts');
     // The constants of the limits may live in another file of the module.
-    const tickets = readdirSync(join(API_SRC, 'tickets'))
-      .filter((file) => file.endsWith('.ts') && !file.endsWith('.spec.ts'))
-      .map((file) => read('api', 'src', 'tickets', file));
+    const tickets = TICKETS_SOURCES;
     /** The number `expression` stands for in `sources`: `15 * 1024 * 1024`, or a `const` set to one. */
     const number = (sources, expression) => {
       const constant = new RegExp(`const ${expression}(?::\\s*\\w+)?\\s*=\\s*([\\d\\s*_]+);`);
@@ -187,10 +193,24 @@ describe('answers of the fake API', () => {
   });
 
   test('the catalogs have the fields of their DTOs', () => {
-    const dto = (file, name) => fields(block(read('api', 'src', ...file.split('/')), `export interface ${name} {`, '\n}'));
-    assert.deepEqual(sorted(Object.keys(data.companies[0])), dto('companies/companies.controller.ts', 'CompanyDto'));
-    assert.deepEqual(sorted(Object.keys(data.assignees[0])), dto('assignees/assignees.controller.ts', 'AssigneeDto'));
-    assert.deepEqual(sorted(Object.keys(data.supportTypes[0])), dto('support-types/support-types.controller.ts', 'SupportTypeDto'));
-    assert.deepEqual(sorted(Object.keys(data.modules[0])), dto('catalog/catalog.controller.ts', 'ModuleDto'));
+    // The companies, the responsibles and the support types answer an entry of a catalog of names,
+    // the support types with fields of their own besides.
+    const NAMED = 'common/named-catalog.ts';
+    /** The fields of the DTO `name` of a file of api/src: its own, and those of the DTO it is or extends. */
+    const dto = (file, name) => {
+      const source = read('api', 'src', ...file.split('/'));
+      const alias = `export type ${name} = `;
+      if (source.includes(alias)) return dto(NAMED, block(source, alias, ';'));
+      const head = block(source, `export interface ${name} `, '{');
+      const base = head.replace('extends', '').trim();
+      const own = fields(block(source, `export interface ${name} ${head}{`, '\n}'));
+      return sorted([...own, ...(base ? dto(NAMED, base) : [])]);
+    };
+    assert.deepEqual(dto('companies/companies.service.ts', 'CompanyDto'), dto(NAMED, 'NamedEntryDto'));
+    assert.deepEqual(sorted(Object.keys(data.companies[0])), dto('companies/companies.service.ts', 'CompanyDto'));
+    assert.deepEqual(sorted(Object.keys(data.assignees[0])), dto('assignees/assignees.service.ts', 'AssigneeDto'));
+    assert.deepEqual(sorted(Object.keys(data.supportTypes[0])), dto('support-types/support-types.service.ts', 'SupportTypeDto'));
+    assert.ok(dto('support-types/support-types.service.ts', 'SupportTypeDto').includes('color'));
+    assert.deepEqual(sorted(Object.keys(data.modules[0])), dto('catalog/modules.service.ts', 'ModuleDto'));
   });
 });

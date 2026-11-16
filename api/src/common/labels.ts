@@ -55,6 +55,22 @@ export function moduleFullName(module: { name: string; parent?: { name: string }
   return module.parent ? `${module.parent.name} > ${module.name}` : module.name;
 }
 
+/** Support types in the order people read them everywhere: by name. */
+export function byName<T extends { name: string }>(types: T[]): T[] {
+  return [...types].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+/**
+ * Some support types as one text, the way every place writes them: their names in alphabetical
+ * order and separated by commas ("Capacitación, Falla del sistema"). The "Tipos de soporte" cell
+ * of the exports and the history of a case say them so, and the import reads the cell back.
+ */
+export function supportTypesText(types: { name: string }[]): string {
+  return byName(types)
+    .map((type) => type.name)
+    .join(', ');
+}
+
 export function ticketCode(id: number): string {
   return `SOP-${String(id).padStart(5, '0')}`;
 }

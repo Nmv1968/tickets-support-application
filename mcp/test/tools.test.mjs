@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { TEST_PASSWORD, TEST_USERNAME, startFakeApi } from './fake-api.mjs';
-import { startMcp } from './mcp-client.mjs';
+import { startMcpOn } from './mcp-client.mjs';
 
 let api;
 let mcp;
@@ -13,7 +13,7 @@ let files;
 
 before(async () => {
   api = await startFakeApi();
-  mcp = await startMcp({ SUPPORT_API_URL: api.url, SUPPORT_USERNAME: TEST_USERNAME, SUPPORT_PASSWORD: TEST_PASSWORD });
+  mcp = await startMcpOn(api);
   files = await mkdtemp(join(tmpdir(), 'soporte-mcp-pruebas-'));
 });
 
@@ -211,6 +211,16 @@ describe('crear_empresa, crear_responsable, crear_modulo, crear_tipo_soporte', (
     fails(await mcp.call('crear_modulo', { nombre: 'notas de credito', dentro_de: 'Ventas' }), 'El módulo "Ventas > Notas de crédito" ya existe: úsalo con ese nombre.');
     fails(await mcp.call('crear_modulo', { nombre: 'Nomina' }), 'El módulo "Nómina" ya existe pero está inactivo', 'Configuración > Módulos');
     noWrites();
+  });
+
+  // Someone may add the same module between the list the tool reads and its POST: the unique index
+  // of the API refuses the second one, and the tool says what the API said.
+  test('crear_modulo passes the 409 of the API through', async () => {
+    const message = 'Ya existe un módulo con ese nombre en Ventas';
+    api.answerNext('POST', 'modules', 409, { message, error: 'Conflict', statusCode: 409 });
+
+    fails(await mcp.call('crear_modulo', { nombre: 'Facturas', dentro_de: 'Ventas' }), message);
+    assert.deepEqual(onlyCall('POST', 'modules').body, { name: 'Facturas', parentId: 1 });
   });
 });
 
@@ -591,12 +601,13 @@ describe('login and errors of the API', () => {
     ok(await mcp.call('ver_caso', { caso: '7' }));
   });
 
-  test('a 401 after logging in again is not retried forever', async () => {
+  test('a 401 after logging in again is not retried forever, and its message reaches the assistant', async () => {
     ok(await mcp.call('ver_caso', { caso: '7' }));
     api.reset();
-    api.answerNext('GET', 'tickets/7', 401, { message: 'Unauthorized', statusCode: 401 });
-    api.answerNext('GET', 'tickets/7', 401, { message: 'Unauthorized', statusCode: 401 });
-    fails(await mcp.call('ver_caso', { caso: '7' }), 'Unauthorized');
+    const refused = { statusCode: 401, error: 'Unauthorized', message: 'La sesión terminó o no es válida. Vuelve a ingresar.' };
+    api.answerNext('GET', 'tickets/7', 401, refused);
+    api.answerNext('GET', 'tickets/7', 401, refused);
+    fails(await mcp.call('ver_caso', { caso: '7' }), 'Error: La sesión terminó o no es válida. Vuelve a ingresar.');
     assert.equal(api.calls('GET', 'tickets/7').length, 2);
   });
 

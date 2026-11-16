@@ -1,8 +1,8 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, HttpException } from '@nestjs/common';
 import type { Type as ClassType } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
-import { MALFORMED_JSON, MAX_MESSAGES, MORE_MESSAGES, NOT_AN_OBJECT, malformedJsonInSpanish, validationPipe } from './validation';
+import { MALFORMED_JSON, MAX_MESSAGES, MORE_MESSAGES, NOT_AN_OBJECT, bodyErrorsInSpanish, validationPipe } from './validation';
 
 enum Color {
   RED = 'RED',
@@ -115,22 +115,84 @@ describe('the answer of a body that breaks the rules of its DTO', () => {
   });
 });
 
-describe('the answer of a body that is not JSON', () => {
-  it('is a Spanish 400', () => {
+describe('the answer of a body the parser refuses', () => {
+  /** What the handler passes on for `error`: the answer, as its status and body. */
+  const answerTo = (error: unknown): unknown => {
     const next = jest.fn();
+    bodyErrorsInSpanish(error, {} as never, {} as never, next);
+    const [passed] = next.mock.calls[0] as [unknown];
+    return passed instanceof HttpException ? { status: passed.getStatus(), body: passed.getResponse() } : passed;
+  };
+  /** An error as body-parser makes it (with http-errors): its English text, its status and its type. */
+  const parserError = (message: string, status: number, type: string, extra: object = {}) =>
+    Object.assign(new Error(message), { status, statusCode: status, type, expose: status < 500, ...extra });
+
+  it('is a Spanish 400 for a body that is not JSON', () => {
     const parseError = Object.assign(new SyntaxError('Unexpected end of JSON input'), { status: 400, type: 'entity.parse.failed' });
 
-    malformedJsonInSpanish(parseError, {} as never, {} as never, next);
-
-    expect(next).toHaveBeenCalledWith(new BadRequestException(MALFORMED_JSON));
+    expect(answerTo(parseError)).toEqual({ status: 400, body: new BadRequestException(MALFORMED_JSON).getResponse() });
   });
 
-  it('leaves the other errors of the parser as they are', () => {
-    const next = jest.fn();
-    const tooLarge = Object.assign(new Error('request entity too large'), { status: 413, type: 'entity.too.large' });
+  // body-parser's own texts are English: "request entity too large", "unsupported charset "EBCDIC"".
+  it.each([
+    [
+      'a body over the limit of 100 KB',
+      parserError('request entity too large', 413, 'entity.too.large', { limit: 102_400, length: 204_800 }),
+      413,
+      'Payload Too Large',
+      'Los datos enviados pesan más de 100 KB, lo máximo que el sistema recibe en una solicitud.',
+    ],
+    [
+      'a body over a limit it does not say',
+      parserError('request entity too large', 413, 'entity.too.large'),
+      413,
+      'Payload Too Large',
+      'Los datos enviados pesan más de lo permitido, lo máximo que el sistema recibe en una solicitud.',
+    ],
+    [
+      'a form with too many fields',
+      parserError('too many parameters', 413, 'parameters.too.many'),
+      413,
+      'Payload Too Large',
+      'Los datos enviados tienen más campos de los que el sistema recibe en una solicitud.',
+    ],
+    [
+      'a form nested too deep',
+      parserError('The input exceeded the depth', 400, 'querystring.parse.rangeError'),
+      400,
+      'Bad Request',
+      'Los datos enviados tienen más niveles de los que el sistema lee.',
+    ],
+    [
+      'a charset other than UTF-8',
+      parserError('unsupported charset "EBCDIC"', 415, 'charset.unsupported', { charset: 'ebcdic' }),
+      415,
+      'Unsupported Media Type',
+      'Los datos enviados están en una codificación de caracteres que el sistema no lee. Envíalos en UTF-8.',
+    ],
+    [
+      'a compression it does not read',
+      parserError('unsupported content encoding "compress"', 415, 'encoding.unsupported'),
+      415,
+      'Unsupported Media Type',
+      'Los datos enviados están comprimidos de una forma que el sistema no lee.',
+    ],
+  ])('is in Spanish, with the status of the parser, for %s', (_case, error, status, name, message) => {
+    expect(answerTo(error)).toEqual({ status, body: { statusCode: status, error: name, message } });
+  });
 
-    malformedJsonInSpanish(tooLarge, {} as never, {} as never, next);
+  it('is a Spanish message with the status of the parser for any other refusal of a request', () => {
+    expect(answerTo(parserError('request size did not match content length', 400, 'request.size.invalid'))).toEqual({
+      status: 400,
+      body: { statusCode: 400, message: 'No se pudieron leer los datos enviados.' },
+    });
+  });
 
-    expect(next).toHaveBeenCalledWith(tooLarge);
+  it('leaves a failure of the server, and any error that is not of the parser, as it came', () => {
+    const serverFailure = parserError('stream encoding should not be set', 500, 'stream.encoding.set');
+    const other = new Error('otra cosa');
+
+    expect(answerTo(serverFailure)).toBe(serverFailure);
+    expect(answerTo(other)).toBe(other);
   });
 });

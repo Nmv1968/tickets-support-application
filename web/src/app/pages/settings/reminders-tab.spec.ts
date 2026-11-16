@@ -1,9 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import type { HttpTestingController } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { Auth } from '../../core/auth';
+import { httpTestBed } from '../../testing/http';
 import { chooseOption, closeSelect, ngSelect, optionTexts, selectedTexts } from '../../testing/ng-select';
 import { RemindersTab } from './reminders-tab';
 
@@ -13,8 +13,7 @@ describe('RemindersTab, the time after which an open case counts as forgotten', 
   let el: HTMLElement;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed(provideRouter([]));
     // Nobody logged in: the bell, which is read again after every save, asks for nothing here.
     TestBed.inject(Auth).user.set(null);
   });

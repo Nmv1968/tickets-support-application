@@ -1,6 +1,4 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed } from '@angular/core/testing';
 import { Chart } from 'chart.js';
@@ -8,6 +6,7 @@ import type { Dashboard } from '../core/api';
 import { Theme } from '../core/theme';
 import { TicketEvents } from '../core/ticket-events';
 import { todayIso } from '../core/ui';
+import { httpTestBed } from '../testing/http';
 import { buttonIn, nextTask, toasts } from '../testing/screen';
 import { DashboardPage } from './dashboard';
 
@@ -39,8 +38,7 @@ describe('DashboardPage', () => {
   beforeEach(() => {
     // The light theme, whatever the machine that runs the tests prefers.
     localStorage.setItem('st.theme', 'light');
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     theme = TestBed.inject(Theme);
   });
 

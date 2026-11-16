@@ -32,6 +32,15 @@ export async function verifiedPayload(jwt: JwtService, authorization: string | u
   return Number.isInteger(payload.sub) && Number.isInteger(payload.ver) ? (payload as TokenPayload) : null;
 }
 
+/**
+ * Whether the session of `token` still stands for `user`, as the user is stored now: there is
+ * one, it is active, and the version of its sessions is still the one of the token. `JwtGuard`
+ * asks it of every request, and an open stream of events at each heartbeat.
+ */
+export function sessionStands<User extends { active: boolean; tokenVersion: number }>(user: User | null, token: TokenPayload): user is User {
+  return !!user?.active && user.tokenVersion === token.ver;
+}
+
 /** What the token of a session of this user says, as the user is stored now. */
 export function tokenPayload(user: { id: number; role: Role; tokenVersion: number }): TokenPayload {
   return { sub: user.id, role: user.role, ver: user.tokenVersion };

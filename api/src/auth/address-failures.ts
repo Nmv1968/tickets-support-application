@@ -12,8 +12,10 @@ interface Window {
 
 /**
  * Failed logins per client address, in memory: enough for one API instance. A window of a minute
- * starts with the first failure of an address; once `limit` logins of it have failed, every login
- * from that address is refused until the window is over, the right password included. A login that
+ * starts with the first login attempt of an address that has none open, whether its password turns
+ * out right or not: each attempt is counted as failed before its password is compared (`fail`),
+ * and taken back when it is right. Once `limit` logins of the window have failed, every login from
+ * that address is refused until the window is over, the right password included. A login that
  * works does not count, so a team that reaches the API from one address (every client of Docker
  * Desktop does) is never refused for logging in, only for failing.
  *

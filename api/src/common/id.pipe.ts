@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, ParseIntPipe } from '@nestjs/common';
 import type { ArgumentMetadata } from '@nestjs/common';
+import { NO_RECORD_MESSAGE } from './prisma-exception.filter';
 
 /** Largest id the database can hold: its id columns are 32-bit integers. */
 export const MAX_ID = 2_147_483_647;
@@ -17,7 +18,7 @@ export class IdPipe extends ParseIntPipe {
   override async transform(value: string, metadata: ArgumentMetadata): Promise<number> {
     if (!this.isNumeric(value)) throw new BadRequestException(notAnId(metadata.data));
     const id = await super.transform(value, metadata);
-    if (id < 1 || id > MAX_ID) throw new NotFoundException('El registro no existe');
+    if (id < 1 || id > MAX_ID) throw new NotFoundException(NO_RECORD_MESSAGE);
     return id;
   }
 }

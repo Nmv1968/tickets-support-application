@@ -35,6 +35,18 @@ describe('AddressFailures', () => {
       expect(failures.blockedFor('10.0.0.5', later)).toBe(RATE_WINDOW_MS);
     });
 
+    // Each login is counted before its password is compared: the first one opens the window, even
+    // when it turns out right and is taken back. The failures after it fall in that same minute.
+    it('starts the minute with the first login attempt of the address, one whose password was right included', () => {
+      const failures = new AddressFailures(2);
+      failures.fail('10.0.0.5', T0)();
+
+      failTimes(failures, '10.0.0.5', 2, T0 + 50_000);
+
+      expect(failures.blockedFor('10.0.0.5', T0 + 50_000)).toBe(RATE_WINDOW_MS - 50_000);
+      expect(failures.blockedFor('10.0.0.5', T0 + RATE_WINDOW_MS)).toBe(0);
+    });
+
     // A login counts from when it starts; the one whose password was right is taken back.
     it('takes a failure back, once, and leaves the others', () => {
       const failures = new AddressFailures(3);

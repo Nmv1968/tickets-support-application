@@ -140,11 +140,18 @@ sigue en `change-me`: el API se niega a iniciar así.
 ### Uso diario
 
 ```bash
-docker compose ps                 # estado de los contenedores
+docker compose ps                 # estado de los contenedores; el API, "healthy" cuando responde
 docker compose logs -f api        # log del API
 docker compose down               # detener; los datos se conservan
 docker compose up -d              # volver a encender
 ```
+
+El API dice si está en marcha y llega a su base de datos en `GET /api/health`, sin iniciar sesión
+(`{"status":"ok","database":"ok"}`, o un 503 si la base de datos no responde): es lo que Docker
+consulta para marcarlo "healthy", y la web se enciende cuando lo está. Sirve también para vigilar la
+instalación desde otra máquina (<http://servidor:4300/api/health>). Al detenerse, el API deja de
+recibir solicitudes, termina las que está atendiendo, cierra los avisos en vivo (cada navegador se
+vuelve a conectar solo cuando el API vuelve) y las conexiones a la base de datos.
 
 Los contenedores se reinician solos cuando arranca Docker. En Docker Desktop, activa "Start Docker
 Desktop when you sign in" para que la aplicación vuelva sola después de reiniciar la máquina.
@@ -169,10 +176,23 @@ docker compose up -d --build
 
 Los comandos se escriben igual en bash y en PowerShell; el del paso 2, con sus comillas simples.
 
-Las migraciones de la base de datos se aplican solas al arrancar el API. Algunas reorganizan los
+Las migraciones de la base de datos se aplican solas al arrancar el API, y `docker compose up`
+espera a que termine y responda antes de encender la web (hasta dos minutos y medio; si no lo logra,
+avisa que el API no quedó "healthy" y `docker compose logs api` dice por qué). Algunas reorganizan los
 datos: la que trajo el catálogo de empresas, por ejemplo, convierte la empresa escrita en cada caso
 en una entrada del catálogo y une en una sola las que solo se distinguían por mayúsculas, tildes o
 espacios. Por eso los dos primeros pasos: son lo que permite volver atrás.
+
+Al actualizar desde una versión en la que la base de datos no impedía repetir un nombre, la
+migración revisa las empresas, los responsables, los tipos de soporte y los módulos. Si dos se
+llaman igual salvo mayúsculas, tildes o espacios (dos registros al mismo tiempo podían dejarlos
+así; en los módulos, dentro del mismo lugar), uno conserva el nombre (el activo, o el más antiguo
+de los activos) y los demás pasan a llamarse "Nombre (2)", "Nombre (3)"…; sus casos no cambian, y
+luego puedes renombrarlos o desactivarlos. Una preferencia de vista guardada con un texto que no
+es JSON, que solo deja una edición a mano de la base de datos, se borra: ya se leía como no
+guardada. Si dos adjuntos compartieran el mismo archivo guardado (no debería haber ninguno), el más
+reciente pasa a buscarlo como `dup-<id>-<nombre>`: en la carpeta de adjuntos, copia el archivo
+`<nombre>` con ese nombre nuevo.
 
 Al actualizar desde una versión sin roles, todos los usuarios que ya existían quedan como
 administradores, así que nadie pierde lo que podía hacer; el usuario asistente queda como agente.
@@ -275,9 +295,11 @@ cd mcp && npm test            # servidor MCP de los asistentes: node:test contra
 Las del API prueban cada controlador por separado, sobre una base de datos simulada, y en
 `api/src/app.http.spec.ts` el API entero como lo arranca `main.ts`, por HTTP: una ruta pública
 responde sin sesión y las demás piden un token vigente, un agente recibe 403 en una ruta de
-administradores, un cuerpo inválido recibe el 400 en español y un fallo de la base de datos no
-llega como un 500. `api/src/common/dto-messages.spec.ts` recorre todos los DTO del API, con un valor
-que rompe cada regla de cada campo, y falla si alguna respuesta llega en inglés.
+administradores, un cuerpo inválido recibe el 400 en español, un fallo de la base de datos no
+llega como un 500, una ruta que no existe, un cuerpo demasiado grande o una sesión terminada se
+explican en español, y una señal de detención cierra el API antes de terminar el proceso.
+`api/src/common/dto-messages.spec.ts` recorre todos los DTO del API, con un valor que rompe cada
+regla de cada campo, y falla si alguna respuesta llega en inglés.
 
 Las pruebas de extremo a extremo (`e2e/`, con [Playwright](https://playwright.dev/) en Chromium)
 recorren la aplicación como lo haría una persona: ingresar, registrar un caso y crear su empresa,
@@ -295,7 +317,7 @@ respaldos: el servicio `backup` nunca se enciende ahí.
 cd e2e
 npm install
 npx playwright install chromium   # una sola vez
-npm run stack:up                  # construye db, api y web y espera a que el API responda
+npm run stack:up                  # construye db, api y web y espera a /api/health
 npm test                          # todas las pruebas; npm run test:ui para verlas paso a paso
 npm run stack:down                # borra contenedores, volúmenes, red e imágenes de support-e2e
 ```
@@ -311,7 +333,8 @@ de la última corrida.
 
 En GitHub, cada push y cada pull request a `main` pasa por
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): las pruebas del API, de la web y del
-servidor MCP, la revisión de tipos, la compilación de la web y las pruebas de extremo a extremo.
+servidor MCP, la revisión de tipos, el lint del API y de la web, que el esquema de la base de datos
+coincida con sus migraciones, la compilación de la web y las pruebas de extremo a extremo.
 Cuando estas fallan, el informe de Playwright y sus trazas quedan como artefacto de la ejecución.
 
 ### Cambios en la base de datos
@@ -321,6 +344,9 @@ Después de editar `api/prisma/schema.prisma`, con la base de desarrollo encendi
 ```bash
 cd api && npx prisma migrate dev --name describe_el_cambio
 ```
+
+La integración continua aplica todas las migraciones en una base vacía y falla si el resultado no
+es lo que dice `schema.prisma`: un cambio del esquema sin su migración no pasa.
 
 <details>
 <summary>Pasar a Docker los datos de la base de desarrollo</summary>
@@ -362,7 +388,7 @@ Todo va en el archivo `.env` de la raíz, que nunca se sube al repositorio.
 | `MCP_USERNAME`, `MCP_NAME`, `MCP_PASSWORD` | Usuario para asistentes de IA por MCP, con rol de agente. Deja `MCP_PASSWORD` vacía para no crearlo. | `claude`, `Claude`, vacía |
 | `WEB_PORT` | Puerto donde se publica la web. | `4300` |
 | `LOGIN_RATE_LIMIT` | Ingresos fallidos por minuto desde una misma dirección IP; pasado ese número, se rechaza todo ingreso desde ella hasta que termine el minuto. Los ingresos correctos no cuentan. Con Docker Desktop, todos los equipos llegan desde una sola dirección y el límite es de toda la instalación (ver [Seguridad](#seguridad)). | `20` |
-| `API_RATE_LIMIT` | Solicitudes por minuto a todo el API: de cada usuario, con su sesión; de cada dirección IP, las que llegan sin sesión (el ingreso entre ellas). | `1000` |
+| `API_RATE_LIMIT` | Solicitudes por minuto a todo el API: de cada usuario, con su sesión; de cada dirección IP, las que llegan sin sesión (el ingreso entre ellas). Un token que el API ya no acepta (de antes de un cambio de contraseña, por ejemplo) cuenta aparte del de las sesiones vigentes. | `1000` |
 | `TRUST_PROXY_HOPS` | Proxies delante del API cuyo `X-Forwarded-For` se cree para saber la dirección de cada cliente. `1` es el nginx de la web; `2` si hay otro proxy delante (ver [Acceso desde otras máquinas](#acceso-desde-otras-máquinas)). | `1` |
 | `TZ` | Zona horaria. Define qué día es "hoy" para fechas, avisos y respaldos. | `America/Guayaquil` |
 | `BACKUP_DIR` | Carpeta de la máquina que recibe los respaldos. | `./backups` |
@@ -401,7 +427,10 @@ que no cambia lo que ven los demás.
 - **Tipos de soporte.** En **Configuración > Tipos de soporte** define las etiquetas con las que
   clasificas los casos ("Falla del sistema", "Capacitación"…), cada una con su color.
 - **Módulos.** El catálogo inicial es un ejemplo para un software de gestión. Cámbialo por los
-  módulos o áreas de tu producto en **Configuración > Módulos**.
+  módulos o áreas de tu producto en **Configuración > Módulos**. Dos módulos del mismo lugar (los
+  principales, o los submódulos de un módulo) no pueden llamarse igual, sin contar mayúsculas,
+  tildes ni espacios; dos submódulos de módulos distintos sí ("Ventas > Facturas" y "Compras >
+  Facturas").
 - **Columnas de la lista de casos.** El botón **Columnas** de la lista deja marcar cuáles ver y
   volver a las iniciales con **Restablecer**. Es una preferencia de cada usuario, no del equipo.
 - **Guía de estilo de los mensajes a clientes.** La IA redacta siguiendo
@@ -940,7 +969,8 @@ api/
   src/settings/            recordatorios
   src/branding/            logo de la empresa
   src/events/              aviso en vivo de cada cambio (Server-Sent Events)
-  src/common/              sesión, límites de solicitudes, validación de la entrada, cifrado, fechas, revisión de la configuración al arrancar
+  src/health/              GET /api/health: el API está en marcha y llega a su base de datos
+  src/common/              sesión, límites de solicitudes, validación de la entrada, cifrado, fechas, revisión de la configuración al arrancar, lo común a los catálogos de nombres, a los PDF, a las hojas de Excel y a los archivos que se descargan
 web/
   src/app/core/            cliente del API, sesión, tema, utilidades
   src/app/layout/          menú y campana de avisos
@@ -985,12 +1015,15 @@ docker-compose.yml
   tarda en ser rechazado lo mismo que uno que existe, así que la respuesta no dice qué usuarios hay.
 - **Límites de solicitudes.** Cada usuario con sesión puede hacer 1000 solicitudes al API por minuto
   (`API_RATE_LIMIT`), desde donde sea; las que llegan sin sesión, o con un token falso o caducado,
-  cuentan para su dirección IP, con el mismo límite, y el ingreso entre ellas. Además, desde una
-  misma dirección se aceptan 20 ingresos fallidos por minuto (`LOGIN_RATE_LIMIT`), contados desde el
-  primero: pasado ese número, el API rechaza todo ingreso desde ella, aun con la contraseña correcta,
-  hasta que termine ese minuto. Los ingresos correctos no cuentan, así que un equipo que llega desde
-  una sola dirección nunca queda fuera por ingresar. Cada respuesta 429 pide en español que se
-  espere, y la cabecera `Retry-After` dice cuántos segundos faltan. La dirección es la que ve el
+  cuentan para su dirección IP, con el mismo límite, y el ingreso entre ellas. Un token que el API
+  ya no acepta pero que no ha caducado (de antes de un cambio de contraseña o de rol) tiene su propio
+  límite: quien lo conserve no gasta el de las sesiones vigentes de ese usuario. Además, desde una
+  misma dirección se aceptan 20 ingresos fallidos por minuto (`LOGIN_RATE_LIMIT`), en un minuto que
+  empieza con el primer intento de ingreso desde ella, correcto o no: pasado ese número, el API
+  rechaza todo ingreso desde ella, aun con la contraseña correcta, hasta que termine ese minuto. Los
+  ingresos correctos no cuentan, así que un equipo que llega desde una sola dirección nunca queda
+  fuera por ingresar. Cada respuesta 429 pide en español que se espere, y la cabecera `Retry-After`
+  dice cuántos segundos faltan. La dirección es la que ve el
   nginx de la web: la que un cliente escribe en `X-Forwarded-For` no cuenta.
 - **Con Docker Desktop (Windows, macOS)**, el nginx de la web ve llegar a todos los equipos de la red
   desde una sola dirección interna, la de Docker. Los 20 ingresos fallidos por minuto son entonces de
@@ -1005,7 +1038,10 @@ docker-compose.yml
 - **Datos de entrada revisados** antes de que el API haga nada con ellos: cada campo contra las
   reglas de su ruta, y un campo que la ruta no admite se rechaza, de modo que nadie escribe lo que
   ninguna pantalla ofrece. El 400 dice en español qué campo falla, con el nombre que tiene en el API
-  (`El campo «username» debe ser un texto`, `El campo «role» no se admite`).
+  (`El campo «username» debe ser un texto`, `El campo «role» no se admite`). También en español: una
+  ruta que no existe (`La ruta no existe.`), una sesión que terminó o un token que no vale (`La
+  sesión terminó o no es válida. Vuelve a ingresar.`), un cuerpo de más de 100 KB o en otra
+  codificación que UTF-8, y una dirección con caracteres mal codificados.
 - **Subidas con límites de memoria.** Los adjuntos se escriben en disco a medida que llegan, en una
   carpeta aparte (`.incoming`), y pasan a la de los adjuntos solo si el caso existe; sus registros se
   guardan juntos, y si algo falla no queda ningún archivo suelto. Una importación o las imágenes para

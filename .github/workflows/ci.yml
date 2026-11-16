@@ -24,6 +24,23 @@ jobs:
     defaults:
       run:
         working-directory: api
+    # An empty database where Prisma replays the migrations to compare them with the schema,
+    # created like the one of docker-compose.yml. It only lives during this job.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: support
+          POSTGRES_DB: shadow
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U support -d shadow"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -33,10 +50,21 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: api/package-lock.json
+      # Also generates the Prisma client: the "postinstall" script of package.json.
       - run: npm ci
-      - run: npx prisma generate
       - run: npx tsc --noEmit -p tsconfig.json
+      # ESLint with typescript-eslint (eslint.config.mjs), without --fix.
+      - run: npm run lint
       - run: npm test
+      # A change to prisma/schema.prisma without its migration, or a migration the schema does not
+      # say, fails here (exit code 2) and prints what differs.
+      - name: Schema matches the migrations
+        run: >-
+          npx prisma migrate diff
+          --from-migrations prisma/migrations
+          --to-schema-datamodel prisma/schema.prisma
+          --shadow-database-url postgresql://support@localhost:5432/shadow
+          --exit-code
 
   web:
     name: Web (Angular)
@@ -103,7 +131,7 @@ jobs:
       - run: npx tsc --noEmit -p tsconfig.json
       - run: npx playwright install --with-deps chromium
       # Builds db, api and web from this checkout under the Docker Compose project "support-e2e",
-      # with random secrets, and waits until the API answers.
+      # with random secrets, and waits until GET /api/health says the API and its database answer.
       - run: npm run stack:up
       - run: npx playwright test
       - name: Logs of the stack

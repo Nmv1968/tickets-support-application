@@ -1,9 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import type { HttpTestingController } from '@angular/common/http/testing';
 import { ChangeDetectionStrategy, Component, inject, signal, viewChild } from '@angular/core';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { FAILURE, MODULES, TRAINING } from '../testing/fixtures';
+import { httpTestBed } from '../testing/http';
 import { chooseOption, clearSelect, closeSelect, optionTexts, removeChosen, typeInSelect } from '../testing/ng-select';
 import { screenOf, toasts } from '../testing/screen';
 import type { Priority, TicketStatus } from './api';
@@ -57,8 +57,7 @@ describe('The selects of the fields of a case', () => {
   let el: HTMLElement;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     const catalogs = TestBed.inject(Catalogs);
     catalogs.companies.set([
       { id: 1, name: 'Acme', active: true, tickets: 3 },

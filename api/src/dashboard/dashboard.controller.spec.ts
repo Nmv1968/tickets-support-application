@@ -2,13 +2,11 @@ import { BadRequestException, StreamableFile } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import type { Response } from 'express';
 import { formatDateOnly, todayDateOnly } from '../common/labels';
+import { day } from '../common/testing';
+import { XLSX_EXPORT_LIMIT } from '../common/xlsx';
 import type { PrismaService } from '../prisma.service';
-import type { SettingsService } from '../settings/settings.service';
-import { TicketsService } from '../tickets/tickets.service';
-import { XLSX_EXPORT_LIMIT } from '../transfer/transfer.service';
 import { DashboardController } from './dashboard.controller';
-
-const day = (value: string): Date => new Date(`${value}T00:00:00.000Z`);
+import { DashboardService } from './dashboard.service';
 
 describe('dashboard', () => {
   /** A case with the columns the dashboard and its report read. */
@@ -35,11 +33,10 @@ describe('dashboard', () => {
   });
   const cases = (count: number, changes: Record<string, unknown>): Record<string, unknown>[] => Array.from({ length: count }, () => ticket(changes));
 
-  /** The controller over a fake database with these cases. The filters go through the real `buildWhere`. */
+  /** The controller and its service over a fake database with these cases. The filters go through the real `buildWhere`. */
   const setup = (tickets: Record<string, unknown>[] = [], total = tickets.length) => {
     const db = { ticket: { findMany: jest.fn().mockResolvedValue(tickets), count: jest.fn().mockResolvedValue(total) } };
-    const prisma = db as unknown as PrismaService;
-    return { db, controller: new DashboardController(prisma, new TicketsService(prisma, {} as SettingsService)), res: { set: jest.fn() } };
+    return { db, controller: new DashboardController(new DashboardService(db as unknown as PrismaService)), res: { set: jest.fn() } };
   };
   interface CaseQuery {
     where: unknown;

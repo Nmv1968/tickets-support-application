@@ -53,6 +53,9 @@ model User {
 model Assignee {
   id        Int      @id @default(autoincrement())
   name      String
+  /// `searchKey(name)`. Unique: two responsibles cannot have names that differ only in case,
+  /// accents or spaces. No default on purpose, as `Company.sortKey`: written next to the name.
+  nameKey   String   @unique
   /// False keeps the cases they have and takes them out of the lists for new ones.
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -67,15 +70,14 @@ model Company {
   /// `searchKey(name)`: what the list of cases orders by when it orders by company. The database
   /// orders text by code point ("Óptica" and "acme" after "Zapatería"); this, the way people
   /// read the names ('Ñ' as 'n', since the accent goes). No default on purpose: a company created
-  /// without it must not compile; a rename writes it next to the name.
-  sortKey   String
+  /// without it must not compile; a rename writes it next to the name. Unique: it is also what
+  /// tells two companies apart, so two names that differ only in case, accents or spaces cannot be.
+  sortKey   String   @unique
   /// False keeps its cases and takes it out of the lists for new ones.
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
   tickets Ticket[]
-
-  @@index([sortKey])
 }
 
 /// "Tipos de soporte": labels a case can carry (a failure of the system, the user did not know
@@ -83,6 +85,8 @@ model Company {
 model SupportType {
   id        Int      @id @default(autoincrement())
   name      String
+  /// `searchKey(name)`, unique: as `Assignee.nameKey`.
+  nameKey   String   @unique
   /// "#rrggbb", lowercase.
   color     String   @db.VarChar(7)
   /// False keeps it on the cases that carry it and stops offering it for new ones.
@@ -107,11 +111,19 @@ model TicketSupportType {
 model SystemModule {
   id       Int            @id @default(autoincrement())
   name     String
+  /// `searchKey(name)`. No two modules in the same place have the same one: see the unique index.
+  nameKey  String
   parentId Int?
   parent   SystemModule?  @relation("ModuleTree", fields: [parentId], references: [id], onDelete: SetNull)
   children SystemModule[] @relation("ModuleTree")
   active   Boolean        @default(true)
   tickets  Ticket[]
+
+  /// No two submodules of one module, and no two main modules, with the same name. The migration
+  /// creates this index NULLS NOT DISTINCT, which Prisma cannot write here: without it PostgreSQL
+  /// takes two null parents for different ones, and the main modules could repeat a name. An index
+  /// made again from this line would lose it (see 20261114120000_unique_catalog_names).
+  @@unique([parentId, nameKey])
 }
 
 /// Hours allowed to resolve a ticket, per priority.
@@ -164,10 +176,16 @@ model Ticket {
   history      TicketHistory[]
   supportTypes TicketSupportType[]
 
+  /// One for each column a list, an export or the bell filters or orders the cases by: the guard in
+  /// tickets.service.spec.ts walks those queries and fails on a column without one.
   @@index([status])
   @@index([date])
   @@index([companyId])
   @@index([assigneeId])
+  @@index([moduleId])
+  @@index([createdById])
+  @@index([dueAt])
+  @@index([lastActivityAt])
   @@index([promisedDate])
   @@index([archivedAt])
 }
@@ -192,7 +210,8 @@ model Attachment {
   ticketId   Int
   ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   filename   String
-  storedName String
+  /// Name of its file in the folder of the attachments (`storedName()`): one file per attachment.
+  storedName String   @unique
   mime       String
   size       Int
   createdAt  DateTime @default(now())
@@ -226,8 +245,10 @@ model Setting {
 model UserPreference {
   userId    Int
   key       String
-  /// The value, as JSON.
-  value     String
+  /// Any JSON value, kept as it was sent: PostgreSQL `json`, not `jsonb`, which orders the keys
+  /// of an object its own way and refuses a text with a NUL character. The API writes the JSON
+  /// text itself (`PreferencesService.save`).
+  value     Json     @db.Json
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 

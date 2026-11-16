@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { compareSync, hashSync } from 'bcryptjs';
+import { searchKey } from './common/labels';
 import { EventsService } from './events/events.service';
 import type { PrismaService } from './prisma.service';
 import { SeedService } from './seed.service';
@@ -233,5 +234,32 @@ describe('SeedService and the roles', () => {
     expect(warn).toHaveBeenCalledWith(
       'No hay ningún administrador que pueda iniciar sesión y ADMIN_PASSWORD no está definido: nadie puede administrar el sistema.',
     );
+  });
+});
+
+describe('SeedService and the modules', () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  // The unique index of the modules compares the keys of their names: one the seed left out
+  // would make the first start fail.
+  it('fills an empty catalog of modules with the main ones, each with the key of its name', async () => {
+    delete process.env.MCP_PASSWORD;
+    const createMany = jest.fn().mockResolvedValue({ count: 0 });
+    const db = {
+      user: { count: () => Promise.resolve(1) },
+      slaPolicy: { count: () => Promise.resolve(4) },
+      systemModule: { count: () => Promise.resolve(0), createMany },
+    };
+
+    await new SeedService(db as unknown as PrismaService, new EventsService()).onApplicationBootstrap();
+
+    const [[{ data }]] = createMany.mock.calls as [[{ data: { name: string; nameKey: string; parentId?: number }[] }]];
+    expect(data.length).toBeGreaterThan(10);
+    expect(data.find((module) => module.name === 'Órdenes de trabajo')).toEqual({ name: 'Órdenes de trabajo', nameKey: 'ordenes de trabajo' });
+    expect(data.every((module) => module.nameKey === searchKey(module.name) && module.parentId === undefined)).toBe(true);
+    expect(new Set(data.map((module) => module.nameKey)).size).toBe(data.length);
   });
 });

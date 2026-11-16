@@ -1,9 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import type { HttpTestingController } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import type { Attachment } from '../../core/api';
 import { Confirm } from '../../core/confirm';
+import { httpTestBed } from '../../testing/http';
 import { paste } from '../../testing/screen';
 import { TicketAttachments } from './ticket-attachments';
 
@@ -16,8 +16,7 @@ describe('TicketAttachments, a paste', () => {
   let field: HTMLTextAreaElement;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
 
     const fixture = TestBed.createComponent(TicketAttachments);
     fixture.componentRef.setInput('ticketId', 7);
@@ -60,8 +59,7 @@ describe('TicketAttachments, a file deleted', () => {
   const remove = { method: 'DELETE', url: '/api/attachments/3' };
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     confirm = TestBed.inject(Confirm);
 
     fixture = TestBed.createComponent(TicketAttachments);

@@ -4,6 +4,11 @@ import { join } from 'node:path';
 /** The folder of the end-to-end tests. Playwright runs from it (npm scripts of e2e/). */
 export const E2E_DIR = join(__dirname, '..');
 
+/** A file of the repository, as text with \n line ends whatever the checkout left. */
+export function repoFile(...path: string[]): string {
+  return readFileSync(join(E2E_DIR, '..', ...path), 'utf8').split('\r\n').join('\n');
+}
+
 /** Written by `npm run stack:up` (scripts/stack.mjs): the port and the secrets of the throwaway stack. */
 function stackEnv(): Record<string, string> {
   const file = join(E2E_DIR, '.stack.env');

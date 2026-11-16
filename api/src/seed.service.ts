@@ -1,10 +1,12 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Priority, Role } from '@prisma/client';
-import { compare, hash } from 'bcryptjs';
+import { compare } from 'bcryptjs';
+import { searchKey } from './common/labels';
 import { END_SESSIONS } from './common/session-token';
 import { EventsService } from './events/events.service';
 import { PrismaService } from './prisma.service';
 import { WORKING_ADMIN } from './users/admins';
+import { hashPassword, seededUsernames } from './users/credentials';
 
 /** Starting point only. The team edits the catalog from Configuración > Módulos. */
 const INITIAL_MODULES = [
@@ -61,7 +63,7 @@ export class SeedService implements OnApplicationBootstrap {
     }
 
     if ((await this.prisma.systemModule.count()) === 0) {
-      await this.prisma.systemModule.createMany({ data: INITIAL_MODULES.map((name) => ({ name })) });
+      await this.prisma.systemModule.createMany({ data: INITIAL_MODULES.map((name) => ({ name, nameKey: searchKey(name) })) });
     }
   }
 
@@ -75,12 +77,12 @@ export class SeedService implements OnApplicationBootstrap {
   private async seedAssistantUser(): Promise<void> {
     const password = process.env.MCP_PASSWORD;
     if (!password) return;
-    const username = (process.env.MCP_USERNAME ?? 'claude').trim().toLowerCase();
+    const username = seededUsernames(process.env).assistant;
     const existing = await this.prisma.user.findUnique({ where: { username }, select: { passwordHash: true, role: true } });
     const samePassword = !!existing?.passwordHash && (await compare(password, existing.passwordHash));
     if (samePassword && existing?.role === Role.AGENT) return;
 
-    const passwordHash = samePassword && existing?.passwordHash ? existing.passwordHash : await hash(password, 10);
+    const passwordHash = samePassword && existing?.passwordHash ? existing.passwordHash : await hashPassword(password);
     const { id } = await this.prisma.user.upsert({
       where: { username },
       create: { username, name: process.env.MCP_NAME ?? 'Claude', passwordHash, role: Role.AGENT },
@@ -98,7 +100,7 @@ export class SeedService implements OnApplicationBootstrap {
   private async seedAdmin(): Promise<void> {
     if ((await this.prisma.user.count({ where: WORKING_ADMIN })) > 0) return;
 
-    const username = (process.env.ADMIN_USERNAME ?? 'admin').trim().toLowerCase();
+    const username = seededUsernames(process.env).admin;
     const password = process.env.ADMIN_PASSWORD;
     if (!password) {
       this.logger.warn('No hay ningún administrador que pueda iniciar sesión y ADMIN_PASSWORD no está definido: nadie puede administrar el sistema.');
@@ -114,7 +116,7 @@ export class SeedService implements OnApplicationBootstrap {
       return;
     }
 
-    const data = { name: process.env.ADMIN_NAME ?? 'Administrador', passwordHash: await hash(password, 10), active: true, role: Role.ADMIN };
+    const data = { name: process.env.ADMIN_NAME ?? 'Administrador', passwordHash: await hashPassword(password), active: true, role: Role.ADMIN };
     const { id } = await this.prisma.user.upsert({ where: { username }, create: { username, ...data }, update: { ...data, ...END_SESSIONS } });
     if (existing) this.events.sessionsEnded(id);
     this.logger.log(`Usuario inicial "${username}" creado como administrador, con la contraseña de ADMIN_PASSWORD.`);

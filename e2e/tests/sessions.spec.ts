@@ -1,18 +1,7 @@
-import { request } from '@playwright/test';
-import { Api, login } from '../support/api';
+import { Api, login, loginStatus } from '../support/api';
 import { BASE_URL } from '../support/env';
 import { expect, test } from '../support/fixtures';
 import { toast } from '../support/ui';
-
-/** The status the API answers to this login, a refusal included. */
-async function loginStatus(username: string, password: string): Promise<number> {
-  const context = await request.newContext({ baseURL: BASE_URL });
-  try {
-    return (await context.post('/api/auth/login', { data: { username, password } })).status();
-  } finally {
-    await context.dispose();
-  }
-}
 
 /** A stream of events opened with this token as the web opens it, through nginx, and read as it arrives. */
 async function openStream(token: string): Promise<{ status: number; isOpen: () => boolean; close: () => void }> {
@@ -37,7 +26,7 @@ test('quien cambia su contraseña sigue en su sesión y las demás sesiones suya
   const user = await newUser();
   const page = await pageAs(user);
   // The same person logged in somewhere else: another browser, another device.
-  const elsewhere = await Api.as((await login(user.username, user.password)).token);
+  const elsewhere = await Api.loggedIn(user);
   const next = `${user.password}-nueva`;
 
   try {
@@ -74,7 +63,7 @@ test('un administrador que cambia la contraseña de alguien cierra la sesión qu
   // Whatever the screen asks next is refused: the web goes back to the login screen.
   await page.goto('/casos');
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ingresar', exact: true })).toBeVisible();
 });
 
 // Changed from Usuarios, it would end the very session that changes it. An administrator of its
@@ -89,7 +78,7 @@ test('un administrador cambia su propia contraseña en Mi cuenta, no en Usuarios
   await expect(own.getByRole('button')).toHaveCount(0);
 
   // Asked of the API all the same, it refuses, and the session goes on.
-  const asAdmin = await Api.as((await login(admin.username, admin.password)).token);
+  const asAdmin = await Api.loggedIn(admin);
   try {
     expect(await asAdmin.attempt('PATCH', `/api/users/${admin.id}`, { password: 'no-se-guarda' })).toEqual({
       status: 400,
@@ -138,7 +127,7 @@ test('cambiar la contraseña desde otro equipo devuelve sola al ingreso la panta
   await expect(page.getByRole('heading', { name: 'Casos de soporte' })).toBeVisible();
   await expect(page.getByText('En vivo', { exact: true })).toBeVisible();
 
-  const elsewhere = await Api.as((await login(user.username, user.password)).token);
+  const elsewhere = await Api.loggedIn(user);
   try {
     expect((await elsewhere.attempt('POST', '/api/auth/password', { current: user.password, next: `${user.password}-nueva` })).status).toBe(200);
   } finally {
@@ -146,5 +135,5 @@ test('cambiar la contraseña desde otro equipo devuelve sola al ingreso la panta
   }
 
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ingresar', exact: true })).toBeVisible();
 });

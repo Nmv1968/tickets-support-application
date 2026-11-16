@@ -1,3 +1,5 @@
+import { textOf } from './text';
+
 /**
  * For specs: an ng-select handled as a person handles it, through the page. A spec reads what a
  * select shows and chooses in it with these, instead of reaching into the component.
@@ -17,16 +19,14 @@ export function ngSelect(root: ParentNode, name: string): HTMLElement {
   return select;
 }
 
-const text = (element: Element): string => element.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-
 /** The text of one chosen value, without the "×" that takes it out of a multiple select. */
 function chosenText(value: Element): string {
   const label = value.querySelector('.ng-value-label');
-  if (label) return text(label);
+  if (label) return textOf(label);
   // Drawn by a template of the app (a support type as a chip of its colour): its text, less its button.
   const copy = value.cloneNode(true) as Element;
   copy.querySelectorAll('button').forEach((button) => button.remove());
-  return text(copy);
+  return textOf(copy);
 }
 
 /** What the select shows as chosen: one text, several in a multiple select, none when empty. */
@@ -62,13 +62,13 @@ export function closeSelect(select: HTMLElement): void {
  */
 export function optionTexts(select: HTMLElement): string[] {
   openSelect(select);
-  return [...(panel(select)?.querySelectorAll('.ng-option') ?? [])].map(text);
+  return [...(panel(select)?.querySelectorAll('.ng-option') ?? [])].map((option) => textOf(option));
 }
 
 /** Chooses the option with this text, as a click on it does. Throws when the list does not offer it. */
 export function chooseOption(select: HTMLElement, option: string): void {
   openSelect(select);
-  const found = [...(panel(select)?.querySelectorAll<HTMLElement>('.ng-option') ?? [])].find((item) => text(item) === option);
+  const found = [...(panel(select)?.querySelectorAll<HTMLElement>('.ng-option') ?? [])].find((item) => textOf(item) === option);
   if (!found) throw new Error(`The select does not offer "${option}". It offers: ${optionTexts(select).join(', ') || 'nothing'}`);
   found.click();
 }

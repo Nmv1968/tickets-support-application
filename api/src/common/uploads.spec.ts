@@ -1,21 +1,20 @@
 import { BadRequestException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import type { CanActivate, ExecutionContext, INestApplication } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import type { App } from 'supertest/types';
 import { AiController } from '../ai/ai.controller';
 import { AiService } from '../ai/ai.service';
-import { configureApp } from '../app.setup';
 import { BrandingController } from '../branding/branding.controller';
 import { BrandingService } from '../branding/branding.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { TransferController } from '../transfer/transfer.controller';
 import { TransferService } from '../transfer/transfer.service';
+import { said, startedApp } from './testing';
 import { FEW_FIELDS, MB, megabytes, uploadError } from './uploads';
 
 /** The message of an error answer of the API. */
-const said = (answer: request.Response): string => (answer.body as { message: string }).message;
 
 describe('the errors of an upload, in Spanish', () => {
   const several = { fileSize: 15 * MB, files: 10 };
@@ -60,7 +59,7 @@ describe('the errors of an upload, in Spanish', () => {
  * those of the routes, and the messages are what multer really says, through Nest, put in Spanish.
  */
 describe('the upload routes that keep the file in memory', () => {
-  let app: INestApplication;
+  let app: INestApplication<App>;
   const transfer = { import: jest.fn().mockResolvedValue({ toCreate: 0 }) };
   const ai = { analyze: jest.fn().mockResolvedValue({ description: 'Borrador' }) };
   const branding = { setLogo: jest.fn().mockResolvedValue({ version: 'v1' }) };
@@ -77,9 +76,7 @@ describe('the upload routes that keep the file in memory', () => {
         { provide: APP_GUARD, useValue: { canActivate: (context: ExecutionContext) => !!Object.assign(context.switchToHttp().getRequest(), { user: { id: 1 } }) } satisfies CanActivate },
       ],
     }).compile();
-    app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
-    configureApp(app as NestExpressApplication, {});
-    await app.init();
+    app = await startedApp(moduleRef);
   });
   afterAll(() => app.close());
   beforeEach(() => jest.clearAllMocks());

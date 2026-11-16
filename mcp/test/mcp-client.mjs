@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { TEST_PASSWORD, TEST_USERNAME } from './fake-api.mjs';
 
 const MCP_DIR = resolve(import.meta.dirname, '..');
 /** A file that does not exist: the server must never read the .env of the installation. */
@@ -38,4 +39,9 @@ export async function startMcp(env) {
     },
     close: () => client.close(),
   };
+}
+
+/** The server as the tests of the tools use it: over the fake API `api`, logging in as its test user, plus `env`. */
+export function startMcpOn(api, env = {}) {
+  return startMcp({ SUPPORT_API_URL: api.url, SUPPORT_USERNAME: TEST_USERNAME, SUPPORT_PASSWORD: TEST_PASSWORD, ...env });
 }

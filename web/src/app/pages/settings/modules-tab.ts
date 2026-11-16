@@ -72,14 +72,17 @@ export class ModulesTab {
     }
   }
 
-  private async run(action: () => Promise<unknown>): Promise<void> {
+  /** Sends a write and reads the list again, also after a refusal. True when it was stored. */
+  private async run(action: () => Promise<unknown>): Promise<boolean> {
     try {
       await action();
-      await Promise.all([this.load(), this.catalogs.reload()]);
     } catch (error) {
       this.toast.error(error);
       await this.load();
+      return false;
     }
+    await Promise.all([this.load(), this.catalogs.reload().catch((error: unknown) => this.toast.error(error))]);
+    return true;
   }
 
   protected async create(): Promise<void> {
@@ -89,9 +92,16 @@ export class ModulesTab {
     });
   }
 
-  protected rename(module: SystemModule, event: Event): void {
-    const name = (event.target as HTMLInputElement).value.trim();
-    if (name && name !== module.name) void this.run(() => this.api.updateModule(module.id, { name }));
+  /**
+   * A name edited in its row, sent when the field is left. An empty or refused name (another
+   * module has it in the same place) puts back the name the module has: the list read again
+   * still has it, so nothing else would redraw the field.
+   */
+  protected async rename(module: SystemModule, event: Event): Promise<void> {
+    const field = event.target as HTMLInputElement;
+    const name = field.value.trim();
+    const renamed = !!name && name !== module.name && (await this.run(() => this.api.updateModule(module.id, { name })));
+    if (!renamed) field.value = module.name;
   }
 
   protected toggle(module: SystemModule): void {

@@ -11,12 +11,12 @@ test('ingresa por la pantalla de login y rechaza una contraseña incorrecta', as
 
   await page.getByLabel('Usuario').fill(user.username);
   await page.getByLabel('Contraseña').fill(`${user.password}-mal`);
-  await page.getByRole('button', { name: 'Ingresar' }).click();
+  await page.getByRole('button', { name: 'Ingresar', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('Usuario o contraseña incorrectos');
   await expect(page).toHaveURL(/\/login$/);
 
   await page.getByLabel('Contraseña').fill(user.password);
-  await page.getByRole('button', { name: 'Ingresar' }).click();
+  await page.getByRole('button', { name: 'Ingresar', exact: true }).click();
 
   await expect(page).toHaveURL(/\/casos$/);
   await expect(page.getByRole('heading', { name: 'Casos de soporte' })).toBeVisible();

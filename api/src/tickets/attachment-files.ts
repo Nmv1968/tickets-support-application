@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm, unlink } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { extname, join, resolve } from 'node:path';
 import { diskStorage } from 'multer';
-import { uploadDir } from './tickets.service';
+
+/** Folder of the attachments: `UPLOAD_DIR`, or `uploads` in the folder the API runs from. */
+export function uploadDir(): string {
+  return resolve(process.env.UPLOAD_DIR ?? './uploads');
+}
 
 /**
  * Folder where the files of an upload are written while they arrive, inside the folder of the

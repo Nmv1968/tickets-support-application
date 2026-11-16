@@ -1,7 +1,7 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import type { HttpTestingController } from '@angular/common/http/testing';
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { httpTestBed } from '../testing/http';
 import { nextTask } from '../testing/screen';
 import { AppLogo } from './app-logo';
 import { Branding } from './branding';
@@ -24,9 +24,8 @@ describe('Branding, the company logo', () => {
     tabIcon.setAttribute('href', 'favicon.ico');
     document.head.appendChild(tabIcon);
 
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = httpTestBed();
     branding = TestBed.inject(Branding);
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => {

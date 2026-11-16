@@ -3,13 +3,16 @@ import { IsString, MaxLength, MinLength } from 'class-validator';
 import { CurrentUser } from '../common/auth';
 import type { AuthUser } from '../common/auth';
 import { IdPipe } from '../common/id.pipe';
-import { TicketInput, TicketsService, parseTicketFilters } from './tickets.service';
-import type { TicketDetailDto, TicketListDto, TicketQuery } from './tickets.service';
+import { parseTicketFilters } from './ticket-filters';
+import type { TicketQuery } from './ticket-filters';
+import { EMPTY_NOTE, NOTE_TOO_LONG, TEXT_MAX, TicketInput } from './ticket-input';
+import type { TicketDetailDto, TicketListDto } from './ticket-mappers';
+import { TicketsService } from './tickets.service';
 
 export class NoteDto {
   @IsString()
-  @MinLength(1, { message: 'La observación está vacía' })
-  @MaxLength(5000, { message: 'La observación no puede tener más de 5000 caracteres' })
+  @MinLength(1, { message: EMPTY_NOTE })
+  @MaxLength(TEXT_MAX, NOTE_TOO_LONG)
   text!: string;
 }
 

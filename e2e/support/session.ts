@@ -28,3 +28,8 @@ export function adminToken(): string {
   if (!token) throw new Error(`${ADMIN_STATE} no tiene la sesión del admin`);
   return token;
 }
+
+/** The headers of a request made with the admin session, for a test that calls the API through Playwright's own `request`. */
+export function adminHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${adminToken()}` };
+}

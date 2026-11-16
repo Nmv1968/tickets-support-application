@@ -66,13 +66,23 @@ async function body<T>(response: APIResponse): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function login(username: string, password: string): Promise<Session> {
+/** A login as the web sends it, from a context of its own, and what `read` takes from the answer. */
+async function postLogin<T>(username: string, password: string, read: (response: APIResponse) => Promise<T>): Promise<T> {
   const context = await playwrightRequest.newContext({ baseURL: BASE_URL });
   try {
-    return await body<Session>(await context.post('/api/auth/login', { data: { username, password } }));
+    return await read(await context.post('/api/auth/login', { data: { username, password } }));
   } finally {
     await context.dispose();
   }
+}
+
+export function login(username: string, password: string): Promise<Session> {
+  return postLogin(username, password, (response) => body<Session>(response));
+}
+
+/** The status the API answers to this login, a refusal included. */
+export function loginStatus(username: string, password: string): Promise<number> {
+  return postLogin(username, password, (response) => Promise.resolve(response.status()));
 }
 
 /**
@@ -84,6 +94,11 @@ export class Api {
 
   static async as(token: string): Promise<Api> {
     return new Api(await playwrightRequest.newContext({ baseURL: BASE_URL, extraHTTPHeaders: { Authorization: `Bearer ${token}` } }));
+  }
+
+  /** The API as this user in a session opened now: another one, besides those the user already has. */
+  static async loggedIn(user: { username: string; password: string }): Promise<Api> {
+    return Api.as((await login(user.username, user.password)).token);
   }
 
   dispose(): Promise<void> {

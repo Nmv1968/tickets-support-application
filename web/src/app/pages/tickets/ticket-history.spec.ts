@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import type { HistoryEntry } from '../../core/api';
 import { formatDateTime } from '../../core/ui';
+import { textOf } from '../../testing/text';
 import { TicketHistory } from './ticket-history';
 
 describe('TicketHistory', () => {
@@ -11,7 +12,7 @@ describe('TicketHistory', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
-  const lines = (el: HTMLElement): string[] => Array.from(el.querySelectorAll('li')).map((line) => line.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+  const lines = (el: HTMLElement): string[] => Array.from(el.querySelectorAll('li')).map((line) => textOf(line));
 
   it('tells every change of the case, with who made it and from what to what, and is closed until it is opened', () => {
     const el = render([

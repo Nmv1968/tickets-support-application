@@ -1,11 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import ExcelJS from 'exceljs';
 import type { APIResponse } from '@playwright/test';
-import { E2E_DIR } from '../support/env';
+import { repoFile } from '../support/env';
 import { expect, test } from '../support/fixtures';
 import { settle, watchPolicies } from '../support/policies';
-import { adminToken } from '../support/session';
+import { adminHeaders } from '../support/session';
 import { casePanel, caseRow, chooseOption, search, toast } from '../support/ui';
 
 /** The Content-Security-Policy of web/security-headers.conf, directive by directive. */
@@ -61,7 +59,7 @@ function nginxBlocks(config: string): { name: string; directives: string }[] {
 const INCLUDE = 'include /etc/nginx/snippets/security-headers.conf;';
 
 test('cada bloque de nginx.conf con add_header propio incluye las cabeceras de seguridad', () => {
-  const blocks = nginxBlocks(readFileSync(join(E2E_DIR, '..', 'web', 'nginx.conf'), 'utf8'));
+  const blocks = nginxBlocks(repoFile('web', 'nginx.conf'));
   const server = blocks.find((block) => block.name === 'server');
   expect(server?.directives, 'el bloque server').toContain(INCLUDE);
   expect(server?.directives).toContain('server_tokens off;');
@@ -80,7 +78,7 @@ test('nginx envía las cabeceras de seguridad en cada respuesta y no dice su ver
   const permissions = index.headers()['permissions-policy'];
 
   // A file of a case: the API marks it nosniff itself, and the header must still go out once.
-  const session = { Authorization: `Bearer ${adminToken()}` };
+  const session = adminHeaders();
   const company = await api.createCompany(`Vidriería Demo ${uid}`);
   const ticket = await api.createTicket({ companyId: company.id, description: `Adjunto de las cabeceras ${uid}` });
   const uploaded = await request.post(`/api/tickets/${ticket.id}/attachments`, {
@@ -168,7 +166,7 @@ test.describe('con la sesión desde la pantalla de ingreso', () => {
       await expect(page).toHaveURL(/\/login$/);
       await page.getByLabel('Usuario').fill(admin.username);
       await page.getByLabel('Contraseña').fill(admin.password);
-      await page.getByRole('button', { name: 'Ingresar' }).click();
+      await page.getByRole('button', { name: 'Ingresar', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Casos de soporte' })).toBeVisible();
       await clean('ingreso');
     });

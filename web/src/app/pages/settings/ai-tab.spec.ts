@@ -5,8 +5,10 @@ import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing
 import type { AiProviderConfig } from '../../core/api';
 import { Confirm } from '../../core/confirm';
 import { Toast } from '../../core/toast';
+import { httpTestBed } from '../../testing/http';
 import { chooseOption, clearSelect, ngSelect, optionTexts, selectedTexts } from '../../testing/ng-select';
 import { buttonIn } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { AiTab } from './ai-tab';
 
 /** A server chosen by its URL, with a key already stored for it. */
@@ -71,7 +73,7 @@ describe('AiTab, the server URL of a provider that has a stored key', () => {
     write('#ai-url', 'https://api.groq.com/openai/v1');
 
     const notice = warning()!;
-    expect(notice.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+    expect(textOf(notice)).toBe(
       'Cambiaste la URL del servidor. La API key guardada es de la URL anterior y no se envía a otra: escríbela de nuevo. Si guardas sin escribirla, la guardada se borra.',
     );
     // As the other notices: the text in the colour and size of the text around it, the warning
@@ -95,8 +97,7 @@ describe('AiTab, the model of a provider', () => {
   let el: HTMLElement;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
   });
 
   afterEach(() => http.verify());
@@ -180,8 +181,7 @@ describe('AiTab, "Quitar API key"', () => {
   let el: HTMLElement;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     confirm = TestBed.inject(Confirm);
   });
 

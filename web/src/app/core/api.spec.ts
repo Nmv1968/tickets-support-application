@@ -2,6 +2,7 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { ticket } from '../testing/fixtures';
+import { httpTestBed } from '../testing/http';
 import { nextTask } from '../testing/screen';
 import { Api, withReadableBody } from './api';
 import type { TicketDetail } from './api';
@@ -19,9 +20,8 @@ describe('Api, announcing changes to cases', () => {
   let seen: TicketEvent[];
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = httpTestBed();
     api = TestBed.inject(Api);
-    http = TestBed.inject(HttpTestingController);
     seen = [];
     TestBed.inject(TicketEvents).events.subscribe((event) => seen.push(event));
   });
@@ -183,9 +183,8 @@ describe('Api, a refused file request', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = httpTestBed();
     api = TestBed.inject(Api);
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => http.verify());
@@ -218,8 +217,7 @@ describe('Api, a refused file request', () => {
 
 describe('Api, the import template', () => {
   it('asks the server for the spreadsheet as a file', async () => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    const http = TestBed.inject(HttpTestingController);
+    const http = httpTestBed();
     const file = new Blob(['xlsx']);
 
     const download = TestBed.inject(Api).importTemplate();
@@ -239,9 +237,8 @@ describe('Api, the preferences of the logged-in user', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = httpTestBed();
     api = TestBed.inject(Api);
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => http.verify());
@@ -276,9 +273,8 @@ describe('Api, the catalogs of companies and support types', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = httpTestBed();
     api = TestBed.inject(Api);
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => http.verify());
@@ -326,8 +322,7 @@ describe('Api, the catalogs of companies and support types', () => {
 
 describe('Api, the filters of the list of cases', () => {
   it('sends the ones that have a value, ids as they come from a select, and leaves the empty ones out', async () => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    const http = TestBed.inject(HttpTestingController);
+    const http = httpTestBed();
 
     const list = TestBed.inject(Api).tickets({ companyId: 4, assignee: 'none', supportType: 2, createdBy: 7, archived: 'only', moduleId: null, priority: '', status: 'PENDING' });
     const request = http.expectOne((r) => r.url === '/api/tickets');
@@ -346,9 +341,8 @@ describe('Api, the dashboard and its report', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = httpTestBed();
     api = TestBed.inject(Api);
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => http.verify());
@@ -428,9 +422,8 @@ describe('Api, a read that is no longer wanted', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = httpTestBed();
     api = TestBed.inject(Api);
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => http.verify());

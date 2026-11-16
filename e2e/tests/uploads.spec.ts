@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import ExcelJS from 'exceljs';
 import type { APIRequestContext, APIResponse } from '@playwright/test';
-import { BASE_URL, E2E_DIR } from '../support/env';
+import { BASE_URL, repoFile } from '../support/env';
 import { expect, test } from '../support/fixtures';
-import { adminToken } from '../support/session';
+import { adminHeaders } from '../support/session';
 import { openCase, toast } from '../support/ui';
 
 const MB = 1024 * 1024;
@@ -21,13 +21,8 @@ interface Attachment {
   size: number;
 }
 
-const session = (): Record<string, string> => ({ Authorization: `Bearer ${adminToken()}` });
-
-/** A file of the repository, as text with \n line ends whatever the checkout left. */
-const repoFile = (...path: string[]): string => readFileSync(join(E2E_DIR, '..', ...path), 'utf8').split('\r\n').join('\n');
-
 async function attachments(request: APIRequestContext, ticketId: number): Promise<Attachment[]> {
-  const answer = await request.get(`/api/tickets/${ticketId}`, { headers: session() });
+  const answer = await request.get(`/api/tickets/${ticketId}`, { headers: adminHeaders() });
   expect(answer.ok()).toBe(true);
   return ((await answer.json()) as { attachments: Attachment[] }).attachments;
 }
@@ -35,7 +30,7 @@ async function attachments(request: APIRequestContext, ticketId: number): Promis
 /** The preview of an import of the sheet in `path`, which writes nothing. */
 function importPreview(request: APIRequestContext, path: string): Promise<APIResponse> {
   const file = { name: basename(path), mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: readFileSync(path) };
-  return request.post('/api/import', { headers: session(), params: { dryRun: '1' }, multipart: { file }, timeout: 150_000 });
+  return request.post('/api/import', { headers: adminHeaders(), params: { dryRun: '1' }, multipart: { file }, timeout: 150_000 });
 }
 
 /**
@@ -46,7 +41,7 @@ function declaredUpload(path: string, length: number): Promise<{ status: number;
   return new Promise((resolve, reject) => {
     const req = httpRequest(new URL(path, BASE_URL), {
       method: 'POST',
-      headers: { ...session(), 'Content-Type': 'multipart/form-data; boundary=limite', 'Content-Length': String(length) },
+      headers: { ...adminHeaders(), 'Content-Type': 'multipart/form-data; boundary=limite', 'Content-Length': String(length) },
     });
     req.on('response', (res) => {
       let body = '';
@@ -93,12 +88,12 @@ test('el envío más grande de adjuntos pasa por nginx y el API, y uno mayor rec
   const files = Array.from({ length: MAX_FILES }, (_, index) => ({ name: `registro-${index}.bin`, buffer: Buffer.alloc(MAX_FILE_BYTES, index) }));
   const form = new FormData();
   for (const file of files) form.append('files', new Blob([file.buffer], { type: 'application/octet-stream' }), file.name);
-  const answer = await request.post(`/api/tickets/${ticket.id}/attachments`, { headers: session(), multipart: form, timeout: 90_000 });
+  const answer = await request.post(`/api/tickets/${ticket.id}/attachments`, { headers: adminHeaders(), multipart: form, timeout: 90_000 });
   expect(answer.status(), await answer.text()).toBe(201);
   const stored = await attachments(request, ticket.id);
   expect(stored.map((file) => file.size)).toEqual(Array(MAX_FILES).fill(MAX_FILE_BYTES));
   const seventh = stored.find((file) => file.filename === 'registro-7.bin');
-  const download = await request.get(`/api/attachments/${seventh?.id}`, { headers: session() });
+  const download = await request.get(`/api/attachments/${seventh?.id}`, { headers: adminHeaders() });
   expect((await download.body()).equals(files[7].buffer)).toBe(true);
 
   // One byte over what nginx admits: refused before the body is sent, in the shape of the API's errors.

@@ -1,7 +1,7 @@
 // The throwaway stack the end-to-end tests run against: db, api and web of this repository, built
 // by Docker Compose under a project of their own, with their own volumes and their own port.
 //
-//   node scripts/stack.mjs up     builds and starts it, and waits until the API answers
+//   node scripts/stack.mjs up     builds and starts it, and waits until the API and its database answer
 //   node scripts/stack.mjs down   removes it: containers, volumes, network and the images it built
 //   node scripts/stack.mjs logs   shows what its services wrote
 //
@@ -110,15 +110,20 @@ function docker(args) {
   return result.stdout.trim();
 }
 
+/** What `GET /api/health` answers while the API is up and reaches its database. */
+const HEALTHY = JSON.stringify({ status: 'ok', database: 'ok' });
+
 async function waitForApi(port) {
-  // A public route of the API, through nginx: it answers once the web, the API and its database are up.
-  const url = `http://localhost:${port}/api/branding`;
+  // The health check of the API, through nginx: it answers once the web, the API and its database
+  // are up. Compose has already waited for the healthcheck of the api service before starting the
+  // web; this also goes through nginx, as the tests will.
+  const url = `http://localhost:${port}/api/health`;
   const started = Date.now();
   let last = '';
   while (Date.now() - started < READY_TIMEOUT_MS) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (response.ok && (response.headers.get('content-type') ?? '').includes('application/json')) {
+      if (response.ok && (await response.text()) === HEALTHY) {
         console.log(`[stack] Listo en http://localhost:${port} (${Math.round((Date.now() - started) / 1000)} s esperando al API).`);
         return true;
       }
@@ -150,8 +155,12 @@ async function up() {
   }
 
   console.log(`[stack] Construyendo y levantando ${SERVICES.join(', ')} del proyecto "${project}" en el puerto ${port}…`);
+  // Compose starts the web once the healthcheck of the api service passes, and fails if it never does.
   const result = compose(['up', '-d', '--build', ...SERVICES], values);
-  if (result.status !== 0) fail('docker compose up falló.');
+  if (result.status !== 0) {
+    compose(['logs', '--tail', '80', 'api', 'web'], values);
+    fail('docker compose up falló.');
+  }
 
   if (!(await waitForApi(port))) {
     compose(['logs', '--tail', '80', 'api', 'web'], values);

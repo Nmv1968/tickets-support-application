@@ -1,7 +1,7 @@
 import { BadRequestException, StreamableFile } from '@nestjs/common';
 import type { Response } from 'express';
-import type { AuthUser } from '../common/auth';
 import { formatDateOnly, todayDateOnly } from '../common/labels';
+import { ADMIN_USER } from '../common/testing';
 import { TransferController } from './transfer.controller';
 import type { TransferService } from './transfer.service';
 
@@ -72,7 +72,7 @@ describe('export endpoints', () => {
 });
 
 describe('import endpoint', () => {
-  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin', role: 'ADMIN' };
+  const user = ADMIN_USER;
   const file = { buffer: Buffer.from('Empresa,Descripción'), originalname: 'casos.csv' } as Express.Multer.File;
   const setup = (): { controller: TransferController; run: jest.Mock } => {
     const run = jest.fn().mockResolvedValue({ toCreate: 0 });

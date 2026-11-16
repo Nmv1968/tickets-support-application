@@ -16,7 +16,8 @@ export const MAX_XLSX_UNCOMPRESSED_BYTES = 50 * MB;
 /** Parts an .xlsx may have. One of Excel has a few dozen; each one costs memory even when it is empty. */
 export const MAX_XLSX_PARTS = 10_000;
 
-const UNREADABLE = 'No se pudo leer el archivo Excel';
+/** The 400 of an .xlsx that is not one, or that is damaged. */
+export const UNREADABLE_XLSX = 'No se pudo leer el archivo Excel';
 
 /** One part of a zip as its central directory describes it, with where its data starts. */
 export interface ZipPart {
@@ -35,7 +36,7 @@ const LOCAL_FILE_HEADER = 0x04034b50;
 const IN_ZIP64 = 0xffffffff;
 
 function unreadable(): BadRequestException {
-  return new BadRequestException(UNREADABLE);
+  return new BadRequestException(UNREADABLE_XLSX);
 }
 
 function uint64(buffer: Buffer, at: number): number {

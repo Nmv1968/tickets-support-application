@@ -1,11 +1,10 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { Branding } from '../../core/branding';
 import { Confirm } from '../../core/confirm';
 import { toSmallPng } from '../../core/ui';
+import { httpTestBed } from '../../testing/http';
 import { nextTask } from '../../testing/screen';
 import { BrandingTab } from './branding-tab';
 
@@ -100,8 +99,7 @@ describe('BrandingTab, the company logo in Configuración', () => {
   }
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     branding = TestBed.inject(Branding);
     confirm = TestBed.inject(Confirm);
     fixture = TestBed.createComponent(BrandingTab);

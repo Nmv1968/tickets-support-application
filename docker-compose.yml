@@ -55,12 +55,23 @@ services:
     memswap_limit: 1536m
     volumes:
       - uploads:/data/uploads
+    # Healthy while GET /api/health answers: the API is up and reaches its database. It starts by
+    # applying the pending migrations, which an update can make take a while: the failures of the
+    # first two minutes do not count.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 120s
 
   web:
     build: ./web
     restart: unless-stopped
+    # Started once the API answers, so the first page does not meet a 502.
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-4300}:80"
 

@@ -15,14 +15,14 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { AdminOnly, Public } from '../common/auth';
-import { FEW_FIELDS, uploadErrors } from '../common/uploads';
+import { FEW_FIELDS, MB, uploadErrors } from '../common/uploads';
 import { BrandingService } from './branding.service';
 
 /**
  * Hard stop for the upload itself, well above what the service accepts: a file between the two
  * gets the message of the service, which names the size a logo may really have.
  */
-const UPLOAD_LIMIT_BYTES = 8 * 1024 * 1024;
+const UPLOAD_LIMIT_BYTES = 8 * MB;
 const LOGO_LIMITS = { fileSize: UPLOAD_LIMIT_BYTES, files: 1, ...FEW_FIELDS };
 
 @Controller('branding')

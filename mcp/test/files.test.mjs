@@ -6,8 +6,8 @@ import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, sep } from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
-import { TEST_PASSWORD, TEST_USERNAME, startFakeApi } from './fake-api.mjs';
-import { startMcp } from './mcp-client.mjs';
+import { startFakeApi } from './fake-api.mjs';
+import { startMcpOn } from './mcp-client.mjs';
 
 /** The per-file limit of the API. */
 const LIMIT = 15 * 1024 * 1024;
@@ -20,7 +20,7 @@ const started = [];
 
 /** A server of its own: the fake API and its user, plus `env`. */
 async function mcpWith(env = {}) {
-  const server = await startMcp({ SUPPORT_API_URL: api.url, SUPPORT_USERNAME: TEST_USERNAME, SUPPORT_PASSWORD: TEST_PASSWORD, ...env });
+  const server = await startMcpOn(api, env);
   started.push(server);
   return server;
 }

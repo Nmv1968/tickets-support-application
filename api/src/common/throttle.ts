@@ -57,14 +57,17 @@ export function clientAddress(ip: string | undefined): string {
 }
 
 /**
- * Whose budget of the general limit a request spends: `user:<id>` for one with a valid session
- * token, checked as `JwtGuard` checks it but without reading the database, so a team behind one
- * address (every client of Docker Desktop reaches nginx from the same one) does not share it.
- * `ip:<address>` for any other: without a token, or with one forged or expired.
+ * Whose budget of the general limit a request spends: `user:<id>:<version>` for one with a valid
+ * session token, checked as `JwtGuard` checks it but without reading the database, so a team behind
+ * one address (every client of Docker Desktop reaches nginx from the same one) does not share it.
+ * The version of the sessions is the token's: a token the API has since revoked (a new password,
+ * another role) but that has not expired spends a budget of its own, and whoever still has it
+ * cannot use up the one of the user's sessions that stand. `ip:<address>` for any other request:
+ * without a token, or with one forged or expired.
  */
 export async function requestTracker(req: Request, jwt: JwtService): Promise<string> {
   const payload = await verifiedPayload(jwt, req.headers.authorization);
-  return payload ? `user:${payload.sub}` : `ip:${clientAddress(req.ip)}`;
+  return payload ? `user:${payload.sub}:${payload.ver}` : `ip:${clientAddress(req.ip)}`;
 }
 
 /**

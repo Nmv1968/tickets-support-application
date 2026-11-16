@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { Toast } from '../core/toast';
 import { chooseOption, closeSelect, ngSelect, optionTexts, selectedTexts } from './ng-select';
+import { textOf } from './text';
 
 /*
  * For specs: the screen of a component, used as a person uses it. A spec finds what is on screen
@@ -14,11 +15,9 @@ export function findIn<T extends Element>(root: ParentNode, selector: string): T
   return found;
 }
 
-const text = (element: Element): string => element.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-
 /** The button in `root` that says `text`, spaces around it aside. Throws when there is none. */
 export function buttonIn(root: ParentNode, label: string): HTMLButtonElement {
-  const found = Array.from(root.querySelectorAll('button')).find((candidate) => text(candidate) === label);
+  const found = Array.from(root.querySelectorAll('button')).find((candidate) => textOf(candidate) === label);
   if (!found) throw new Error(`No "${label}" button on screen`);
   return found;
 }

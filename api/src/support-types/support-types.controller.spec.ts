@@ -1,8 +1,10 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { catalogTable } from '../common/testing';
 import type { PrismaService } from '../prisma.service';
-import { SupportTypeInput, SupportTypesController } from './support-types.controller';
+import { SupportTypesController } from './support-types.controller';
+import { SupportTypeInput, SupportTypesService } from './support-types.service';
 
 interface Row {
   id: number;
@@ -18,37 +20,14 @@ describe('support types catalog', () => {
   const other: Row = { id: 3, name: 'Otro', color: '#64748b', active: false, _count: { tickets: 1 } };
   const COLOR_REFUSED = 'El color debe ser un código hexadecimal como #1a2b3c';
 
-  /** The controller over a fake database that holds `rows` and records what is written to it. */
+  /**
+   * The controller and its service over a fake database that holds `rows` and records what is
+   * written to it. Its table refuses a second type with the key of a name, as the unique index of
+   * `nameKey` does.
+   */
   const setup = (rows: Row[] = [other, failure, training]) => {
-    const table = [...rows];
-    // The lock of the catalog as the database gives it: to one transaction at a time, until it ends.
-    let lockFree: Promise<void> = Promise.resolve();
-    const db = {
-      $transaction: jest.fn((work: (tx: unknown) => Promise<unknown>): Promise<unknown> => {
-        let release = (): void => undefined;
-        const $executeRaw = jest.fn(async (): Promise<void> => {
-          const held = lockFree;
-          lockFree = new Promise((resolve) => (release = resolve));
-          await held;
-        });
-        return work({ ...db, $executeRaw }).finally(() => release());
-      }),
-      supportType: {
-        // The name check reads the others: every row but the one being edited.
-        findMany: jest.fn(({ where }: { where?: { id?: { not: number } } } = {}) => Promise.resolve(table.filter((row) => row.id !== where?.id?.not))),
-        findUnique: jest.fn(({ where }: { where: { id: number } }) => Promise.resolve(table.find((row) => row.id === where.id) ?? null)),
-        create: jest.fn(({ data }: { data: { name: string; color: string } }) => {
-          const row = { id: 9 + table.length - rows.length, ...data, active: true, _count: { tickets: 0 } };
-          table.push(row);
-          return Promise.resolve(row);
-        }),
-        update: jest.fn(({ where, data }: { where: { id: number }; data: Partial<Row> }) =>
-          Promise.resolve({ ...table.find((row) => row.id === where.id), ...JSON.parse(JSON.stringify(data)) }),
-        ),
-        delete: jest.fn().mockResolvedValue({}),
-      },
-    };
-    return { db, controller: new SupportTypesController(db as unknown as PrismaService) };
+    const db = { supportType: catalogTable('SupportType', 'nameKey', rows) };
+    return { db, controller: new SupportTypesController(new SupportTypesService(db as unknown as PrismaService)) };
   };
 
   it('lists every type with its colour and the cases that carry it: the active first, then by name', async () => {
@@ -71,7 +50,7 @@ describe('support types catalog', () => {
         tickets: 0,
       });
       expect(db.supportType.create).toHaveBeenCalledWith({
-        data: { name: 'Error de usuario', color: '#1a2b3c' },
+        data: { name: 'Error de usuario', nameKey: 'error de usuario', color: '#1a2b3c' },
         include: { _count: { select: { tickets: true } } },
       });
     });
@@ -102,7 +81,8 @@ describe('support types catalog', () => {
 
       expect(refused).toBeInstanceOf(ConflictException);
       expect(refused).toHaveProperty('message', 'Ya existe un tipo de soporte con ese nombre');
-      expect(db.supportType.create).not.toHaveBeenCalled();
+      // The database refused it: nothing was added.
+      expect(db.supportType.rows).toHaveLength(3);
     });
 
     // A deactivated type is in none of the lists that offer one. "Ya existe" alone would send the person looking for it in vain.
@@ -113,17 +93,21 @@ describe('support types catalog', () => {
 
       expect(refused).toBeInstanceOf(ConflictException);
       expect(refused).toHaveProperty('message', 'Ya existe un tipo de soporte con ese nombre, pero está inactivo. Actívalo en Configuración > Tipos de soporte.');
-      expect(db.supportType.create).not.toHaveBeenCalled();
+      expect(db.supportType.rows).toHaveLength(3);
     });
 
-    // Each request asks whether the name is free before the other has added it, unless only one
-    // at a time may ask and add.
+    // The unique index lets the first one in; the second is told the name is taken.
     it('is added once when two requests bring the same new name at the same moment', async () => {
       const { db, controller } = setup();
 
       const answers = await Promise.allSettled([controller.create({ name: 'Consulta', color: '#1a2b3c' }), controller.create({ name: 'CONSULTA', color: '#445566' })]);
 
-      expect(db.supportType.create).toHaveBeenCalledTimes(1);
+      expect(db.supportType.rows.map((row) => [row.name, row.color])).toEqual([
+        ['Otro', '#64748b'],
+        ['Falla del sistema', '#e5484d'],
+        ['Capacitación', '#0c7beb'],
+        ['Consulta', '#1a2b3c'],
+      ]);
       expect(answers[0]).toEqual({ status: 'fulfilled', value: { id: 9, name: 'Consulta', color: '#1a2b3c', active: true, tickets: 0 } });
       expect(answers[1]).toMatchObject({ status: 'rejected', reason: { message: 'Ya existe un tipo de soporte con ese nombre' } });
       expect((answers[1] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
@@ -139,7 +123,6 @@ describe('support types catalog', () => {
       expect(refused).toBeInstanceOf(BadRequestException);
       expect(refused).toHaveProperty('message', `"${name.replace(/\s+/g, ' ').trim()}" no puede ser el nombre de un tipo de soporte: en los reportes ya significa que el caso no tiene ninguno`);
       expect(db.supportType.create).not.toHaveBeenCalled();
-      expect(db.$transaction).not.toHaveBeenCalled();
     });
 
     it('can have a name that only starts or ends like it', async () => {
@@ -165,14 +148,15 @@ describe('support types catalog', () => {
       const { db, controller } = setup();
 
       expect(await controller.update(1, { name: 'Capacitacion' })).toMatchObject({ id: 1, name: 'Capacitacion', color: '#0c7beb', tickets: 3 });
-      expect(db.supportType.update.mock.calls[0][0]).toMatchObject({ where: { id: 1 }, data: { name: 'Capacitacion' } });
+      expect(db.supportType.update.mock.calls[0][0]).toMatchObject({ where: { id: 1 }, data: { name: 'Capacitacion', nameKey: 'capacitacion' } });
     });
 
     it('cannot take the name of another type', async () => {
       const { db, controller } = setup();
 
-      await expect(controller.update(2, { name: 'capacitacion' })).rejects.toThrow('Ya existe un tipo de soporte con ese nombre');
-      expect(db.supportType.update).not.toHaveBeenCalled();
+      await expect(controller.update(2, { name: 'capacitacion', color: '#000000' })).rejects.toThrow(new ConflictException('Ya existe un tipo de soporte con ese nombre'));
+      // Nor the colour sent with the name: the database refused the whole write.
+      expect(db.supportType.rows.find((row) => row.id === 2)).toMatchObject({ name: 'Falla del sistema', color: '#e5484d' });
     });
 
     it('cannot take the name of a deactivated type either, and says where that one is', async () => {
@@ -181,7 +165,19 @@ describe('support types catalog', () => {
       await expect(controller.update(2, { name: 'otro' })).rejects.toThrow(
         'Ya existe un tipo de soporte con ese nombre, pero está inactivo. Actívalo en Configuración > Tipos de soporte.',
       );
-      expect(db.supportType.update).not.toHaveBeenCalled();
+      expect(db.supportType.rows.find((row) => row.id === 2)).toMatchObject({ name: 'Falla del sistema' });
+    });
+
+    // A rename used to be checked outside of any lock: two renames to the same new name at once
+    // both found it free. The unique index lets only one of them in.
+    it('gives a new name to one type only when two renames to it arrive together', async () => {
+      const { db, controller } = setup();
+
+      const answers = await Promise.allSettled([controller.update(2, { name: 'Consulta' }), controller.update(3, { name: 'CONSULTA' })]);
+
+      expect(answers[0]).toMatchObject({ status: 'fulfilled', value: { id: 2, name: 'Consulta' } });
+      expect(answers[1]).toMatchObject({ status: 'rejected', reason: new ConflictException('Ya existe un tipo de soporte con ese nombre') });
+      expect(db.supportType.rows.map((row) => row.name)).toEqual(['Otro', 'Consulta', 'Capacitación']);
     });
 
     it('cannot be renamed "Sin tipo"', async () => {
@@ -198,16 +194,17 @@ describe('support types catalog', () => {
       const { db, controller } = setup();
 
       expect(await controller.update(1, { color: '#AABBCC' })).toMatchObject({ id: 1, name: 'Capacitación', color: '#aabbcc' });
-      expect(db.supportType.update.mock.calls[0][0].data).toEqual({ name: undefined, color: '#aabbcc', active: undefined });
+      expect(db.supportType.update.mock.calls[0][0].data).toEqual({ name: undefined, nameKey: undefined, color: '#aabbcc', active: undefined });
       // Nothing to compare the name with: the other rows are not read.
       expect(db.supportType.findMany).not.toHaveBeenCalled();
+      expect(db.supportType.findUnique).not.toHaveBeenCalled();
     });
 
     it('deactivates and reactivates without touching the name or the colour', async () => {
       const { db, controller } = setup();
 
       expect(await controller.update(1, { active: false })).toMatchObject({ id: 1, name: 'Capacitación', color: '#0c7beb', active: false, tickets: 3 });
-      expect(db.supportType.update.mock.calls[0][0].data).toEqual({ name: undefined, color: undefined, active: false });
+      expect(db.supportType.update.mock.calls[0][0].data).toEqual({ name: undefined, nameKey: undefined, color: undefined, active: false });
     });
 
     // The checks of the request body let a null through, and the database takes it in none of the columns.
@@ -216,7 +213,7 @@ describe('support types catalog', () => {
 
       await controller.update(1, { name: null, color: null, active: null } as unknown as SupportTypeInput);
 
-      expect(db.supportType.update.mock.calls[0][0].data).toEqual({ name: undefined, color: undefined, active: undefined });
+      expect(db.supportType.update.mock.calls[0][0].data).toEqual({ name: undefined, nameKey: undefined, color: undefined, active: undefined });
     });
   });
 

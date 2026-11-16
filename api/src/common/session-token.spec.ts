@@ -1,5 +1,5 @@
 import { JwtService } from '@nestjs/jwt';
-import { DEFAULT_TOKEN_LIFETIME, END_SESSIONS, jwtOptions, tokenLifetimeSeconds, tokenPayload, verifiedPayload } from './session-token';
+import { DEFAULT_TOKEN_LIFETIME, END_SESSIONS, jwtOptions, sessionStands, tokenLifetimeSeconds, tokenPayload, verifiedPayload } from './session-token';
 
 describe('lifetime of a login token', () => {
   it('is 12 hours unless JWT_EXPIRES_IN says otherwise', () => {
@@ -52,10 +52,10 @@ describe('the token of an Authorization header', () => {
   });
 
   it.each([
-    ['no header', async () => undefined],
+    ['no header', () => Promise.resolve(undefined)],
     ['a token sent another way', async () => `Basic ${await sign({ sub: 5, role: 'AGENT', ver: 0 })}`],
     ['a token without its scheme', async () => sign({ sub: 5, role: 'AGENT', ver: 0 })],
-    ['text that is not a token', async () => 'Bearer basura'],
+    ['text that is not a token', () => Promise.resolve('Bearer basura')],
     ['a token signed with another secret', async () => `Bearer ${await sign({ sub: 5, role: 'AGENT', ver: 0 }, 'otro-secreto-de-otra-instalacion-de-32-caracteres')}`],
     ['an expired token', async () => `Bearer ${await sign({ sub: 5, role: 'AGENT', ver: 0, exp: Math.floor(Date.now() / 1000) - 10 })}`],
     ['a token without a user', async () => `Bearer ${await sign({ role: 'ADMIN', ver: 0 })}`],
@@ -63,5 +63,21 @@ describe('the token of an Authorization header', () => {
     ['a token whose user is not a number', async () => `Bearer ${await sign({ sub: '5', role: 'ADMIN', ver: 0 })}`],
   ])('is nothing for %s', async (_case, header) => {
     expect(await verifiedPayload(jwt, await header())).toBeNull();
+  });
+});
+
+// JwtGuard asks it of every request, and an open stream of events at each heartbeat.
+describe('whether the session of a token stands', () => {
+  const token = { sub: 5, role: 'AGENT' as const, ver: 2 };
+
+  it('stands for the user it names, active and with the version of the token', () => {
+    expect(sessionStands({ active: true, tokenVersion: 2 }, token)).toBe(true);
+  });
+
+  it('is over once the user is gone, inactive or has ended the sessions of that version', () => {
+    expect(sessionStands(null, token)).toBe(false);
+    expect(sessionStands({ active: false, tokenVersion: 2 }, token)).toBe(false);
+    expect(sessionStands({ active: true, tokenVersion: 3 }, token)).toBe(false);
+    expect(sessionStands({ active: true, tokenVersion: 1 }, token)).toBe(false);
   });
 });

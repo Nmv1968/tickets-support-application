@@ -12,9 +12,11 @@ import {
   formatMomentEs,
   moduleFullName,
   parseDateOnly,
+  supportTypesText,
   ticketCode,
 } from '../common/labels';
-import { PDF_STATUS_COLOR, excelMoment, paintHeader, pdfSafe, supportTypesText } from '../transfer/transfer.service';
+import { PDF_COLOR, PDF_HEADER_CELL, PDF_STATUS_COLOR, pdfFrame, pdfSafe } from '../common/pdf';
+import { EXCEL_FORMAT, excelMoment, paintHeader } from '../common/xlsx';
 
 // The numbers of the dashboard and the two files of its report. Everything here works on cases
 // already loaded: it reads no database and no clock, so the same cases always give the same report.
@@ -216,33 +218,30 @@ function excelTime(time: string | null): number | null {
   return (hours * 60 + minutes) / 1440;
 }
 
-const DAY = 'dd/mm/yyyy';
-const MOMENT = 'dd/mm/yyyy hh:mm';
-
 /**
  * The columns of the "Datos" sheet, in order: one row per case, each value in a cell of its own
  * kind (a date is a date, a number a number), which is what a pivot table or Power BI works with.
  */
 const DATA_COLUMNS: { name: string; width: number; numFmt?: string; value: (t: ReportRow, now: Date) => string | number | Date | null }[] = [
   { name: 'Código', width: 12, value: (t) => ticketCode(t.id) },
-  { name: 'Fecha del caso', width: 15, numFmt: DAY, value: (t) => t.date },
-  { name: 'Hora', width: 8, numFmt: 'hh:mm', value: (t) => excelTime(t.time) },
+  { name: 'Fecha del caso', width: 15, numFmt: EXCEL_FORMAT.day, value: (t) => t.date },
+  { name: 'Hora', width: 8, numFmt: EXCEL_FORMAT.time, value: (t) => excelTime(t.time) },
   // Text, so that a pivot table groups by it as it is and orders the months without help.
   { name: 'Mes', width: 10, value: (t) => formatDateOnly(t.date).slice(0, 7) },
-  { name: 'Fecha de registro', width: 17, numFmt: MOMENT, value: (t) => excelMoment(t.createdAt) },
+  { name: 'Fecha de registro', width: 17, numFmt: EXCEL_FORMAT.moment, value: (t) => excelMoment(t.createdAt) },
   { name: 'Empresa', width: 28, value: (t) => t.company.name },
   { name: 'Descripción', width: 60, value: (t) => t.description },
   { name: 'Estado', width: 14, value: (t) => STATUS_LABEL[t.status] },
   { name: 'Responsable', width: 20, value: (t) => t.assignee?.name ?? null },
   { name: 'Prioridad', width: 11, value: (t) => (t.priority ? PRIORITY_LABEL[t.priority] : null) },
   { name: 'Módulo', width: 26, value: (t) => (t.module ? moduleFullName(t.module) : null) },
-  { name: 'Tipos de soporte', width: 28, value: (t) => supportTypesText(t.supportTypes) || null },
+  { name: 'Tipos de soporte', width: 28, value: (t) => supportTypesText(t.supportTypes.map((link) => link.supportType)) || null },
   { name: 'Minutos estimados', width: 18, value: (t) => t.estimatedMinutes },
   { name: 'Minutos reales', width: 15, value: (t) => t.spentMinutes || null },
-  { name: 'Fecha límite', width: 17, numFmt: MOMENT, value: (t) => excelMoment(t.dueAt) },
+  { name: 'Fecha límite', width: 17, numFmt: EXCEL_FORMAT.moment, value: (t) => excelMoment(t.dueAt) },
   { name: 'Vencido', width: 10, value: (t, now) => yesNo(isOverdue(t, now)) },
-  { name: 'Promesa de entrega', width: 18, numFmt: DAY, value: (t) => t.promisedDate },
-  { name: 'Resuelto el', width: 17, numFmt: MOMENT, value: (t) => excelMoment(t.resolvedAt) },
+  { name: 'Promesa de entrega', width: 18, numFmt: EXCEL_FORMAT.day, value: (t) => t.promisedDate },
+  { name: 'Resuelto el', width: 17, numFmt: EXCEL_FORMAT.moment, value: (t) => excelMoment(t.resolvedAt) },
   {
     name: 'Horas hasta resolver',
     width: 19,
@@ -285,7 +284,7 @@ export function buildReportWorkbook(rows: ReportRow[], options: ReportOptions): 
   overview.addRow(['Periodo', periodText(options)]);
   overview.addRow(['Casos archivados', options.includeArchived ? 'Incluidos' : 'No incluidos']);
   const generated = overview.addRow(['Generado el', excelMoment(options.now)]);
-  generated.getCell(2).numFmt = MOMENT;
+  generated.getCell(2).numFmt = EXCEL_FORMAT.moment;
   generated.getCell(2).alignment = { horizontal: 'left' };
   overview.addRow([]);
   paintHeader(overview.addRow(['Indicador', 'Valor', 'Qué cuenta']));
@@ -368,8 +367,6 @@ export function buildReportWorkbook(rows: ReportRow[], options: ReportOptions): 
   return workbook;
 }
 
-const INK_MUTED = '#5b6472';
-const PRIMARY = '#0c7beb';
 const NEUTRAL = '#98a2b3';
 /** Companies the PDF lists. The spreadsheet has them all. */
 export const PDF_COMPANIES = 15;
@@ -437,9 +434,7 @@ const count = (value: number, color?: string): TableCell => ({ text: String(valu
 function breakdown(title: string, headers: string[], widths: (number | string)[], rows: TableCell[][]): Content {
   const headerCell = (text: string, index: number): TableCell => ({
     text,
-    bold: true,
-    color: '#ffffff',
-    fillColor: PRIMARY,
+    ...PDF_HEADER_CELL,
     alignment: index > 0 && index < headers.length - 1 ? 'right' : 'left',
   });
   return {
@@ -453,7 +448,7 @@ function breakdown(title: string, headers: string[], widths: (number | string)[]
     layout: {
       hLineWidth: (index: number) => (index > 1 ? 0.5 : 0),
       vLineWidth: () => 0,
-      hLineColor: () => '#dbe4f3',
+      hLineColor: () => PDF_COLOR.rule,
       paddingTop: () => 4,
       paddingBottom: () => 4,
     },
@@ -480,7 +475,7 @@ function statusBreakdown(title: string, first: string, counts: StatusCount[], mo
       barWidth,
     ),
   ]);
-  if (more) rows.push([{ text: more, colSpan: 6, italics: true, color: INK_MUTED }, {}, {}, {}, {}, {}]);
+  if (more) rows.push([{ text: more, colSpan: 6, italics: true, color: PDF_COLOR.muted }, {}, {}, {}, {}, {}]);
   const others = [50, 50, 50, 34, barWidth];
   return breakdown(title, [first, 'Sin resolver', 'Pendientes', 'Resueltos', 'Total', ''], [nameWidth(others), ...others], rows);
 }
@@ -489,7 +484,7 @@ function statusBreakdown(title: string, first: string, counts: StatusCount[], mo
 function countBreakdown(title: string, first: string, counts: { name: string; total: number; color?: string | null }[]): Content {
   const barWidth = 230;
   const max = Math.max(...counts.map((c) => c.total), 0);
-  const rows = counts.map((c): TableCell[] => [pdfSafe(c.name), count(c.total), bar([{ value: c.total, color: c.color ?? PRIMARY }], max, barWidth)]);
+  const rows = counts.map((c): TableCell[] => [pdfSafe(c.name), count(c.total), bar([{ value: c.total, color: c.color ?? PDF_COLOR.primary }], max, barWidth)]);
   const others = [40, barWidth];
   return breakdown(title, [first, 'Casos', ''], [nameWidth(others), ...others], rows);
 }
@@ -503,9 +498,9 @@ export function reportPdf(summary: Summary, options: ReportOptions): TDocumentDe
   const hours = summary.avgResolutionHours;
   const indicator = (label: string, value: string, hint = ''): TableCell => ({
     stack: [
-      { text: label, fontSize: 8, color: INK_MUTED },
+      { text: label, fontSize: 8, color: PDF_COLOR.muted },
       { text: value, fontSize: 16, bold: true, margin: [0, 2, 0, 1] },
-      { text: hint, fontSize: 7, color: INK_MUTED },
+      { text: hint, fontSize: 7, color: PDF_COLOR.muted },
     ],
     fillColor: '#f3f6fb',
     margin: [4, 3, 4, 3],
@@ -564,40 +559,26 @@ export function reportPdf(summary: Summary, options: ReportOptions): TDocumentDe
     countBreakdown(
       'Casos por prioridad',
       'Prioridad',
-      summary.byPriority.map((p) => ({ name: priorityName(p.priority), total: p.total, color: p.priority ? PRIMARY : NEUTRAL })),
+      summary.byPriority.map((p) => ({ name: priorityName(p.priority), total: p.total, color: p.priority ? PDF_COLOR.primary : NEUTRAL })),
     ),
     countBreakdown(
       'Casos por tipo de soporte',
       'Tipo de soporte',
       summary.bySupportType.map((type) => ({ ...type, color: type.color ?? NEUTRAL })),
     ),
-    { text: 'Un caso con varios tipos de soporte cuenta en cada uno.', fontSize: 7, color: INK_MUTED, margin: [0, 3, 0, 0] },
+    { text: 'Un caso con varios tipos de soporte cuenta en cada uno.', fontSize: 7, color: PDF_COLOR.muted, margin: [0, 3, 0, 0] },
   ];
 
-  const nothing: Content = { text: 'No hay casos en este periodo.', color: INK_MUTED, margin: [0, 16, 0, 0] };
+  const nothing: Content = { text: 'No hay casos en este periodo.', color: PDF_COLOR.muted, margin: [0, 16, 0, 0] };
 
   return {
     pageSize: 'A4',
     pageMargins: [PAGE_MARGIN, 56, PAGE_MARGIN, 40],
-    defaultStyle: { font: 'Helvetica', fontSize: 8 },
-    header: {
-      margin: [PAGE_MARGIN, 22, PAGE_MARGIN, 0],
-      columns: [
-        { text: 'Reporte de soporte', fontSize: 15, bold: true, color: PRIMARY },
-        { text: `Generado el ${formatMomentEs(options.now)}`, alignment: 'right', fontSize: 8, color: INK_MUTED, margin: [0, 6, 0, 0] },
-      ],
-    },
-    footer: (page: number, pages: number) => ({
-      text: `Página ${page} de ${pages}`,
-      alignment: 'center',
-      fontSize: 7,
-      color: INK_MUTED,
-      margin: [0, 12, 0, 0],
-    }),
+    ...pdfFrame('Reporte de soporte', formatMomentEs(options.now), PAGE_MARGIN),
     content: [
       {
         text: `Periodo: ${periodText(options)}   ·   ${options.includeArchived ? 'Incluye los casos archivados' : 'Sin los casos archivados'}`,
-        color: INK_MUTED,
+        color: PDF_COLOR.muted,
         margin: [0, 0, 0, 8],
       },
       {

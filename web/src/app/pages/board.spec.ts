@@ -1,8 +1,6 @@
 import { CdkDrag, CdkDropList } from '@angular/cdk/drag-drop';
 import type { CdkDragDrop } from '@angular/cdk/drag-drop';
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -10,6 +8,7 @@ import type { Ticket, TicketStatus } from '../core/api';
 import { Catalogs } from '../core/catalogs';
 import { TicketEvents } from '../core/ticket-events';
 import { ASSIGNEES, ticket, ticketPage } from '../testing/fixtures';
+import { httpTestBed } from '../testing/http';
 import { chooseOption, clearSelect, closeSelect, ngSelect, optionTexts, selectedTexts } from '../testing/ng-select';
 import { toasts } from '../testing/screen';
 import { BoardPage } from './board';
@@ -36,8 +35,7 @@ describe('BoardPage', () => {
   let el: HTMLElement;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     events = TestBed.inject(TicketEvents);
     TestBed.inject(Catalogs).assignees.set(ASSIGNEES);
   });

@@ -2,18 +2,19 @@ import { BadRequestException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import type { ClassConstructor } from 'class-transformer';
-import type { AuthUser } from '../common/auth';
+import { ADMIN_USER, sqlText } from '../common/testing';
 import { EventsService } from '../events/events.service';
 import type { PrismaService } from '../prisma.service';
 import { WORKING_ADMIN } from './admins';
 import { UsersController } from './users.controller';
+import { UsersService } from './users.service';
 
 type UserChanges = Parameters<UsersController['update']>[1];
 
 /** The role each user has before the edit: 1 is the administrator of the session, 5 an agent. */
 const STORED_ROLES: Record<number, 'ADMIN' | 'AGENT'> = { 1: 'ADMIN', 5: 'AGENT' };
 
-/** The controller over a fake database that holds user 5 and records what is written to it. */
+/** The controller and its service over a fake database that holds user 5 and records what is written to it. */
 const setup = () => {
   const db = {
     user: {
@@ -32,10 +33,10 @@ const setup = () => {
   /** The users whose open streams of events were told to end, in order. */
   const ended: number[] = [];
   events.sessionsEnded$.subscribe((userId) => ended.push(userId));
-  return { db, events, ended, controller: new UsersController(db as unknown as PrismaService, events) };
+  return { db, events, ended, controller: new UsersController(new UsersService(db as unknown as PrismaService, events)) };
 };
 
-const me: AuthUser = { id: 1, username: 'admin', name: 'Admin', role: 'ADMIN' };
+const me = ADMIN_USER;
 
 describe('user edit', () => {
   // The checks of the request body let a null through, and the database does not take it in "active".
@@ -326,7 +327,7 @@ describe('the last administrator', () => {
 
     expect(db.$executeRaw).toHaveBeenCalledTimes(2);
     const [sql, key] = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, number];
-    expect(sql.join('?')).toBe('SELECT pg_advisory_xact_lock(?::bigint)');
+    expect(sqlText(sql)).toBe('SELECT pg_advisory_xact_lock(?::bigint)');
     expect(key).toEqual(expect.any(Number));
     expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(db.user.update.mock.invocationCallOrder[0]);
   });

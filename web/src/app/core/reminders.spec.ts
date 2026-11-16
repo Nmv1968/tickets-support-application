@@ -1,8 +1,7 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { httpTestBed } from '../testing/http';
 import type { ReminderList, Ticket } from './api';
 import { Auth } from './auth';
 import { Reminders } from './reminders';
@@ -19,8 +18,7 @@ describe('Reminders', () => {
   const list = (groups: Partial<ReminderList>): ReminderList => ({ staleHours: 48, promiseSoonDays: 0, promises: [], stale: [], overdue: [], ...groups });
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed(provideRouter([]));
     TestBed.inject(Auth).user.set({ id: 7, username: 'ana', name: 'Ana', role: 'AGENT' });
     reminders = TestBed.inject(Reminders);
   });

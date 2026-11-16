@@ -1,11 +1,10 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { Company, TicketDraft } from '../../core/api';
 import { Catalogs } from '../../core/catalogs';
+import { httpTestBed } from '../../testing/http';
 import { clearSelect, closeSelect, openSelect, typeInSelect } from '../../testing/ng-select';
 import { paste, screenOf, toasts } from '../../testing/screen';
 import { AiDraftDialog } from './ai-draft';
@@ -18,8 +17,7 @@ describe('AiDraftDialog, a paste', () => {
   let el: HTMLElement;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed(provideRouter([]));
   });
 
   afterEach(() => http.verify());
@@ -106,8 +104,7 @@ describe('AiDraftDialog, the case under review', () => {
   }
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed(provideRouter([]));
     // One entry of each catalog is deactivated: it keeps its cases and takes no new ones.
     catalogs = TestBed.inject(Catalogs);
     catalogs.companies.set([TORNILLO, { id: 4, name: 'Bodega Sur', active: false, tickets: 1 }]);

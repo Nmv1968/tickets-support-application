@@ -1,12 +1,12 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import type { ImportResult, ImportRow } from '../../core/api';
 import { Toast } from '../../core/toast';
+import { httpTestBed } from '../../testing/http';
 import { chooseOption, ngSelect, openSelect, selectedTexts } from '../../testing/ng-select';
 import { nextTask, toasts } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { ImportDialog } from './import-dialog';
 
 // The template is how a person gets the format the import reads without guessing it.
@@ -21,8 +21,7 @@ describe('ImportDialog, the template to fill in', () => {
   };
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     // A click on a link with `download` saves a file: here it is only recorded.
     saved = [];
     spyOn(HTMLAnchorElement.prototype, 'click').and.callFake(function (this: HTMLAnchorElement) {
@@ -153,8 +152,7 @@ describe('ImportDialog, the preview of a sheet', () => {
   let imported: number;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     fixture = TestBed.createComponent(ImportDialog);
     el = fixture.nativeElement as HTMLElement;
     imported = 0;
@@ -216,7 +214,7 @@ describe('ImportDialog, the preview of a sheet', () => {
   /** The text of a section of the preview, by how its heading starts. Empty when the preview does not have it. */
   function section(heading: string): string {
     const found = Array.from(el.querySelectorAll('section')).find((item) => item.querySelector('h3')?.textContent?.startsWith(heading));
-    return found?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    return textOf(found);
   }
 
   // The two titles the preview lists values of the sheet under.
@@ -226,7 +224,7 @@ describe('ImportDialog, the preview of a sheet', () => {
   /** The values listed under one of those titles: a line per catalog. */
   function values(title: string): string[] {
     const heading = Array.from(el.querySelectorAll('section[aria-labelledby=import-values] p')).find((item) => item.textContent?.trim() === title);
-    return Array.from(heading?.nextElementSibling?.querySelectorAll('li') ?? [], (item) => item.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+    return Array.from(heading?.nextElementSibling?.querySelectorAll('li') ?? [], (item) => textOf(item));
   }
 
   /** The headers of the table of the first rows to import, the last table of the preview. */

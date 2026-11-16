@@ -3,6 +3,7 @@ import { TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
 import type { TicketNote } from '../../core/api';
 import { formatDateTime } from '../../core/ui';
 import { screenOf } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { TicketNotes } from './ticket-notes';
 
 const CALLED: TicketNote = { id: 1, text: 'Se llamó al cliente\nVuelve a llamar el lunes', authorName: 'Ana', createdAt: '2026-11-06T09:00:00.000Z' };
@@ -37,7 +38,7 @@ describe('TicketNotes', () => {
 
   const { find, button, click, type } = screenOf(() => el, render);
   const box = (): HTMLTextAreaElement => find('textarea[aria-label="Nueva observación"]');
-  const lines = (): string[] => Array.from(el.querySelectorAll('li')).map((line) => line.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+  const lines = (): string[] => Array.from(el.querySelectorAll('li')).map((line) => textOf(line));
 
   it('lists the observations of the case, each with when and who wrote it, line by line', fakeAsync(() => {
     create([CALLED, IMPORTED]);

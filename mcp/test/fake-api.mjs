@@ -93,7 +93,7 @@ export function seed() {
   return data;
 }
 
-/** A case as the API answers it (detailDto of api/src/tickets/tickets.service.ts). */
+/** A case as the API answers it (detailDto of api/src/tickets/ticket-mappers.ts). */
 function ticket(data, fields) {
   const company = data.companies.find((c) => c.id === fields.companyId);
   const assignee = data.assignees.find((a) => a.id === fields.assigneeId);
@@ -212,9 +212,12 @@ export async function startFakeApi() {
     return created;
   };
 
+  /** A stored case as the fields `ticket()` builds one from: its support types by id. */
+  const fieldsOf = (current) => ({ ...current, supportTypeIds: current.supportTypes.map((type) => type.id) });
+
   /** Applies a TicketInput to a stored case, as `TicketsService.update` reads its fields. */
   const applyInput = (current, body) => {
-    const fields = { ...current, supportTypeIds: current.supportTypes.map((type) => type.id) };
+    const fields = fieldsOf(current);
     for (const name of ['date', 'time', 'companyId', 'description', 'status', 'assigneeId', 'priority', 'estimatedMinutes', 'spentMinutes', 'moduleId', 'promisedDate']) {
       if (body[name] !== undefined) fields[name] = body[name];
     }
@@ -240,7 +243,8 @@ export async function startFakeApi() {
       return [200, { token, user: { id: 9, username: TEST_USERNAME, name: 'Asistente' } }];
     }
     const auth = /^Bearer (.+)$/.exec(req.headers.authorization ?? '');
-    if (!auth || !tokens.has(auth[1])) throw new HttpError(401, 'Unauthorized');
+    // The API's 401 for a token it no longer accepts (api/src/common/auth.ts).
+    if (!auth || !tokens.has(auth[1])) throw new HttpError(401, 'La sesión terminó o no es válida. Vuelve a ingresar.');
 
     const segments = path.split('/');
     switch (`${method} ${segments[0]}${segments.length > 1 ? '/:id' : ''}${segments.slice(2).map((s) => `/${s}`).join('')}`) {
@@ -263,6 +267,12 @@ export async function startFakeApi() {
       case 'POST modules': {
         const id = Math.max(...data.modules.map((m) => m.id)) + 1;
         const parent = data.modules.find((m) => m.id === body.parentId);
+        // As the unique index of the API: no two modules with the same name in the same place (ModulesService).
+        const taken = data.modules.find((m) => m.parentId === (body.parentId ?? null) && key(m.name) === key(body.name));
+        if (taken) {
+          const where = parent ? `Ya existe un módulo con ese nombre en ${parent.name}` : 'Ya existe un módulo principal con ese nombre';
+          throw new HttpError(409, taken.active ? where : `${where}, pero está inactivo. Actívalo en Configuración > Módulos.`);
+        }
         data.modules.push({ id, name: body.name, parentId: body.parentId ?? null, active: true, fullName: parent ? `${parent.name} > ${body.name}` : body.name });
         return [201, { id }];
       }
@@ -289,16 +299,17 @@ export async function startFakeApi() {
       case 'POST tickets/:id/notes': {
         const current = findTicket(segments[1]);
         const note = { id: 200 + current.notes.length, text: body.text, authorName: 'Asistente', createdAt: new Date().toISOString() };
-        return [201, replace(ticket(data, { ...current, supportTypeIds: current.supportTypes.map((t) => t.id), notes: [note, ...current.notes] }))];
+        return [201, replace(ticket(data, { ...fieldsOf(current), notes: [note, ...current.notes] }))];
       }
       case 'POST tickets/:id/attachments': {
         const current = findTicket(segments[1]);
         if (!body?.files?.length) throw new HttpError(400, 'No se recibió ningún archivo');
         const added = body.files.map((file, index) => ({ id: 300 + index, filename: file.name, mime: file.type, size: file.size, createdAt: new Date().toISOString() }));
-        return [201, replace(ticket(data, { ...current, supportTypeIds: current.supportTypes.map((t) => t.id), attachments: [...current.attachments, ...added] }))];
+        return [201, replace(ticket(data, { ...fieldsOf(current), attachments: [...current.attachments, ...added] }))];
       }
       default:
-        throw new HttpError(404, `Cannot ${method} /api/${path}`);
+        // The API's 404 for a method and path without a route (api/src/common/route-errors.filter.ts).
+        throw new HttpError(404, 'La ruta no existe.');
     }
   }
 

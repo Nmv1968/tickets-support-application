@@ -1,9 +1,10 @@
-import { Controller, Headers, Logger, Sse, UnauthorizedException } from '@nestjs/common';
+import { Controller, Headers, Logger, Sse } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { NEVER, defer, exhaustMap, filter, interval, map, merge, switchMap, takeUntil, takeWhile, timer } from 'rxjs';
 import type { Observable } from 'rxjs';
-import { verifiedPayload } from '../common/session-token';
+import { sessionOver } from '../common/auth';
+import { sessionStands, verifiedPayload } from '../common/session-token';
 import type { TokenPayload } from '../common/session-token';
 import { PrismaService } from '../prisma.service';
 import { EventsService } from './events.service';
@@ -43,15 +44,20 @@ export class EventsController {
    * session: when the API ends the sessions of the user (`EventsService.sessionsEnded`), when the
    * token expires, and at a heartbeat that finds the user inactive or with another version of the
    * sessions than the token's, as after a change made straight in the database. The browser opens
-   * it again, and JwtGuard answers 401 to a session that is over.
+   * it again, and JwtGuard answers 401 to a session that is over. Every stream ends too when the API
+   * closes (`EventsService.closing$`): the server could not close while one is open.
    */
   @Sse()
   async stream(@Headers('authorization') authorization: string | undefined): Promise<Observable<MessageEvent>> {
     // JwtGuard has just accepted it; read again for the version and the expiry it does not keep.
     const token = await verifiedPayload(this.jwt, authorization);
-    if (!token) throw new UnauthorizedException();
+    if (!token) throw sessionOver();
 
-    const ended = merge(this.events.sessionsEnded$.pipe(filter((userId) => userId === token.sub)), token.exp === undefined ? NEVER : at(token.exp * 1000));
+    const ended = merge(
+      this.events.sessionsEnded$.pipe(filter((userId) => userId === token.sub)),
+      token.exp === undefined ? NEVER : at(token.exp * 1000),
+      this.events.closing$,
+    );
     const heartbeat = interval(HEARTBEAT_MS).pipe(
       // A check still waiting for the database when the next one is due: that one is skipped.
       exhaustMap(() => this.stands(token)),
@@ -67,7 +73,7 @@ export class EventsController {
   private async stands(token: TokenPayload): Promise<boolean> {
     try {
       const user = await this.prisma.user.findUnique({ where: { id: token.sub }, select: { active: true, tokenVersion: true } });
-      return !!user?.active && user.tokenVersion === token.ver;
+      return sessionStands(user, token);
     } catch (error) {
       // Unknown is not standing: the stream ends, and opening it again goes through JwtGuard.
       this.logger.warn(`No se pudo comprobar la sesión de un flujo de eventos, que se cierra: ${error instanceof Error ? error.message : String(error)}`);

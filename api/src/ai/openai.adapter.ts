@@ -1,4 +1,4 @@
-import { AiError, cleanBaseUrl, httpJson, providerError } from './types';
+import { AiError, NO_BASE_URL, cleanBaseUrl, httpJson, providerError } from './types';
 import type { AiAdapter, AiCredentials, AiRequest, HttpResult } from './types';
 
 const OPENAI_URL = 'https://api.openai.com/v1';
@@ -14,7 +14,7 @@ const NOT_CHAT = /embedding|whisper|tts|dall-e|moderation|audio|realtime|transcr
 function baseUrl(cred: AiCredentials, isOpenAi: boolean): string {
   if (isOpenAi) return OPENAI_URL;
   const url = cleanBaseUrl(cred.baseUrl);
-  if (!url) throw new AiError('Falta la URL del servidor.');
+  if (!url) throw new AiError(NO_BASE_URL);
   if (!/^https?:\/\//i.test(url)) throw new AiError('La URL del servidor debe empezar con http:// o https://');
   return url;
 }

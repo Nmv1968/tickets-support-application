@@ -1,16 +1,17 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
-import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
-import { configureApp } from '../app.setup';
+import type { App } from 'supertest/types';
+import { said, startedApp } from '../common/testing';
 import { MB } from '../common/uploads';
 import { PrismaService } from '../prisma.service';
 import { incomingDir, storedName } from './attachment-files';
 import { AttachmentsController } from './attachments.controller';
+import { AttachmentsService } from './attachments.service';
 import { TicketsService } from './tickets.service';
 
 const NOW = new Date(2026, 10, 11, 10, 0, 0);
@@ -36,7 +37,6 @@ async function onDisk(): Promise<{ stored: string[]; incoming: string[] }> {
 }
 
 /** The message of an error answer of the API. */
-const said = (answer: request.Response): string => (answer.body as { message: string }).message;
 
 /** A fake database that holds case 7 and records what is written to it. */
 function database() {
@@ -49,11 +49,12 @@ function database() {
 }
 
 describe('attachment upload', () => {
-  /** The controller over the fake database, with case 7 in it. */
+  /** The controller and its service over the fake database, with case 7 in it. */
   const setup = () => {
     const db = database();
     const tickets = { get: jest.fn().mockResolvedValue({ id: 7 }) };
-    return { db, tickets, controller: new AttachmentsController(db as unknown as PrismaService, tickets as unknown as TicketsService) };
+    const service = new AttachmentsService(db as unknown as PrismaService, tickets as unknown as TicketsService);
+    return { db, tickets, service, controller: new AttachmentsController(service) };
   };
   /** A file as multer leaves it: written under its stored name in the folder of uploads in progress. */
   const arrived = async (originalname: string, content = 'x'): Promise<Express.Multer.File> => {
@@ -140,14 +141,14 @@ describe('attachment upload', () => {
   });
 
   it('empties the folder of uploads in progress when the API starts, and leaves the attachments', async () => {
-    const { controller } = setup();
+    const { service } = setup();
     await arrived('a medias.png');
     await writeFile(join(root, 'adjunto.png'), 'x');
 
-    await controller.onModuleInit();
+    await service.onModuleInit();
 
     expect(await onDisk()).toEqual({ stored: ['adjunto.png'], incoming: [] });
-    await expect(controller.onModuleInit()).resolves.toBeUndefined();
+    await expect(service.onModuleInit()).resolves.toBeUndefined();
   });
 });
 
@@ -155,7 +156,7 @@ describe('attachment upload', () => {
 describe('an attachment that does not exist', () => {
   const setup = () => {
     const db = { attachment: { findUnique: jest.fn().mockResolvedValue(null), delete: jest.fn() } };
-    return { db, controller: new AttachmentsController(db as unknown as PrismaService, {} as TicketsService) };
+    return { db, controller: new AttachmentsController(new AttachmentsService(db as unknown as PrismaService, {} as TicketsService)) };
   };
 
   it('answers its download with a 404 in Spanish', async () => {
@@ -175,7 +176,7 @@ describe('an attachment that does not exist', () => {
  * request that is refused, by a limit or by a pipe, leaves nothing behind.
  */
 describe('attachment upload through multer', () => {
-  let app: INestApplication;
+  let app: INestApplication<App>;
   let db: ReturnType<typeof database>;
   const tickets = { get: jest.fn().mockResolvedValue({ id: 7, attachments: [] }) };
 
@@ -184,13 +185,12 @@ describe('attachment upload through multer', () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [AttachmentsController],
       providers: [
+        AttachmentsService,
         { provide: PrismaService, useValue: db },
         { provide: TicketsService, useValue: tickets },
       ],
     }).compile();
-    app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
-    configureApp(app as NestExpressApplication, {});
-    await app.init();
+    app = await startedApp(moduleRef);
   });
   afterEach(() => app.close());
 

@@ -6,16 +6,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import type { Role } from '@prisma/client';
 import { hashSync } from 'bcryptjs';
 import request from 'supertest';
+import type { App } from 'supertest/types';
 import { AppModule } from './app.module';
-import { configureApp } from './app.setup';
-import { ADMIN_ONLY_MESSAGE } from './common/auth';
+import { closeOnStopSignals } from './app.setup';
+import { ADMIN_ONLY_MESSAGE, SESSION_OVER_MESSAGE } from './common/auth';
+import { BAD_PATH_MESSAGE, NO_ROUTE_MESSAGE } from './common/route-errors.filter';
 import { tokenPayload } from './common/session-token';
+import { startedApp } from './common/testing';
+import { DATABASE_DOWN_MESSAGE } from './health/health.service';
 import { PrismaService } from './prisma.service';
 import { SeedService } from './seed.service';
 
@@ -78,6 +81,8 @@ function fakeDatabase() {
     company: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn(), update: jest.fn().mockReturnValue({}) },
     ticket: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(() => Promise.reject(notFound())),
+    // The query of the health check, which reads no table.
+    $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
   };
 }
 
@@ -93,7 +98,7 @@ type Variables = Partial<Record<(typeof VARIABLES)[number], string>>;
  * tests of its own), and the uploads go to a folder of the test: starting, the API empties the
  * folder of uploads in progress.
  */
-async function start(db: FakeDatabase, variables: Variables = {}): Promise<INestApplication> {
+async function start(db: FakeDatabase, variables: Variables = {}): Promise<INestApplication<App>> {
   const uploads = mkdtempSync(join(tmpdir(), 'soporte-api-'));
   const env: Variables = { JWT_SECRET: SECRET, UPLOAD_DIR: uploads, ...variables };
   const saved = VARIABLES.map((name) => [name, process.env[name]] as const);
@@ -108,10 +113,7 @@ async function start(db: FakeDatabase, variables: Variables = {}): Promise<INest
       .overrideProvider(SeedService)
       .useValue({})
       .compile();
-    const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
-    configureApp(app, env);
-    await app.init();
-    return app;
+    return await startedApp(moduleRef, env);
   } finally {
     for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name];
@@ -123,7 +125,7 @@ async function start(db: FakeDatabase, variables: Variables = {}): Promise<INest
 
 describe('the API as main.ts builds it, through HTTP', () => {
   let db: FakeDatabase;
-  let app: INestApplication;
+  let app: INestApplication<App>;
   let jwt: JwtService;
 
   beforeAll(async () => {
@@ -153,11 +155,12 @@ describe('the API as main.ts builds it, through HTTP', () => {
   });
 
   describe('every other route', () => {
-    it('answers 401 without a token, and does nothing', async () => {
+    it('answers 401 without a token, in Spanish, and does nothing', async () => {
       for (const answer of [await http().get('/api/tickets'), await http().get('/api/auth/me'), await http().put('/api/settings/reminders').send({ staleHours: 1 })]) {
         expect(answer.status).toBe(401);
-        expect(answer.body).toEqual({ statusCode: 401, message: 'Unauthorized' });
+        expect(answer.body).toEqual({ statusCode: 401, error: 'Unauthorized', message: SESSION_OVER_MESSAGE });
       }
+      expect(SESSION_OVER_MESSAGE).toBe('La sesión terminó o no es válida. Vuelve a ingresar.');
       expect(db.ticket.findMany).not.toHaveBeenCalled();
       expect(db.setting.upsert).not.toHaveBeenCalled();
     });
@@ -173,6 +176,7 @@ describe('the API as main.ts builds it, through HTTP', () => {
       for (const headers of [bearer(forged), bearer(expired), bearer('basura'), { Authorization: valid }, { Authorization: `Basic ${valid}` }]) {
         const answer = await http().get('/api/auth/me').set(headers);
         expect(answer.status).toBe(401);
+        expect((answer.body as { message: unknown }).message).toBe(SESSION_OVER_MESSAGE);
       }
       expect((await http().get('/api/auth/me').set(bearer(valid))).status).toBe(200);
     });
@@ -192,7 +196,9 @@ describe('the API as main.ts builds it, through HTTP', () => {
       const token = await tokenOf('ana');
       db.users[1].active = false;
       try {
-        expect((await http().get('/api/auth/me').set(bearer(token))).status).toBe(401);
+        const refused = await http().get('/api/auth/me').set(bearer(token));
+        expect(refused.status).toBe(401);
+        expect(refused.body).toEqual({ statusCode: 401, error: 'Unauthorized', message: SESSION_OVER_MESSAGE });
       } finally {
         db.users[1].active = true;
       }
@@ -351,8 +357,121 @@ describe('the API as main.ts builds it, through HTTP', () => {
   });
 });
 
+// Nest, Express and body-parser answer these before any route of the API runs, in English.
+describe('a request no route of the API takes', () => {
+  let db: FakeDatabase;
+  let app: INestApplication<App>;
+
+  beforeAll(async () => {
+    db = fakeDatabase();
+    app = await start(db);
+  });
+
+  afterAll(() => app.close());
+
+  const http = () => request(app.getHttpServer());
+  const agent = async () => ({ Authorization: `Bearer ${await app.get(JwtService).signAsync(tokenPayload(db.users[1]))}` });
+
+  it('gets a 404 in Spanish for a path without a route, and for a method the route does not have', async () => {
+    const headers = await agent();
+    for (const answer of [
+      await http().get('/api/nada-por-aqui').set(headers),
+      await http().get('/api/'),
+      await http().put('/api/tickets').set(headers).send({}),
+      await http().delete('/api/companies').set(headers),
+      await http().get('/api/nada/%FF').set(headers),
+    ]) {
+      expect(answer.status).toBe(404);
+      expect(answer.body).toEqual({ statusCode: 404, error: 'Not Found', message: NO_ROUTE_MESSAGE });
+    }
+    expect(NO_ROUTE_MESSAGE).toBe('La ruta no existe.');
+  });
+
+  it('keeps the 404 of a route that did not find its record as the route wrote it', async () => {
+    const answer = await http().patch('/api/companies/999').set(await agent()).send({ active: false });
+
+    expect(answer.body).toEqual({ statusCode: 404, error: 'Not Found', message: 'El registro no existe' });
+  });
+
+  // An escape with hexadecimal digits that is not UTF-8 text: nginx lets it through.
+  it('gets a 400 in Spanish for a parameter of the path that cannot be read as text', async () => {
+    const headers = await agent();
+    for (const path of ['/api/tickets/%FF', '/api/preferences/a%C0%80']) {
+      const answer = await http().get(path).set(headers);
+
+      expect({ path, status: answer.status, body: answer.body as unknown }).toEqual({ path, status: 400, body: { statusCode: 400, error: 'Bad Request', message: BAD_PATH_MESSAGE } });
+    }
+  });
+
+  it('gets a 413 in Spanish for a JSON body or a form over the 100 KB of the parser, before the route reads anything', async () => {
+    const headers = await agent();
+    const json = await http().post('/api/companies').set(headers).send({ name: 'Grande', relleno: 'x'.repeat(200 * 1024) });
+    const form = await http().post('/api/companies').set(headers).type('form').send(`name=Grande&relleno=${'x'.repeat(200 * 1024)}`);
+
+    for (const answer of [json, form]) {
+      expect(answer.status).toBe(413);
+      expect(answer.body).toEqual({ statusCode: 413, error: 'Payload Too Large', message: 'Los datos enviados pesan más de 100 KB, lo máximo que el sistema recibe en una solicitud.' });
+    }
+    expect(db.company.create).not.toHaveBeenCalled();
+  });
+
+  it('gets a 415 in Spanish for a body in a charset other than UTF-8, or compressed in a way the parser does not read', async () => {
+    const headers = await agent();
+    const charset = await http().post('/api/companies').set(headers).set('Content-Type', 'application/json; charset=ebcdic').send('{"name":"Charset"}');
+    const compressed = await http().post('/api/companies').set(headers).set('Content-Type', 'application/json').set('Content-Encoding', 'compress').send('{"name":"Comprimido"}');
+
+    expect(charset.status).toBe(415);
+    expect(charset.body).toEqual({
+      statusCode: 415,
+      error: 'Unsupported Media Type',
+      message: 'Los datos enviados están en una codificación de caracteres que el sistema no lee. Envíalos en UTF-8.',
+    });
+    expect(compressed.status).toBe(415);
+    expect(compressed.body).toEqual({ statusCode: 415, error: 'Unsupported Media Type', message: 'Los datos enviados están comprimidos de una forma que el sistema no lee.' });
+    expect(db.company.create).not.toHaveBeenCalled();
+  });
+
+  // The form is read as before: the same parser, with the options Nest gave it.
+  it('still reads a form body, nested fields included', async () => {
+    const answer = await http().post('/api/companies').set(await agent()).type('form').send('name[a]=1');
+
+    expect(answer.status).toBe(400);
+    expect(answer.body).toEqual({ statusCode: 400, error: 'Bad Request', message: ['El campo «name» debe ser un texto'] });
+  });
+});
+
+describe('the health check', () => {
+  let db: FakeDatabase;
+  let app: INestApplication<App>;
+
+  beforeAll(async () => {
+    db = fakeDatabase();
+    app = await start(db);
+  });
+
+  afterAll(() => app.close());
+
+  it('answers without a session that the API is up and reaches its database, with nothing else', async () => {
+    const answer = await request(app.getHttpServer()).get('/api/health');
+
+    expect(answer.status).toBe(200);
+    expect(answer.body).toEqual({ status: 'ok', database: 'ok' });
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers 503 in Spanish while the database does not answer', async () => {
+    db.$queryRaw.mockRejectedValueOnce(new Error('la base de datos no responde'));
+
+    const answer = await request(app.getHttpServer()).get('/api/health');
+
+    expect(answer.status).toBe(503);
+    expect(answer.body).toEqual({ statusCode: 503, error: 'Service Unavailable', message: DATABASE_DOWN_MESSAGE });
+    expect(DATABASE_DOWN_MESSAGE).toBe('La base de datos no responde.');
+  });
+});
+
 describe('the limits, as AppModule registers them', () => {
-  let app: INestApplication | undefined;
+  let app: INestApplication<App> | undefined;
   afterEach(() => app?.close());
 
   const bearer = async (db: FakeDatabase, username: string) =>
@@ -426,8 +545,8 @@ describe('the limits, as AppModule registers them', () => {
 // JwtGuard looks at the token of a stream when it opens. The write that ends the sessions of a user
 // reaches the open streams through the EventsService that AppModule gives every controller.
 describe('a stream of events, as AppModule wires it', () => {
-  let app: INestApplication | undefined;
-  /** Every stream a test opened: one the API did not end would keep the server from closing. */
+  let app: INestApplication<App> | undefined;
+  /** Every stream a test opened, ended here if the API did not end it. */
   const responses: IncomingMessage[] = [];
   afterEach(async () => {
     responses.splice(0).forEach((response) => response.destroy());
@@ -483,5 +602,52 @@ describe('a stream of events, as AppModule wires it', () => {
     expect((await open(port, renewed)).response.statusCode).toBe(401);
 
     expect(admin.isOpen()).toBe(true);
+  });
+
+  /** The application, listening on a free port, and an open stream of Ana's. */
+  async function listeningWithAStream() {
+    const db = fakeDatabase();
+    app = await start(db);
+    await app.listen(0, '127.0.0.1');
+    const server = app.getHttpServer() as Server;
+    const stream = await open((server.address() as AddressInfo).port, await app.get(JwtService).signAsync(tokenPayload(db.users[1])));
+    expect(stream.response.statusCode).toBe(200);
+    return { server, stream };
+  }
+
+  // The server waits for every answer in progress before it closes, and a stream never ends by
+  // itself: before, closing the application waited for the browsers to go.
+  it('ends when the application closes, which does not wait for it', async () => {
+    const { server, stream } = await listeningWithAStream();
+
+    await app!.close();
+    app = undefined;
+
+    await stream.ended;
+    expect(server.listening).toBe(false);
+  });
+
+  // What `docker stop` sends. Nest would send the signal again to the process, which Linux ignores
+  // for process 1, the API in its container: the process ends by itself instead.
+  it('closes the application on SIGTERM, and then ends the process', async () => {
+    const { server, stream } = await listeningWithAStream();
+    const exited = new Promise<unknown>((done) => jest.spyOn(process, 'exit').mockImplementation((code) => done(code) as never));
+    const kill = jest.spyOn(process, 'kill').mockImplementation(() => true);
+    const before = { term: process.listenerCount('SIGTERM'), int: process.listenerCount('SIGINT') };
+    try {
+      closeOnStopSignals(app!);
+      expect({ term: process.listenerCount('SIGTERM'), int: process.listenerCount('SIGINT') }).toEqual({ term: before.term + 1, int: before.int + 1 });
+
+      process.emit('SIGTERM', 'SIGTERM');
+
+      expect(await exited).toBe(0);
+      await stream.ended;
+      expect(server.listening).toBe(false);
+      expect(kill).not.toHaveBeenCalled();
+      expect({ term: process.listenerCount('SIGTERM'), int: process.listenerCount('SIGINT') }).toEqual(before);
+    } finally {
+      jest.restoreAllMocks();
+      app = undefined;
+    }
   });
 });

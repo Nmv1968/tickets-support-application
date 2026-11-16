@@ -1,3 +1,4 @@
+import { seededUsernames } from '../users/credentials';
 import { DEFAULT_TOKEN_LIFETIME, tokenLifetimeSeconds } from './session-token';
 import { THROTTLE_ENV, throttleEnvValue } from './throttle';
 import type { ThrottleVariable } from './throttle';
@@ -68,8 +69,8 @@ export function checkEnv(env: NodeJS.ProcessEnv): EnvProblems {
   // The start-up makes the assistant user an agent and the first user an administrator (see
   // SeedService): one user cannot be both, and each start would undo the other half.
   if (env.MCP_PASSWORD) {
-    const assistant = (env.MCP_USERNAME ?? 'claude').trim().toLowerCase();
-    if (assistant === (env.ADMIN_USERNAME ?? 'admin').trim().toLowerCase()) {
+    const { assistant, admin } = seededUsernames(env);
+    if (assistant === admin) {
       errors.push(
         `MCP_USERNAME y ADMIN_USERNAME son el mismo usuario ("${assistant}") en el archivo .env. El del asistente es un agente y el ` +
           'inicial un administrador: usa un nombre distinto para cada uno.',

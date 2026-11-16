@@ -1,6 +1,4 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
@@ -8,7 +6,9 @@ import type { User } from '../../core/api';
 import { Confirm } from '../../core/confirm';
 import { answerCatalogs } from '../../testing/catalogs';
 import type { CatalogsAnswer } from '../../testing/catalogs';
+import { httpTestBed } from '../../testing/http';
 import { screenOf, toasts } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { ASSIGNEES, COMPANIES, NamedCatalogTab } from './named-catalog-tab';
 import type { NamedCatalog, NamedEntry } from './named-catalog-tab';
 
@@ -129,8 +129,7 @@ for (const c of CASES) {
     const [first, second, third] = c.entries;
 
     beforeEach(() => {
-      TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
-      http = TestBed.inject(HttpTestingController);
+      http = httpTestBed(provideRouter([]));
     });
 
     // Also catches a write nobody expected: any request left unanswered fails the test.
@@ -182,7 +181,7 @@ for (const c of CASES) {
 
       expect(rows().map((row) => nameOf(row).value)).toEqual(c.entries.map((entry) => entry.name));
       // What each row says after the name: cases, state and what can be done.
-      const said = (row: HTMLElement): string[] => [...row.querySelectorAll('span, button')].map((item) => item.textContent?.replace(/\s+/g, ' ').trim() ?? '').filter(Boolean);
+      const said = (row: HTMLElement): string[] => [...row.querySelectorAll('span, button')].map((item) => textOf(item)).filter(Boolean);
       expect(rows().map(said)).toEqual([
         ['3 casos', 'Desactivar'],
         ['0 casos', 'Desactivar'],

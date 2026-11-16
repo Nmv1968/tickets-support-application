@@ -12,7 +12,8 @@ import { storageStateFor } from './session';
 export default async function globalSetup(): Promise<void> {
   const probe = await request.newContext({ baseURL: BASE_URL });
   try {
-    const response = await probe.get('/api/branding', { timeout: 10_000 }).catch(() => null);
+    // The health check of the API: it answers once the API is up and reaches its database.
+    const response = await probe.get('/api/health', { timeout: 10_000 }).catch(() => null);
     if (!response?.ok()) {
       throw new Error(`El API no responde en ${BASE_URL}. Levanta la pila de pruebas con "npm run stack:up" (en e2e/).`);
     }

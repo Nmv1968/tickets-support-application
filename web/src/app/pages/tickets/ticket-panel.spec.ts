@@ -1,6 +1,4 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import type { Company, TicketDetail } from '../../core/api';
@@ -10,8 +8,10 @@ import { Confirm } from '../../core/confirm';
 import { TicketEvents } from '../../core/ticket-events';
 import { UnsavedChanges } from '../../core/unsaved-changes';
 import { ASSIGNEES, COMPANIES, FAILURE, MODULES, SUPPORT_TYPES, TRAINING, WARRANTY, ticket } from '../../testing/fixtures';
+import { httpTestBed } from '../../testing/http';
 import { clearSelect, closeSelect, openSelect, optionTexts, removeChosen, typeInSelect } from '../../testing/ng-select';
 import { screenOf, toasts } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { TicketPanel } from './ticket-panel';
 
 const OTHER = ticket({ id: 8, code: 'SOP-00008', date: '2026-11-03', companyId: 5, company: 'Bodega Sur', description: 'No abre la caja' });
@@ -34,8 +34,7 @@ describe('TicketPanel', () => {
   let closed: number;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
     events = TestBed.inject(TicketEvents);
     confirm = TestBed.inject(Confirm);
     catalogs = TestBed.inject(Catalogs);
@@ -2215,7 +2214,7 @@ describe('TicketPanel', () => {
           ],
         }),
       );
-      const lines = Array.from(el.querySelectorAll('details li')).map((line) => line.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+      const lines = Array.from(el.querySelectorAll('details li')).map((line) => textOf(line));
 
       expect(find('details summary').textContent).toContain('Historial de cambios (2)');
       expect(lines[0]).toContain('Ana Torres: Tipos de soporte de «—» a «Capacitación, Falla del sistema»');

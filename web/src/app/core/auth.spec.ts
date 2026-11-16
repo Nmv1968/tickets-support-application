@@ -241,7 +241,9 @@ describe('Auth, when the API refuses the token', () => {
     localStorage.removeItem('st.user');
   });
 
-  const refuse = (request: TestRequest): void => request.flush({ statusCode: 401, message: 'Unauthorized' }, { status: 401, statusText: 'Unauthorized' });
+  /** The API's 401 for a session that is over (api/src/common/auth.ts). */
+  const refuse = (request: TestRequest): void =>
+    request.flush({ statusCode: 401, error: 'Unauthorized', message: 'La sesión terminó o no es válida. Vuelve a ingresar.' }, { status: 401, statusText: 'Unauthorized' });
   /** What a GET ends with, filled in as it ends: its answer, or the status of its error. */
   const outcome = (path: string): { value?: unknown; status?: number } => {
     const seen: { value?: unknown; status?: number } = {};

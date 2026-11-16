@@ -234,7 +234,8 @@ describe('Live', () => {
 describe('Live, when the API refuses the token of the stream', () => {
   let live: Live;
   let auth: { token: string; logout: jasmine.Spy; renewed: jasmine.Spy<(refused: string | null) => Promise<string | null>> };
-  const refused = (): Response => new Response('{"statusCode":401,"message":"Unauthorized"}', { status: 401 });
+  /** The API's 401 for a session that is over (api/src/common/auth.ts). */
+  const refused = (): Response => new Response('{"statusCode":401,"error":"Unauthorized","message":"La sesión terminó o no es válida. Vuelve a ingresar."}', { status: 401 });
 
   beforeEach(() => {
     auth = { token: 'token-viejo', logout: jasmine.createSpy('logout'), renewed: jasmine.createSpy('renewed') };

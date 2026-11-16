@@ -8,14 +8,16 @@ import { TooManyAttemptsException } from '../common/retry-after';
 import { THROTTLE_ENV } from '../common/throttle';
 import { EventsService } from '../events/events.service';
 import { UsersController } from '../users/users.controller';
+import { UsersService } from '../users/users.service';
 import { MAX_ADDRESSES } from './address-failures';
-import { ADDRESS_LIMIT_MESSAGE, AuthController, DUMMY_HASH, LOCKED_MESSAGE } from './auth.controller';
+import { AuthController } from './auth.controller';
+import { ADDRESS_LIMIT_MESSAGE, AuthService, DUMMY_HASH, LOCKED_MESSAGE } from './auth.service';
 import { LOCK_MS, MAX_FAILURES, MAX_TRACKED } from './login-failures';
 
 // The real comparison, watched: which hash each login compares with is what these tests look at.
 jest.mock('bcryptjs', () => {
   const actual = jest.requireActual<typeof import('bcryptjs')>('bcryptjs');
-  return { ...actual, compare: jest.fn(actual.compare) };
+  return { ...actual, compare: jest.fn((password: string, hash: string) => actual.compare(password, hash)) };
 });
 
 const compareMock = compare as jest.MockedFunction<(password: string, hash: string) => Promise<boolean>>;
@@ -49,10 +51,10 @@ describe('login', () => {
       },
     };
     const jwt = { signAsync: jest.fn().mockResolvedValue('token-firmado') };
-    return { db, jwt, controller: new AuthController(db as unknown as PrismaService, jwt as unknown as JwtService, new EventsService()) };
+    return { db, jwt, controller: new AuthController(new AuthService(db as unknown as PrismaService, jwt as unknown as JwtService, new EventsService())) };
   };
 
-  // The limit of failed logins per address is read when the controller is created: the one of the
+  // The limit of failed logins per address is read when the service is created: the one of the
   // environment of whoever runs the tests must not count.
   const savedLimit = process.env.LOGIN_RATE_LIMIT;
   beforeAll(() => delete process.env.LOGIN_RATE_LIMIT);
@@ -155,10 +157,10 @@ describe('login', () => {
       const prisma = db as unknown as PrismaService;
 
       const events = new EventsService();
-      await new UsersController(prisma, events).create({ username: 'luis', name: 'Luis', password: 'secreto1' });
+      await new UsersController(new UsersService(prisma, events)).create({ username: 'luis', name: 'Luis', password: 'secreto1' });
       // An administrator resets the password of someone else: their own is changed in Mi cuenta.
-      await new UsersController(prisma, events).update(6, { password: 'secreto2' }, me);
-      await new AuthController(prisma, { signAsync: jest.fn() } as unknown as JwtService, events).changePassword(me, { current: 'secreto1', next: 'secreto3' });
+      await new UsersController(new UsersService(prisma, events)).update(6, { password: 'secreto2' }, me);
+      await new AuthController(new AuthService(prisma, { signAsync: jest.fn() } as unknown as JwtService, events)).changePassword(me, { current: 'secreto1', next: 'secreto3' });
 
       expect(stored).toHaveLength(3);
       expect(stored.map((hash) => getRounds(hash))).toEqual([getRounds(DUMMY_HASH), getRounds(DUMMY_HASH), getRounds(DUMMY_HASH)]);
@@ -183,7 +185,7 @@ describe('login', () => {
       const events = new EventsService();
       const ended: number[] = [];
       events.sessionsEnded$.subscribe((userId) => ended.push(userId));
-      return { db, jwt, events, ended, controller: new AuthController(db as unknown as PrismaService, jwt as unknown as JwtService, events) };
+      return { db, jwt, events, ended, controller: new AuthController(new AuthService(db as unknown as PrismaService, jwt as unknown as JwtService, events)) };
     };
 
     it('stores the new password and ends every session the user had, this one too', async () => {
@@ -240,7 +242,7 @@ describe('login', () => {
 
     // With 204 the body, and the new token in it, would never reach the browser.
     it('answers 200, with the token in the body', () => {
-      expect(Reflect.getMetadata(HTTP_CODE_METADATA, AuthController.prototype.changePassword)).toBe(HttpStatus.OK);
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, (AuthController.prototype as Record<'changePassword', object>).changePassword)).toBe(HttpStatus.OK);
     });
 
     it('changes nothing and ends no session when the current password is wrong', async () => {

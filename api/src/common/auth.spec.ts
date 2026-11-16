@@ -3,26 +3,40 @@ import type { ExecutionContext, INestApplication, Type } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { APP_GUARD, Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { AppModule } from '../app.module';
-import { configureApp } from '../app.setup';
+import type { App } from 'supertest/types';
 import { EventsService } from '../events/events.service';
 import { PrismaService } from '../prisma.service';
 import { SettingsController } from '../settings/settings.controller';
 import { SettingsService } from '../settings/settings.service';
+import { apiControllers } from '../testing';
 import { UsersController } from '../users/users.controller';
-import { ADMIN_ONLY_MESSAGE, AdminOnly, CurrentUser, JwtGuard, Public, RolesGuard } from './auth';
+import { UsersService } from '../users/users.service';
+import { ADMIN_ONLY_MESSAGE, AdminOnly, CurrentUser, JwtGuard, Public, RolesGuard, SESSION_OVER_MESSAGE, authUser } from './auth';
 import type { AuthUser } from './auth';
+import { ADMIN_USER, startedApp } from './testing';
 
 // @nestjs/config is published as ES modules only, which Jest does not load here, and the real one
 // would read the .env files of whoever runs the tests (see app.module.spec.ts). The tokens of these
 // tests are names: the stand-in of JwtService says whose each one is.
 jest.mock('@nestjs/config', () => ({ ConfigModule: { forRoot: () => ({ module: class ConfigModule {} }) } }));
 
-const admin: AuthUser = { id: 1, username: 'admin', name: 'Admin', role: 'ADMIN' };
+const admin = ADMIN_USER;
 const agent: AuthUser = { id: 2, username: 'ana', name: 'Ana', role: 'AGENT' };
+
+/** Every 401 of the guards: in Spanish, where Nest's own says `Unauthorized`. The web goes back to the login with it. */
+const SESSION_OVER = new UnauthorizedException(SESSION_OVER_MESSAGE);
+
+/** What `attempt` throws. */
+function thrownBy(attempt: () => unknown): unknown {
+  try {
+    attempt();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
 
 /** What a guard is asked about: one route of one controller, for a request of this user. */
 function contextFor(controller: Type, method: string, user?: AuthUser, headers: Record<string, string> = {}): ExecutionContext & { request: { user?: AuthUser } } {
@@ -86,14 +100,14 @@ describe('RolesGuard', () => {
     expect(guard.canActivate(contextFor(DemoController, 'open', agent))).toBe(true);
     // A public route has no user, and is never marked.
     expect(guard.canActivate(contextFor(DemoController, 'open'))).toBe(true);
-    expect(() => guard.canActivate(contextFor(DemoController, 'closed'))).toThrow(UnauthorizedException);
+    expect(thrownBy(() => guard.canActivate(contextFor(DemoController, 'closed')))).toEqual(SESSION_OVER);
   });
 });
 
 // Every route of the API, as an agent finds it. Anything new for administrators only is added
 // here on purpose; a route that loses its mark by mistake, or never got it, fails this test.
 describe('the routes only an administrator may use', () => {
-  const controllers = Reflect.getMetadata('controllers', AppModule) as Type[];
+  const controllers = apiControllers();
 
   /** "METHOD /path" of every route of a controller, with its method name. */
   const routes = (controller: Type): { route: string; method: string }[] => {
@@ -202,7 +216,7 @@ describe('JwtGuard and @Public()', () => {
   it('answers 401 without a token on the route next to it, which is not marked', async () => {
     const { guard } = guarded();
 
-    await expect(guard.canActivate(contextFor(DemoController, 'closed'))).rejects.toThrow(UnauthorizedException);
+    await expect(guard.canActivate(contextFor(DemoController, 'closed'))).rejects.toEqual(SESSION_OVER);
     await expect(guard.canActivate(contextFor(DemoController, 'closed', undefined, { authorization: 'Bearer de-ana' }))).resolves.toBe(true);
   });
 
@@ -211,12 +225,21 @@ describe('JwtGuard and @Public()', () => {
     const { guard, verifyAsync } = guarded();
 
     for (const authorization of ['de-ana', 'Basic de-ana', 'Token: de-ana', 'Bearerde-ana', '']) {
-      await expect(guard.canActivate(contextFor(DemoController, 'closed', undefined, { authorization }))).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(contextFor(DemoController, 'closed', undefined, { authorization }))).rejects.toEqual(SESSION_OVER);
     }
     expect(verifyAsync).not.toHaveBeenCalled();
 
     await guard.canActivate(contextFor(DemoController, 'closed', undefined, { authorization: 'Bearer de-ana' }));
     expect(verifyAsync.mock.calls).toEqual([['de-ana']]);
+  });
+});
+
+// The login answers it, and JwtGuard puts it on each request: the hash, the state and the version stay in the database.
+describe('the user of a session', () => {
+  it('is who the stored user is and nothing else', () => {
+    const stored = { id: 5, username: 'ana', name: 'Ana', role: 'AGENT' as const, active: true, passwordHash: 'hash', tokenVersion: 3 };
+
+    expect(authUser(stored)).toEqual({ id: 5, username: 'ana', name: 'Ana', role: 'AGENT' });
   });
 });
 
@@ -239,7 +262,7 @@ describe('@CurrentUser()', () => {
 
   // On a public route by mistake, it must not act for nobody.
   it('answers 401 when the request has no user', () => {
-    expect(() => currentUserOf()).toThrow(UnauthorizedException);
+    expect(thrownBy(() => currentUserOf())).toEqual(SESSION_OVER);
   });
 });
 
@@ -253,7 +276,7 @@ describe('JwtGuard and the role', () => {
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
 
-    expect(findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 2 }, select: expect.objectContaining({ role: true }) }));
+    expect(findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 2 }, select: expect.objectContaining({ role: true }) as object }));
     expect(context.request.user).toEqual(agent);
     expect(agentMay(UsersController, 'create')).toBe(false);
   });
@@ -276,29 +299,29 @@ describe('JwtGuard and the version of the sessions', () => {
     const { result, findUnique, context } = check({ sub: 2, role: 'AGENT', ver: 3 }, { tokenVersion: 3 });
 
     await expect(result).resolves.toBe(true);
-    expect(findUnique).toHaveBeenCalledWith(expect.objectContaining({ select: expect.objectContaining({ tokenVersion: true }) }));
+    expect(findUnique).toHaveBeenCalledWith(expect.objectContaining({ select: expect.objectContaining({ tokenVersion: true }) as object }));
     expect(context.request.user).toEqual(agent);
   });
 
   it('answers 401 to a token signed before the last change, and to one of a version not reached yet', async () => {
-    await expect(check({ sub: 2, role: 'AGENT', ver: 2 }, { tokenVersion: 3 }).result).rejects.toThrow(UnauthorizedException);
-    await expect(check({ sub: 2, role: 'AGENT', ver: 4 }, { tokenVersion: 3 }).result).rejects.toThrow(UnauthorizedException);
+    await expect(check({ sub: 2, role: 'AGENT', ver: 2 }, { tokenVersion: 3 }).result).rejects.toEqual(SESSION_OVER);
+    await expect(check({ sub: 2, role: 'AGENT', ver: 4 }, { tokenVersion: 3 }).result).rejects.toEqual(SESSION_OVER);
   });
 
   // Signed for seven days by the version before this one, and nothing could end them.
   it('answers 401 to a token without a version, even for a user who never changed anything', async () => {
     const { result, findUnique } = check({ sub: 2, role: 'AGENT' }, { tokenVersion: 0 });
 
-    await expect(result).rejects.toThrow(UnauthorizedException);
+    await expect(result).rejects.toEqual(SESSION_OVER);
     // Refused on what the token says, before the database is asked.
     expect(findUnique).not.toHaveBeenCalled();
-    await expect(check({ sub: 2, ver: '0' }, { tokenVersion: 0 }).result).rejects.toThrow(UnauthorizedException);
-    await expect(check({ sub: '2', ver: 0 }, { tokenVersion: 0 }).result).rejects.toThrow(UnauthorizedException);
+    await expect(check({ sub: 2, ver: '0' }, { tokenVersion: 0 }).result).rejects.toEqual(SESSION_OVER);
+    await expect(check({ sub: '2', ver: 0 }, { tokenVersion: 0 }).result).rejects.toEqual(SESSION_OVER);
   });
 
   it('answers 401 to an inactive user and to one that no longer exists, whatever the version', async () => {
-    await expect(check({ sub: 2, role: 'AGENT', ver: 0 }, { tokenVersion: 0, active: false }).result).rejects.toThrow(UnauthorizedException);
-    await expect(check({ sub: 2, role: 'AGENT', ver: 0 }, null).result).rejects.toThrow(UnauthorizedException);
+    await expect(check({ sub: 2, role: 'AGENT', ver: 0 }, { tokenVersion: 0, active: false }).result).rejects.toEqual(SESSION_OVER);
+    await expect(check({ sub: 2, role: 'AGENT', ver: 0 }, null).result).rejects.toEqual(SESSION_OVER);
   });
 
   it('answers 401 to a token whose signature or date does not hold, and to a request without one', async () => {
@@ -306,14 +329,14 @@ describe('JwtGuard and the version of the sessions', () => {
       user: { findUnique: jest.fn() },
     } as unknown as PrismaService);
 
-    await expect(guard.canActivate(contextFor(UsersController, 'list', undefined, { authorization: 'Bearer vencido' }))).rejects.toThrow(UnauthorizedException);
-    await expect(guard.canActivate(contextFor(UsersController, 'list', undefined, {}))).rejects.toThrow(UnauthorizedException);
+    await expect(guard.canActivate(contextFor(UsersController, 'list', undefined, { authorization: 'Bearer vencido' }))).rejects.toEqual(SESSION_OVER);
+    await expect(guard.canActivate(contextFor(UsersController, 'list', undefined, {}))).rejects.toEqual(SESSION_OVER);
   });
 });
 
 // The two guards as the API registers them, over real controllers: what a client gets back.
 describe('an agent and an administrator, through HTTP', () => {
-  let app: INestApplication;
+  let app: INestApplication<App>;
   const people: Record<string, AuthUser> = { admin, agent };
   const updated = { id: 2, username: 'ana', name: 'Ana', active: true, passwordHash: 'x', role: 'AGENT' };
 
@@ -338,6 +361,7 @@ describe('an agent and an administrator, through HTTP', () => {
           },
         },
         { provide: SettingsService, useValue: { setStaleHours: () => Promise.resolve(), setPromiseSoonDays: () => Promise.resolve() } },
+        UsersService,
         EventsService,
         { provide: APP_GUARD, useClass: JwtGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
@@ -346,9 +370,7 @@ describe('an agent and an administrator, through HTTP', () => {
     class TestModule {}
 
     const moduleRef = await Test.createTestingModule({ imports: [TestModule] }).compile();
-    app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
-    configureApp(app as NestExpressApplication, {});
-    await app.init();
+    app = await startedApp(moduleRef);
   });
 
   afterAll(() => app.close());
@@ -373,7 +395,10 @@ describe('an agent and an administrator, through HTTP', () => {
   });
 
   // The login check runs first: without a session the answer is 401, not 403.
-  it('answers 401 without a valid session, to an administrator route too', async () => {
-    expect((await as('nadie').put('settings/reminders', { staleHours: 1 })).status).toBe(401);
+  it('answers 401 without a valid session, to an administrator route too, in Spanish', async () => {
+    const answer = await as('nadie').put('settings/reminders', { staleHours: 1 });
+
+    expect(answer.status).toBe(401);
+    expect(answer.body).toEqual({ statusCode: 401, error: 'Unauthorized', message: 'La sesión terminó o no es válida. Vuelve a ingresar.' });
   });
 });

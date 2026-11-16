@@ -5,7 +5,7 @@ import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { PrismaExceptionFilter } from './prisma-exception.filter';
+import { PrismaExceptionFilter, violatesUnique } from './prisma-exception.filter';
 
 @Controller()
 class FailingController {
@@ -52,7 +52,7 @@ describe('PrismaExceptionFilter', () => {
       400,
       { message: 'La operación hace referencia a un registro que no existe o que sigue en uso', error: 'Bad Request', statusCode: 400 },
     ],
-    // A transaction out of time, as one that waited behind an import for the lock of a catalog.
+    // A transaction out of time, as a large import on a slow server.
     [
       'P2028',
       503,
@@ -84,5 +84,26 @@ describe('PrismaExceptionFilter', () => {
     const response = await request(app.getHttpServer()).get('/bug');
     expect(response.status).toBe(500);
     expect(response.body).toEqual({ statusCode: 500, message: 'Internal server error' });
+  });
+});
+
+describe('violatesUnique', () => {
+  const failure = (code: string, meta?: Record<string, unknown>): Prisma.PrismaClientKnownRequestError =>
+    new Prisma.PrismaClientKnownRequestError(`Prisma failed with ${code}`, { code, clientVersion: Prisma.prismaVersion.client, meta });
+
+  // As Prisma 6 throws it on PostgreSQL: the columns of the index, by field name.
+  it('tells the refusal of the unique index on the columns given', () => {
+    const repeated = failure('P2002', { modelName: 'SystemModule', target: ['parentId', 'nameKey'] });
+
+    expect(violatesUnique(repeated, 'nameKey')).toBe(true);
+    expect(violatesUnique(repeated, 'parentId', 'nameKey')).toBe(true);
+    expect(violatesUnique(failure('P2002', { target: 'SystemModule_parentId_nameKey_key' }), 'parentId', 'nameKey')).toBe(true);
+  });
+
+  it('is false for another index, another error, or one without the columns', () => {
+    expect(violatesUnique(failure('P2002', { modelName: 'Company', target: ['sortKey'] }), 'nameKey')).toBe(false);
+    expect(violatesUnique(failure('P2025', { target: ['nameKey'] }), 'nameKey')).toBe(false);
+    expect(violatesUnique(failure('P2002'), 'nameKey')).toBe(false);
+    expect(violatesUnique(new Error('P2002 nameKey'), 'nameKey')).toBe(false);
   });
 });

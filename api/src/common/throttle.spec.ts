@@ -2,17 +2,18 @@ import { Controller, Get, Module } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { hashSync } from 'bcryptjs';
 import request from 'supertest';
-import { configureApp } from '../app.setup';
+import type { App } from 'supertest/types';
 import { AuthController } from '../auth/auth.controller';
+import { AuthService } from '../auth/auth.service';
 import { EventsService } from '../events/events.service';
 import { PrismaService } from '../prisma.service';
 import { retryAfterSeconds } from './retry-after';
 import { tokenPayload } from './session-token';
+import { startedApp } from './testing';
 import { RATE_WINDOW_MS, THROTTLE_ENV, clientAddress, failedLoginLimit, requestTracker, throttleEnvValue, throttlerOptions, trustedProxyHops } from './throttle';
 
 @Controller('ping')
@@ -46,16 +47,17 @@ const bearer = (user: (typeof USERS)[number]) => jwt.signAsync(tokenPayload(user
 
 /**
  * The limits as the API sets them (`throttlerOptions`, `configureApp`, the counters of the login),
- * over the login route and two routes of a stand-in. LOGIN_RATE_LIMIT is read when the login
- * controller is created, as in the API: from process.env, set for that moment.
+ * over the login route and two routes of a stand-in. LOGIN_RATE_LIMIT is read when the service of
+ * the login is created, as in the API: from process.env, set for that moment.
  */
-async function startApp(env: NodeJS.ProcessEnv): Promise<INestApplication> {
+async function startApp(env: NodeJS.ProcessEnv): Promise<INestApplication<App>> {
   @Module({
     imports: [ThrottlerModule.forRoot(throttlerOptions(env, jwt))],
     controllers: [AuthController, PingController],
     providers: [
       { provide: PrismaService, useValue: { user: { findUnique: ({ where }: { where: { username: string } }) => Promise.resolve(USERS.find((user) => user.username === where.username) ?? null) } } },
       { provide: JwtService, useValue: jwt },
+      AuthService,
       EventsService,
       { provide: APP_GUARD, useClass: ThrottlerGuard },
     ],
@@ -67,10 +69,7 @@ async function startApp(env: NodeJS.ProcessEnv): Promise<INestApplication> {
   else process.env.LOGIN_RATE_LIMIT = env.LOGIN_RATE_LIMIT;
   try {
     const moduleRef = await Test.createTestingModule({ imports: [TestModule] }).compile();
-    const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
-    configureApp(app, env);
-    await app.init();
-    return app;
+    return await startedApp(moduleRef, env);
   } finally {
     if (saved === undefined) delete process.env.LOGIN_RATE_LIMIT;
     else process.env.LOGIN_RATE_LIMIT = saved;
@@ -78,7 +77,7 @@ async function startApp(env: NodeJS.ProcessEnv): Promise<INestApplication> {
 }
 
 describe('the limits', () => {
-  let app: INestApplication | undefined;
+  let app: INestApplication<App> | undefined;
   afterEach(async () => {
     await app?.close();
     app = undefined;
@@ -201,6 +200,22 @@ describe('the limits', () => {
       expect((await ping('172.19.0.1')).status).toBe(200);
     });
 
+    // A token the API refuses since a change of password, but that has not expired: whoever kept
+    // it could otherwise send requests with it until the user's own sessions were refused too.
+    it('gives a token of an earlier version of the sessions a budget apart from the sessions that stand', async () => {
+      app = await startApp({ API_RATE_LIMIT: '3' });
+      const revoked = await bearer(USERS[0]);
+      const current = await bearer({ ...USERS[0], tokenVersion: 1 });
+
+      for (let i = 0; i < 3; i++) expect((await ping('172.19.0.1', revoked)).status).toBe(200);
+      expect((await ping('172.19.0.1', revoked)).status).toBe(429);
+
+      for (let i = 0; i < 3; i++) expect((await ping('172.19.0.1', current)).status).toBe(200);
+      const refused = await ping('172.19.0.1', current);
+      expect(refused.status).toBe(429);
+      expect(refused.body).toEqual({ statusCode: 429, message: USER_MESSAGE });
+    });
+
     it('counts a user as one wherever the requests come from', async () => {
       app = await startApp({ API_RATE_LIMIT: '2' });
       const ana = await bearer(USERS[0]);
@@ -272,8 +287,9 @@ describe('whose budget a request spends', () => {
   const req = (authorization?: string, ip = '10.0.0.5') => ({ headers: { authorization }, ip }) as unknown as Parameters<typeof requestTracker>[0];
 
   // Only the signature and the expiry: whether the user is still active is for JwtGuard, after it.
-  it('is its user with a valid session token, without reading any database', async () => {
-    expect(await requestTracker(req(await bearer(USERS[1])), jwt)).toBe('user:2');
+  it('is its user and the version of the sessions of the token, with a valid session token, without reading any database', async () => {
+    expect(await requestTracker(req(await bearer(USERS[1])), jwt)).toBe('user:2:0');
+    expect(await requestTracker(req(await bearer({ ...USERS[1], tokenVersion: 4 })), jwt)).toBe('user:2:4');
   });
 
   it.each([

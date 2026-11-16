@@ -5,6 +5,9 @@ import type { Observable } from 'rxjs';
 
 export const MB = 1024 * 1024;
 
+/** The 400 of a route of files that got none. */
+export const NO_FILE_MESSAGE = 'No se recibió ningún archivo';
+
 /** The limits of one upload route that its messages name: the size of each file and how many go in one request. */
 export interface UploadLimits {
   fileSize: number;

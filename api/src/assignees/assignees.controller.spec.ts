@@ -1,8 +1,10 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { catalogTable } from '../common/testing';
 import type { PrismaService } from '../prisma.service';
-import { AssigneeInput, AssigneesController, meansNobody } from './assignees.controller';
+import { AssigneesController } from './assignees.controller';
+import { AssigneeInput, AssigneesService, meansNobody } from './assignees.service';
 
 interface Row {
   id: number;
@@ -16,37 +18,14 @@ describe('responsibles catalog', () => {
   const jose: Row = { id: 2, name: 'José Pérez', active: true, _count: { tickets: 0 } };
   const zoe: Row = { id: 3, name: 'Zoe', active: false, _count: { tickets: 1 } };
 
-  /** The controller over a fake database that holds `rows` and records what is written to it. */
+  /**
+   * The controller and its service over a fake database that holds `rows` and records what is
+   * written to it. Its table refuses a second responsible with the key of a name, as the unique
+   * index of `nameKey` does.
+   */
   const setup = (rows: Row[] = [zoe, jose, ana]) => {
-    const table = [...rows];
-    // The lock of the catalog as the database gives it: to one transaction at a time, until it ends.
-    let lockFree: Promise<void> = Promise.resolve();
-    const db = {
-      $transaction: jest.fn((work: (tx: unknown) => Promise<unknown>): Promise<unknown> => {
-        let release = (): void => undefined;
-        const $executeRaw = jest.fn(async (): Promise<void> => {
-          const held = lockFree;
-          lockFree = new Promise((resolve) => (release = resolve));
-          await held;
-        });
-        return work({ ...db, $executeRaw }).finally(() => release());
-      }),
-      assignee: {
-        // The name check reads the others: every row but the one being edited.
-        findMany: jest.fn(({ where }: { where?: { id?: { not: number } } } = {}) => Promise.resolve(table.filter((row) => row.id !== where?.id?.not))),
-        findUnique: jest.fn(({ where }: { where: { id: number } }) => Promise.resolve(table.find((row) => row.id === where.id) ?? null)),
-        create: jest.fn(({ data }: { data: { name: string } }) => {
-          const row = { id: 9 + table.length - rows.length, name: data.name, active: true, _count: { tickets: 0 } };
-          table.push(row);
-          return Promise.resolve(row);
-        }),
-        update: jest.fn(({ where, data }: { where: { id: number }; data: Partial<Row> }) =>
-          Promise.resolve({ ...table.find((row) => row.id === where.id), ...JSON.parse(JSON.stringify(data)) }),
-        ),
-        delete: jest.fn().mockResolvedValue({}),
-      },
-    };
-    return { db, controller: new AssigneesController(db as unknown as PrismaService) };
+    const db = { assignee: catalogTable('Assignee', 'nameKey', rows) };
+    return { db, controller: new AssigneesController(new AssigneesService(db as unknown as PrismaService)) };
   };
 
   it('lists everyone with the cases they have: the active first, then by name', async () => {
@@ -68,7 +47,8 @@ describe('responsibles catalog', () => {
       const { db, controller } = setup();
 
       expect(await controller.create({ name: '  Luis   Ñáñez ' })).toEqual({ id: 9, name: 'Luis Ñáñez', active: true, tickets: 0 });
-      expect(db.assignee.create).toHaveBeenCalledWith({ data: { name: 'Luis Ñáñez' }, include: { _count: { select: { tickets: true } } } });
+      // With the key of the name, which no other responsible can have.
+      expect(db.assignee.create).toHaveBeenCalledWith({ data: { name: 'Luis Ñáñez', nameKey: 'luis nanez' }, include: { _count: { select: { tickets: true } } } });
     });
 
     it.each([undefined, null, '', '   '])('needs a name: %p is refused', async (name) => {
@@ -86,7 +66,8 @@ describe('responsibles catalog', () => {
 
       expect(failure).toBeInstanceOf(ConflictException);
       expect(failure).toHaveProperty('message', 'Ya existe un responsable con ese nombre');
-      expect(db.assignee.create).not.toHaveBeenCalled();
+      // The database refused it: nothing was added.
+      expect(db.assignee.rows).toHaveLength(3);
     });
 
     // A deactivated responsible is in none of the lists that offer one. "Ya existe" alone would send the person looking for them in vain.
@@ -97,17 +78,16 @@ describe('responsibles catalog', () => {
 
       expect(failure).toBeInstanceOf(ConflictException);
       expect(failure).toHaveProperty('message', 'Ya existe un responsable con ese nombre, pero está inactivo. Actívalo en Configuración > Responsables.');
-      expect(db.assignee.create).not.toHaveBeenCalled();
+      expect(db.assignee.rows).toHaveLength(3);
     });
 
-    // Each request asks whether the name is free before the other has added it, unless only one
-    // at a time may ask and add.
+    // The unique index lets the first one in; the second is told the name is taken.
     it('is added once when two requests bring the same new name at the same moment', async () => {
       const { db, controller } = setup();
 
       const answers = await Promise.allSettled([controller.create({ name: 'Luis Ñáñez' }), controller.create({ name: 'LUIS  NANEZ' })]);
 
-      expect(db.assignee.create).toHaveBeenCalledTimes(1);
+      expect(db.assignee.rows.map((row) => row.name)).toEqual(['Zoe', 'José Pérez', 'Ana', 'Luis Ñáñez']);
       expect(answers[0]).toEqual({ status: 'fulfilled', value: { id: 9, name: 'Luis Ñáñez', active: true, tickets: 0 } });
       expect(answers[1]).toMatchObject({ status: 'rejected', reason: { message: 'Ya existe un responsable con ese nombre' } });
       expect((answers[1] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
@@ -135,14 +115,24 @@ describe('responsibles catalog', () => {
       const { db, controller } = setup();
 
       expect(await controller.update(2, { name: 'Jose Perez' })).toMatchObject({ id: 2, name: 'Jose Perez', tickets: 0 });
-      expect(db.assignee.update.mock.calls[0][0]).toMatchObject({ where: { id: 2 }, data: { name: 'Jose Perez' } });
+      expect(db.assignee.update.mock.calls[0][0]).toMatchObject({ where: { id: 2 }, data: { name: 'Jose Perez', nameKey: 'jose perez' } });
+    });
+
+    // Left as it was, the key would keep the old name from being given to anyone else.
+    it('gives a renamed responsible the key of the new name', async () => {
+      const { db, controller } = setup();
+
+      await controller.update(1, { name: ' Ana  Ñáñez ' });
+
+      expect(db.assignee.update.mock.calls[0][0].data).toEqual({ name: 'Ana Ñáñez', nameKey: 'ana nanez', active: undefined });
+      expect(await controller.create({ name: 'Ana' })).toMatchObject({ name: 'Ana' });
     });
 
     it('cannot take the name of another responsible', async () => {
       const { db, controller } = setup();
 
-      await expect(controller.update(2, { name: 'ana' })).rejects.toThrow('Ya existe un responsable con ese nombre');
-      expect(db.assignee.update).not.toHaveBeenCalled();
+      await expect(controller.update(2, { name: 'ana' })).rejects.toThrow(new ConflictException('Ya existe un responsable con ese nombre'));
+      expect(db.assignee.rows.find((row) => row.id === 2)).toMatchObject({ name: 'José Pérez', nameKey: 'jose perez' });
     });
 
     it('cannot take the name of a deactivated responsible either, and says where that one is', async () => {
@@ -151,16 +141,29 @@ describe('responsibles catalog', () => {
       await expect(controller.update(2, { name: 'zoe' })).rejects.toThrow(
         'Ya existe un responsable con ese nombre, pero está inactivo. Actívalo en Configuración > Responsables.',
       );
-      expect(db.assignee.update).not.toHaveBeenCalled();
+      expect(db.assignee.rows.find((row) => row.id === 2)).toMatchObject({ name: 'José Pérez' });
+    });
+
+    // A rename used to be checked outside of any lock: two renames to the same new name at once
+    // both found it free. The unique index lets only one of them in.
+    it('gives a new name to one responsible only when two renames to it arrive together', async () => {
+      const { db, controller } = setup();
+
+      const answers = await Promise.allSettled([controller.update(2, { name: 'Luis Ñáñez' }), controller.update(3, { name: 'luis nanez' })]);
+
+      expect(answers[0]).toMatchObject({ status: 'fulfilled', value: { id: 2, name: 'Luis Ñáñez' } });
+      expect(answers[1]).toMatchObject({ status: 'rejected', reason: new ConflictException('Ya existe un responsable con ese nombre') });
+      expect(db.assignee.rows.map((row) => row.name)).toEqual(['Zoe', 'Luis Ñáñez', 'Ana']);
     });
 
     it('deactivates and reactivates without touching the name', async () => {
       const { db, controller } = setup();
 
       expect(await controller.update(1, { active: false })).toMatchObject({ id: 1, name: 'Ana', active: false, tickets: 3 });
-      expect(db.assignee.update.mock.calls[0][0].data).toEqual({ name: undefined, active: false });
+      expect(db.assignee.update.mock.calls[0][0].data).toEqual({ name: undefined, nameKey: undefined, active: false });
       // Nothing to compare the name with: the other rows are not read.
       expect(db.assignee.findMany).not.toHaveBeenCalled();
+      expect(db.assignee.findUnique).not.toHaveBeenCalled();
     });
 
     // The checks of the request body let a null through, and the database takes it in neither column.
@@ -169,7 +172,7 @@ describe('responsibles catalog', () => {
 
       await controller.update(1, { name: null, active: null } as unknown as AssigneeInput);
 
-      expect(db.assignee.update.mock.calls[0][0].data).toEqual({ name: undefined, active: undefined });
+      expect(db.assignee.update.mock.calls[0][0].data).toEqual({ name: undefined, nameKey: undefined, active: undefined });
     });
   });
 

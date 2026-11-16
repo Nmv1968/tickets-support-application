@@ -1,12 +1,12 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import type { TestRequest } from '@angular/common/http/testing';
+import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import type { SupportType } from '../../core/api';
 import { Confirm } from '../../core/confirm';
 import { answerCatalogs } from '../../testing/catalogs';
+import { httpTestBed } from '../../testing/http';
 import { buttonIn, screenOf, toasts } from '../../testing/screen';
+import { textOf } from '../../testing/text';
 import { SupportTypesTab } from './support-types-tab';
 
 const REFUSED = { status: 409, statusText: 'Conflict' };
@@ -24,8 +24,7 @@ describe('SupportTypesTab, the support types in Configuración', () => {
   const other: SupportType = { id: 3, name: 'Otro', color: '#64748b', active: false, tickets: 1 };
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
+    http = httpTestBed();
   });
 
   // Also catches a write nobody expected: any request left unanswered fails the test.
@@ -104,7 +103,7 @@ describe('SupportTypesTab, the support types in Configuración', () => {
     const said = (row: HTMLElement): string[] =>
       [...row.querySelectorAll('span, button')]
         .filter((item) => !item.closest('app-type-chip'))
-        .map((item) => item.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+        .map((item) => textOf(item))
         .filter(Boolean);
     expect(rows().map(said)).toEqual([
       ['3 casos', 'Desactivar'],

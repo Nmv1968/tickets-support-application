@@ -1,13 +1,22 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONTROLLER_WATERMARK } from '@nestjs/common/constants';
+import { CONTROLLER_WATERMARK, GLOBAL_MODULE_METADATA } from '@nestjs/common/constants';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppModule } from './app.module';
+import { AssigneesService } from './assignees/assignees.service';
+import { CatalogsModule } from './catalogs.module';
 import { JwtGuard, RolesGuard } from './common/auth';
+import { NamedCatalogService } from './common/named-catalog';
 import { CompaniesController } from './companies/companies.controller';
+import { CompaniesService } from './companies/companies.service';
+import { EventsController } from './events/events.controller';
 import { PreferencesController } from './preferences/preferences.controller';
+import { PrismaModule } from './prisma.module';
+import { PrismaService } from './prisma.service';
 import { SupportTypesController } from './support-types/support-types.controller';
+import { SupportTypesService } from './support-types/support-types.service';
+import { apiControllers, apiModules, declared } from './testing';
 
 // @nestjs/config is published as ES modules only, which Jest does not load here (jest.esm-transform.cjs
 // turns only @nestjs/jwt into CommonJS). Its stand-in is also the wanted thing: the real one reads
@@ -16,7 +25,7 @@ import { SupportTypesController } from './support-types/support-types.controller
 jest.mock('@nestjs/config', () => ({ ConfigModule: { forRoot: () => ({ module: class ConfigModule {} }) } }));
 
 describe('AppModule', () => {
-  const registered = Reflect.getMetadata('controllers', AppModule) as unknown[];
+  const registered: unknown[] = apiControllers();
 
   /** Every controller class that a `*.controller.ts` file of the API exports, with where it is written. */
   const written = (): { file: string; name: string; controller: unknown }[] =>
@@ -63,10 +72,53 @@ describe('AppModule', () => {
     const folders = new Set(found.map((entry) => entry.file.split(/[\\/]/)[0]));
 
     expect([...folders].sort()).toEqual(
-      ['ai', 'assignees', 'auth', 'branding', 'catalog', 'companies', 'dashboard', 'events', 'preferences', 'settings', 'support-types', 'tickets', 'transfer', 'users'].sort(),
+      [
+        'ai',
+        'assignees',
+        'auth',
+        'branding',
+        'catalog',
+        'companies',
+        'dashboard',
+        'events',
+        'health',
+        'preferences',
+        'settings',
+        'support-types',
+        'tickets',
+        'transfer',
+        'users',
+      ].sort(),
     );
     // Each one once, and none registered that the search did not see.
     expect(new Set(registered).size).toBe(registered.length);
     expect(found).toHaveLength(registered.length);
+  });
+
+  // A module that listed PrismaService among its own providers would give its controllers a client
+  // of their own, with a pool of connections of its own, and the tests over a fake database would
+  // still pass.
+  it('provides the client of the database once, in a global module that every other one sees', () => {
+    const providing = apiModules().filter((module) => declared(module, 'providers').includes(PrismaService));
+
+    expect(providing).toEqual([PrismaModule]);
+    expect(Reflect.getMetadata(GLOBAL_MODULE_METADATA, PrismaModule)).toBe(true);
+  });
+
+  // The rules of each part of the API live in its services, which the tests reach without HTTP. A
+  // controller given the client of the database is where they start to spread again. The one of
+  // the live events only checks, at each heartbeat, that the session of its stream still stands.
+  it('leaves the database to the services: no controller is given PrismaService, but the one of the live events', () => {
+    const given = registered.filter((controller) => ((Reflect.getMetadata('design:paramtypes', controller as object) as unknown[] | undefined) ?? []).includes(PrismaService));
+
+    expect(given).toEqual([EventsController]);
+  });
+
+  // One implementation of a catalog of names, set up for each one: a change of its rules reaches the three.
+  it('serves the companies, the responsibles and the support types with the one catalog of names', () => {
+    const services = [CompaniesService, AssigneesService, SupportTypesService];
+
+    expect(declared(CatalogsModule, 'providers')).toEqual(expect.arrayContaining(services));
+    for (const service of services) expect(service.prototype).toBeInstanceOf(NamedCatalogService);
   });
 });

@@ -168,7 +168,8 @@ describe('BrandingController', () => {
 
   // The login page and the browser tab icon ask before there is a session; changing the logo needs one.
   it('lets anyone read the logo, and only a logged-in person change it', () => {
-    const isPublic = (method: keyof BrandingController): boolean => Reflect.getMetadata('isPublic', BrandingController.prototype[method]) === true;
+    const isPublic = (method: keyof BrandingController): boolean =>
+      Reflect.getMetadata('isPublic', (BrandingController.prototype as Record<keyof BrandingController, object>)[method]) === true;
 
     expect(isPublic('info')).toBe(true);
     expect(isPublic('logo')).toBe(true);

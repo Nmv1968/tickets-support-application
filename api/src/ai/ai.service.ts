@@ -17,11 +17,12 @@ import {
   todayDateOnly,
 } from '../common/labels';
 import { PrismaService } from '../prisma.service';
-import { TicketsService } from '../tickets/tickets.service';
+import { TEXT_MAX } from '../tickets/ticket-input';
+import { TICKET_NOT_FOUND, TicketsService } from '../tickets/tickets.service';
 import { anthropicAdapter } from './anthropic.adapter';
 import { geminiAdapter } from './gemini.adapter';
 import { openAiAdapter } from './openai.adapter';
-import { AiError, PROVIDERS, cleanBaseUrl } from './types';
+import { AiError, NO_BASE_URL, PROVIDERS, cleanBaseUrl } from './types';
 import type { AiAdapter, AiCredentials, AiImage, AiModelInfo, ProviderId, ProviderInfo } from './types';
 
 const ADAPTERS: Record<ProviderId, AiAdapter> = {
@@ -228,7 +229,7 @@ export class AiService {
       },
     });
     // Not an AiError, which answers 422: a case that is not there is a 404 in the rest of the API.
-    if (!ticket) throw new NotFoundException('El caso no existe');
+    if (!ticket) throw new NotFoundException(TICKET_NOT_FOUND);
     const { provider, cred, model } = await this.activeProvider();
 
     const caseText = [
@@ -259,7 +260,7 @@ export class AiService {
       .replace(/^```[a-z]*\n?|```$/g, '')
       .replace(/^"([\s\S]*)"$/, '$1')
       .trim()
-      .slice(0, 5000);
+      .slice(0, TEXT_MAX);
     if (!message) throw new AiError('El modelo no devolvió ningún mensaje. Intenta de nuevo.');
 
     // Through the tickets service, so that drafting the reply counts as activity on the case.
@@ -290,7 +291,7 @@ export class AiService {
 
     const storedUrl = storedBaseUrl(info, row);
     const baseUrl = info.needsBaseUrl && typed.baseUrl !== undefined ? cleanBaseUrl(typed.baseUrl) : storedUrl;
-    if (info.needsBaseUrl && !baseUrl) throw new AiError('Falta la URL del servidor.');
+    if (info.needsBaseUrl && !baseUrl) throw new AiError(NO_BASE_URL);
 
     let apiKey = typed.apiKey?.trim() ?? '';
     if (!apiKey && row?.apiKeyEnc) {

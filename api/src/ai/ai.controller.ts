@@ -18,7 +18,7 @@ import { AdminOnly } from '../common/auth';
 import { IdPipe } from '../common/id.pipe';
 import { FEW_FIELDS, MB, uploadErrors } from '../common/uploads';
 import { TicketsService } from '../tickets/tickets.service';
-import type { TicketDetailDto } from '../tickets/tickets.service';
+import type { TicketDetailDto } from '../tickets/ticket-mappers';
 import { AiService } from './ai.service';
 import type { ProviderConfigDto, TicketDraft } from './ai.service';
 import { AiError, isProviderId } from './types';
@@ -38,7 +38,7 @@ class ModelsDto {
 }
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 8 * MB;
 const MAX_IMAGES = 4;
 /** The text goes in a field of the form, and may be a long chat pasted whole: up to 1 MB, of which the AI is given the start. */
 const ANALYZE_LIMITS = { fileSize: MAX_IMAGE_BYTES, files: MAX_IMAGES, fields: FEW_FIELDS.fields, fieldSize: MB };

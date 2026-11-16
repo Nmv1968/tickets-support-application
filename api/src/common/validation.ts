@@ -1,4 +1,4 @@
-import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, HttpException, PayloadTooLargeException, UnsupportedMediaTypeException, ValidationPipe } from '@nestjs/common';
 import type { ArgumentMetadata } from '@nestjs/common';
 import { getMetadataStorage } from 'class-validator';
 import type { MetadataStorage, ValidationError } from 'class-validator';
@@ -11,6 +11,17 @@ export const MAX_MESSAGES = 20;
 export const MORE_MESSAGES = 'Hay más errores en los datos enviados';
 export const NOT_AN_OBJECT = 'Los datos enviados deben ser un objeto JSON';
 export const MALFORMED_JSON = 'Los datos enviados no son un JSON válido';
+/** A body over the limit of its parser, `limit` bytes (100 KB unless the parser is given another). */
+export const tooLargeBody = (limit?: number): string =>
+  `Los datos enviados pesan más de ${limit ? `${Math.round(limit / 1024)} KB` : 'lo permitido'}, lo máximo que el sistema recibe en una solicitud.`;
+export const TOO_MANY_FIELDS = 'Los datos enviados tienen más campos de los que el sistema recibe en una solicitud.';
+export const TOO_DEEP = 'Los datos enviados tienen más niveles de los que el sistema lee.';
+export const UNSUPPORTED_CHARSET = 'Los datos enviados están en una codificación de caracteres que el sistema no lee. Envíalos en UTF-8.';
+export const UNSUPPORTED_ENCODING = 'Los datos enviados están comprimidos de una forma que el sistema no lee.';
+export const UNREADABLE_BODY = 'No se pudieron leer los datos enviados.';
+
+/** The message of `@MaxLength(max, tooLong(...))` for a field the person knows by name: "La descripción no puede tener más de 5000 caracteres". */
+export const tooLong = (field: string, max: number): { message: string } => ({ message: `${field} no puede tener más de ${max} caracteres` });
 
 /**
  * The rules that say what a value is, in order of preference. When one fails, the field gets
@@ -138,12 +149,34 @@ export function validationPipe(): ValidationPipe {
   });
 }
 
+/** An error of body-parser: the `type` says which, the `status` is the one it answers with. */
+interface ParserError {
+  type: string;
+  status: number;
+  limit?: unknown;
+}
+
+const isParserError = (error: unknown): error is ParserError =>
+  typeof (error as Partial<ParserError> | null)?.type === 'string' && typeof (error as Partial<ParserError>).status === 'number';
+
+/** The Spanish answer of each error of body-parser a request can cause, by its `type`. */
+const PARSER_ERRORS: Record<string, (error: ParserError) => HttpException> = {
+  'entity.parse.failed': () => new BadRequestException(MALFORMED_JSON),
+  'entity.too.large': (error) => new PayloadTooLargeException(tooLargeBody(typeof error.limit === 'number' ? error.limit : undefined)),
+  'parameters.too.many': () => new PayloadTooLargeException(TOO_MANY_FIELDS),
+  'querystring.parse.rangeError': () => new BadRequestException(TOO_DEEP),
+  'charset.unsupported': () => new UnsupportedMediaTypeException(UNSUPPORTED_CHARSET),
+  'encoding.unsupported': () => new UnsupportedMediaTypeException(UNSUPPORTED_ENCODING),
+};
+
 /**
- * Express error handler for the JSON parser, placed right after it. Nest answers a body that is
- * not JSON with a 400 that carries the English text of `JSON.parse`; this one answers it in
- * Spanish. Every other error goes on as it came.
+ * Express error handler for the parsers of the body (JSON and form), placed right after them.
+ * body-parser refuses a request with an English text ("request entity too large", "unsupported
+ * charset", the message of `JSON.parse`), which Nest answers as it comes; this one answers each in
+ * Spanish, with the status body-parser gave it. A failure of the server itself (a 5xx) goes on as
+ * it came.
  */
-export function malformedJsonInSpanish(error: unknown, _req: Request, _res: Response, next: NextFunction): void {
-  const type = (error as { type?: unknown } | null)?.type;
-  next(type === 'entity.parse.failed' ? new BadRequestException(MALFORMED_JSON) : error);
+export function bodyErrorsInSpanish(error: unknown, _req: Request, _res: Response, next: NextFunction): void {
+  if (!isParserError(error) || error.status >= 500) return next(error);
+  next(PARSER_ERRORS[error.type]?.(error) ?? new HttpException({ statusCode: error.status, message: UNREADABLE_BODY }, error.status));
 }

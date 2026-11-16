@@ -6,6 +6,7 @@ import { provideRouter } from '@angular/router';
 import type { Role, Ticket } from '../core/api';
 import { Auth } from '../core/auth';
 import { Reminders } from '../core/reminders';
+import { textOf } from '../testing/text';
 import { RemindersPanel } from './reminders-panel';
 
 // The drawer of the bell. What goes into each group is in reminders.spec.ts; here, what it says
@@ -24,7 +25,7 @@ describe('RemindersPanel', () => {
     TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana', role });
     const fixture = TestBed.createComponent(RemindersPanel);
     fixture.detectChanges();
-    return (fixture.nativeElement as HTMLElement).textContent?.replace(/\s+/g, ' ') ?? '';
+    return textOf(fixture.nativeElement as HTMLElement);
   }
 
   it('tells an administrator where the forgotten cases are turned on', () => {

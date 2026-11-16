@@ -1,10 +1,11 @@
 import ExcelJS from 'exceljs';
 import type { TDocumentDefinitions } from 'pdfmake/interfaces';
-import { renderPdf, toTimeOnly } from '../transfer/transfer.service';
+import { renderPdf } from '../common/pdf';
+import { day } from '../common/testing';
+import { toTimeOnly } from '../transfer/sheet-reading';
 import { DATA_TABLE, PDF_COMPANIES, bar, buildReportWorkbook, periodText, reportPdf, summarize } from './dashboard.report';
 import type { ReportOptions, ReportRow } from './dashboard.report';
 
-const day = (value: string): Date => new Date(`${value}T00:00:00.000Z`);
 /** The moment the reports of these tests are generated: 12 November 2026, at noon on the server clock. */
 const now = new Date(2026, 10, 12, 12, 0);
 const hoursAfter = (moment: Date, hours: number): Date => new Date(moment.getTime() + hours * 3_600_000);
