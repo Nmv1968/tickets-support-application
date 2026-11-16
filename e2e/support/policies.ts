@@ -11,6 +11,14 @@ export interface PolicyReports {
 const POLICY_MESSAGE = /Content Security Policy|Content-Security-Policy|Permissions[- ]Policy|Feature[- ]Policy/i;
 
 /**
+ * Features of the Permissions-Policy that only some builds of Chromium know. The Chromium of
+ * Linux has no Web Bluetooth, and warns "Unrecognized feature: 'bluetooth'" where Windows and
+ * macOS apply the denial. Any other unknown feature still fails: a misspelt one would deny nothing.
+ */
+const PLATFORM_FEATURES = ['bluetooth'];
+const PLATFORM_ONLY = new RegExp(`Unrecognized feature: '(${PLATFORM_FEATURES.join('|')})'\\.?$`);
+
+/**
  * Listens, from before the page loads and across all its navigations, to what the browser reports
  * against the Content-Security-Policy and the Permissions-Policy: the `securitypolicyviolation`
  * events of the page, and the messages of the browser console, which also tell what a policy
@@ -33,7 +41,7 @@ export async function watchPolicies(page: Page): Promise<PolicyReports> {
 
   const devtools = await page.context().newCDPSession(page);
   devtools.on('Log.entryAdded', ({ entry }) => {
-    if (POLICY_MESSAGE.test(entry.text)) reports.console.push(`${entry.level}: ${entry.text}`);
+    if (POLICY_MESSAGE.test(entry.text) && !PLATFORM_ONLY.test(entry.text)) reports.console.push(`${entry.level}: ${entry.text}`);
   });
   await devtools.send('Log.enable');
 
