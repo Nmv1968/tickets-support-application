@@ -256,6 +256,14 @@ describe('ui', () => {
       expect(errorMessage(new HttpErrorResponse({ status: 500, error: {} }))).toBe('Error 500');
     });
 
+    // An agent on something only an administrator may do: the toast says it in Spanish.
+    it('says in Spanish that something is not allowed', () => {
+      const refused = new HttpErrorResponse({ status: 403, error: { statusCode: 403, error: 'Forbidden', message: 'Solo un administrador puede hacer esto.' } });
+      expect(errorMessage(refused)).toBe('Solo un administrador puede hacer esto.');
+      // Without a message of its own, from whatever answered.
+      expect(errorMessage(new HttpErrorResponse({ status: 403, error: '<html>Forbidden</html>' }))).toBe('No tienes permiso para hacer esto. Pídeselo a un administrador.');
+    });
+
     it('gives the message of any other Error', () => {
       expect(errorMessage(new Error('No se pudo leer la imagen'))).toBe('No se pudo leer la imagen');
     });

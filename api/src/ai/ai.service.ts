@@ -112,6 +112,11 @@ export class AiService {
     });
   }
 
+  /** An active provider with a model chosen: what `analyze` and `reply` need besides a key that works. */
+  async ready(): Promise<boolean> {
+    return !!(await this.prisma.aiProviderConfig.findFirst({ where: { active: true } }))?.model;
+  }
+
   async save(provider: ProviderId, input: SaveConfigInput): Promise<void> {
     const info = providerInfo(provider);
     const apiKey = input.apiKey?.trim();
@@ -263,18 +268,19 @@ export class AiService {
 
   private async activeProvider(): Promise<{ provider: ProviderId; cred: AiCredentials; model: string }> {
     const active = await this.prisma.aiProviderConfig.findFirst({ where: { active: true } });
-    if (!active) throw new AiError('La IA no está configurada. Ve a Configuración > IA, guarda una API key y activa un proveedor.');
+    // Agents reach this too, and Configuración > IA is a tab of administrators: the texts say who does it.
+    if (!active) throw new AiError('La IA no está configurada. Un administrador debe guardar una API key y activar un proveedor en Configuración > IA.');
     const provider = active.provider as ProviderId;
     const { cred, model } = await this.credentials(provider);
-    if (!model) throw new AiError('Falta elegir el modelo en Configuración > IA.');
+    if (!model) throw new AiError('Falta elegir el modelo de la IA. Un administrador debe elegirlo en Configuración > IA.');
     return { provider, cred, model };
   }
 
   /**
    * The key and the address for a call to a provider: what is stored, or what the form typed.
    *
-   * Any logged-in user reaches this through the list of models, so two rules keep a stored key
-   * from leaving for a host of the caller's choice. A typed URL counts only for the providers that
+   * An administrator reaches this through the list of models, with a key and a URL typed in the
+   * form, so two rules keep a stored key from leaving for a host of the caller's choice. A typed URL counts only for the providers that
    * need one. And a stored key goes only to the URL it was saved with: for any other URL the key
    * has to come in the same request.
    */

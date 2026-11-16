@@ -2,10 +2,21 @@ import { expect, request as playwrightRequest } from '@playwright/test';
 import type { APIRequestContext, APIResponse } from '@playwright/test';
 import { BASE_URL } from './env';
 
+export type Role = 'ADMIN' | 'AGENT';
+
 /** What the API answers to a login, and what the web keeps in localStorage (core/auth.ts). */
 export interface Session {
   token: string;
-  user: { id: number; username: string; name: string };
+  user: { id: number; username: string; name: string; role: Role };
+}
+
+/** A user as the list of users gives it. */
+export interface User {
+  id: number;
+  username: string;
+  name: string;
+  active: boolean;
+  role: Role;
 }
 
 export interface Company {
@@ -40,12 +51,13 @@ export interface TicketInput {
   supportTypeIds?: number[];
 }
 
-/** A user made for one test, with the password to log in as it. */
+/** A user made for one test, with the password to log in as it. An agent unless the test says otherwise. */
 export interface TestUser {
   id: number;
   username: string;
   name: string;
   password: string;
+  role?: Role;
 }
 
 async function body<T>(response: APIResponse): Promise<T> {
@@ -108,5 +120,16 @@ export class Api {
   async createUser(user: Omit<TestUser, 'id'>): Promise<TestUser> {
     const created = await body<{ id: number }>(await this.http.post('/api/users', { data: user }));
     return { ...user, id: created.id };
+  }
+
+  async users(): Promise<User[]> {
+    return body<User[]>(await this.http.get('/api/users'));
+  }
+
+  /** Any request, for a test about what the API refuses: its status and its message, whatever they are. */
+  async attempt(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, data?: unknown): Promise<{ status: number; message: unknown }> {
+    const response = await this.http.fetch(path, { method, data });
+    const answer = (await response.json().catch(() => null)) as { message?: unknown } | null;
+    return { status: response.status(), message: answer?.message };
   }
 }

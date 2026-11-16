@@ -4,6 +4,7 @@ import type { TestRequest } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import type { Company, TicketDetail } from '../../core/api';
+import { Auth } from '../../core/auth';
 import { Catalogs } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
 import { TicketEvents } from '../../core/ticket-events';
@@ -2513,13 +2514,20 @@ describe('TicketPanel', () => {
         expect(el.textContent).not.toContain('Para redactarlo con IA');
       }));
 
-      it('cannot be pressed, and says where to turn it on, when no AI provider is active', fakeAsync(() => {
-        catalogs.aiReady.set(false);
-        open();
+      // Configuración > IA is a tab of administrators: an agent is told who turns the AI on.
+      for (const [role, hint] of [
+        ['ADMIN', 'Activa un proveedor en Configuración > IA'],
+        ['AGENT', 'Un administrador debe activar un proveedor en Configuración > IA'],
+      ] as const) {
+        it(`cannot be pressed, and says how it is turned on, when no AI provider is active (${role})`, fakeAsync(() => {
+          TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana', role });
+          catalogs.aiReady.set(false);
+          open();
 
-        expect(button('Generar con IA').disabled).toBeTrue();
-        expect(button('Generar con IA').title).toBe('Activa un proveedor en Configuración > IA');
-      }));
+          expect(button('Generar con IA').disabled).toBeTrue();
+          expect(button('Generar con IA').title).toBe(hint);
+        }));
+      }
 
       it('that the AI could not write says why, and can be asked for again', fakeAsync(() => {
         open();

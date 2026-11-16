@@ -1,6 +1,6 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Api } from '../../core/api';
+import { Auth } from '../../core/auth';
 import { Icon } from '../../core/icon';
 import type { IconName } from '../../core/icons';
 import { Toast } from '../../core/toast';
@@ -25,14 +25,14 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
 
       <!-- More tabs than fit in a line: a phone scrolls them sideways, a wider screen puts them in two lines. -->
       <div class="flex gap-1 overflow-x-auto rounded-control bg-elevated p-1 md:flex-wrap" role="tablist">
-        @for (item of tabs; track item.id) {
+        @for (item of tabs(); track item.id) {
           <button
             type="button"
             role="tab"
             class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap"
-            [class.bg-surface]="tab() === item.id"
-            [class.text-muted]="tab() !== item.id"
-            [attr.aria-selected]="tab() === item.id"
+            [class.bg-surface]="shown() === item.id"
+            [class.text-muted]="shown() !== item.id"
+            [attr.aria-selected]="shown() === item.id"
             (click)="tab.set(item.id)"
           >
             <app-icon [name]="item.icon" class="text-base leading-none" />
@@ -41,7 +41,7 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
         }
       </div>
 
-      @switch (tab()) {
+      @switch (shown()) {
         @case ('users') {
           <app-users-tab />
         }
@@ -88,23 +88,28 @@ type TabId = 'users' | 'assignees' | 'companies' | 'supportTypes' | 'modules' | 
   `,
 })
 export class SettingsPage {
-  private readonly api = inject(Api);
   private readonly toast = inject(Toast);
+  private readonly auth = inject(Auth);
 
-  protected readonly tabs: { id: TabId; label: string; icon: IconName }[] = [
-    { id: 'users', label: 'Usuarios', icon: 'account-multiple-outline' },
+  /** `admin`: only an administrator sees the tab. An agent has the catalogs and their own account. */
+  private readonly allTabs: { id: TabId; label: string; icon: IconName; admin?: true }[] = [
+    { id: 'users', label: 'Usuarios', icon: 'account-multiple-outline', admin: true },
     { id: 'assignees', label: 'Responsables', icon: 'account-hard-hat-outline' },
     { id: 'companies', label: 'Empresas', icon: 'domain' },
     { id: 'supportTypes', label: 'Tipos de soporte', icon: 'tag-multiple-outline' },
     { id: 'modules', label: 'Módulos', icon: 'view-grid-outline' },
-    { id: 'sla', label: 'SLA', icon: 'timer-cog-outline' },
-    { id: 'reminders', label: 'Recordatorios', icon: 'bell-cog-outline' },
-    { id: 'ai', label: 'IA', icon: 'creation-outline' },
+    { id: 'sla', label: 'SLA', icon: 'timer-cog-outline', admin: true },
+    { id: 'reminders', label: 'Recordatorios', icon: 'bell-cog-outline', admin: true },
+    { id: 'ai', label: 'IA', icon: 'creation-outline', admin: true },
     // "Logo" and not "Empresa": the companies of the catalog are the clients, and have their own tab.
-    { id: 'branding', label: 'Logo', icon: 'image-outline' },
+    { id: 'branding', label: 'Logo', icon: 'image-outline', admin: true },
     { id: 'account', label: 'Mi cuenta', icon: 'account-key-outline' },
   ];
+  protected readonly tabs = computed(() => (this.auth.isAdmin() ? this.allTabs : this.allTabs.filter((item) => !item.admin)));
+  /** The tab chosen. */
   protected readonly tab = signal<TabId>('users');
+  /** The tab on screen: the one chosen while this user has it, the first one they have otherwise. */
+  protected readonly shown = computed(() => (this.tabs().some((item) => item.id === this.tab()) ? this.tab() : this.tabs()[0].id));
   protected readonly assignees = ASSIGNEES;
   protected readonly companies = COMPANIES;
   protected readonly current = signal('');
@@ -112,10 +117,10 @@ export class SettingsPage {
 
   protected async changePassword(): Promise<void> {
     try {
-      await this.api.changePassword(this.current(), this.next());
+      await this.auth.changePassword(this.current(), this.next());
       this.current.set('');
       this.next.set('');
-      this.toast.ok('Contraseña cambiada');
+      this.toast.ok('Contraseña cambiada. Si tenías la sesión abierta en otro navegador o equipo, allí se cerró.');
     } catch (error) {
       this.toast.error(error);
     }

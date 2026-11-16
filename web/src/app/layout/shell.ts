@@ -124,6 +124,9 @@ export class Shell {
   ];
 
   constructor() {
+    // A session may be older than the last change to its user (or than the roles themselves).
+    // A rejected session already goes back to the login on its own (authInterceptor).
+    this.auth.refresh().catch(() => undefined);
     this.catalogs.ensure().catch((error: unknown) => this.toast.error(error));
     this.reminders.start();
     this.live.start();

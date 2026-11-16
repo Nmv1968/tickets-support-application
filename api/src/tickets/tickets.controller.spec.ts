@@ -2,10 +2,6 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { NoteDto } from './tickets.controller';
 
-// The controller imports the login decorators and, through them, @nestjs/jwt, which is published
-// as ES modules only: Jest cannot load it here. Nothing in these tests uses it.
-jest.mock('@nestjs/jwt', () => ({ JwtService: class {} }));
-
 describe('observation input', () => {
   /** What the person would read for this request body: the messages of the 400, none when it is accepted. */
   const errors = async (input: Record<string, unknown>): Promise<string[]> =>

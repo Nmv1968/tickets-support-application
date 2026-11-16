@@ -16,12 +16,14 @@ import type { Response } from 'express';
 import { CurrentUser } from '../common/auth';
 import type { AuthUser } from '../common/auth';
 import { formatDateOnly, todayDateOnly } from '../common/labels';
+import { FEW_FIELDS, uploadErrors } from '../common/uploads';
 import { parseTicketFilters } from '../tickets/tickets.service';
 import type { TicketQuery } from '../tickets/tickets.service';
 import { TransferService } from './transfer.service';
 import type { ImportResult } from './transfer.service';
 
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
+const IMPORT_LIMITS = { fileSize: MAX_IMPORT_BYTES, files: 1, ...FEW_FIELDS };
 
 @Controller()
 export class TransferController {
@@ -34,7 +36,7 @@ export class TransferController {
    */
   @Post('import')
   @HttpCode(HttpStatus.OK)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_IMPORT_BYTES } }))
+  @UseInterceptors(uploadErrors(IMPORT_LIMITS), FileInterceptor('file', { limits: IMPORT_LIMITS }))
   import(
     @UploadedFile() file: Express.Multer.File | undefined,
     @CurrentUser() user: AuthUser,

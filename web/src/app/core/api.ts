@@ -9,10 +9,14 @@ export type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 /** `overdue` the promised day passed, `today` it is today, `soon` within the advance notice, `later` further away. */
 export type PromiseState = 'overdue' | 'today' | 'soon' | 'later';
 
+/** An agent works the cases and the catalogs; an administrator also manages users and the settings of the team. */
+export type Role = 'ADMIN' | 'AGENT';
+
 export interface AuthUser {
   id: number;
   username: string;
   name: string;
+  role: Role;
 }
 
 export interface User extends AuthUser {
@@ -413,7 +417,8 @@ export class Api {
   me(): Promise<AuthUser> {
     return this.get('auth/me');
   }
-  changePassword(current: string, next: string): Promise<void> {
+  /** The API ends every session of the user, the one that asks included, and answers a new token for it (see `Auth.changePassword`). */
+  changePassword(current: string, next: string): Promise<{ token: string }> {
     return this.send('POST', 'auth/password', { current, next });
   }
 
@@ -421,10 +426,10 @@ export class Api {
   users(): Promise<User[]> {
     return this.get('users');
   }
-  createUser(input: { username: string; name: string; password: string }): Promise<User> {
+  createUser(input: { username: string; name: string; password: string; role: Role }): Promise<User> {
     return this.send('POST', 'users', input);
   }
-  updateUser(id: number, input: { name?: string; active?: boolean; password?: string }): Promise<User> {
+  updateUser(id: number, input: { name?: string; active?: boolean; password?: string; role?: Role }): Promise<User> {
     return this.send('PATCH', `users/${id}`, input);
   }
 
@@ -560,6 +565,10 @@ export class Api {
   }
 
   // AI
+  /** Whether the AI can be asked for something: for every user. The configuration is for administrators. */
+  aiStatus(): Promise<{ ready: boolean }> {
+    return this.get('ai/status');
+  }
   aiConfig(): Promise<AiProviderConfig[]> {
     return this.get('ai/config');
   }

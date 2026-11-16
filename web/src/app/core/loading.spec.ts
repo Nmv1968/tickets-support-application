@@ -95,6 +95,9 @@ describe('liveResource', () => {
     TestBed.tick();
   }
 
+  /** The next task of the browser after its next frame. */
+  const afterNextFrame = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));
+
   beforeEach(() => {
     reads = [];
     failures = [];
@@ -174,28 +177,45 @@ describe('liveResource', () => {
     expect(live.value()).toBe('después del cambio');
   });
 
-  // The list of cases does this with a page past its end: it goes to the last page there is.
-  it('does not keep the answer of a load that asked for another read before giving it', async () => {
-    const live = TestBed.runInInjectionContext(() =>
-      liveResource({
-        params,
-        load: async (asked: string) => {
-          await Promise.resolve();
-          if (asked === 'enero') params.set('febrero');
-          return `casos de ${asked}`;
-        },
-        failed: (error) => failures.push(error),
-      }),
-    );
-    TestBed.tick();
-    await settle();
-    expect(live.value()).toBeUndefined();
-    expect(live.loading()).toBeTrue();
+  /*
+   * The list of cases does this with a page past its end: it goes to the last page there is.
+   *
+   * Changing the params also has Angular update the screen on its own, at the next frame or the
+   * next task, whichever comes first, and that update starts the next read. A next read that
+   * answered itself had answered before the spec looked in a run where the frame came first: it
+   * is answered when the spec says, and the spec waits both ways.
+   */
+  for (const [order, wait] of [
+    ['the next task', nextTask],
+    ['a task after the next frame', afterNextFrame],
+  ] as const) {
+    it(`does not keep the answer of a load that asked for another read before giving it (waiting for ${order})`, async () => {
+      const live = TestBed.runInInjectionContext(() =>
+        liveResource({
+          params,
+          load: async (asked: string, abort: AbortSignal) => {
+            if (asked !== 'enero') return new Promise<string>((resolve, reject) => reads.push({ params: asked, abort, answer: resolve, fail: reject }));
+            await Promise.resolve();
+            params.set('febrero');
+            return 'casos de enero';
+          },
+          failed: (error) => failures.push(error),
+        }),
+      );
+      TestBed.tick();
+      await wait();
+      TestBed.tick();
+      expect(reads.map((read) => read.params)).toEqual(['febrero']);
+      expect(live.value()).toBeUndefined();
+      expect(live.loading()).toBeTrue();
 
-    await settle();
-    expect(live.value()).toBe('casos de febrero');
-    expect(live.loading()).toBeFalse();
-  });
+      reads[0].answer('casos de febrero');
+      await settle();
+      expect(live.value()).toBe('casos de febrero');
+      expect(live.loading()).toBeFalse();
+      expect(failures).toEqual([]);
+    });
+  }
 
   // Its read is cancelled only at the next screen update: an answer can arrive before it.
   it('tells a load that its read is no longer the one asked for as soon as other params are', () => {

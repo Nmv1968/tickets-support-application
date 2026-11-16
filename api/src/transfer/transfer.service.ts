@@ -27,6 +27,7 @@ import { SettingsService } from '../settings/settings.service';
 import { SUPPORT_TYPE_NAME_MAX, meansNoType } from '../support-types/support-types.controller';
 import { MAX_SUPPORT_TYPES, TicketsService, activityStamp, slaDueAt, ticketOrder } from '../tickets/tickets.service';
 import type { ArchivedFilter, PromiseFilter, TicketFilters } from '../tickets/tickets.service';
+import { checkXlsxSize } from './xlsx-size';
 
 type DateOrder = 'mdy' | 'dmy';
 type ColumnKey = 'date' | 'time' | 'company' | 'description' | 'status' | 'priority' | 'module' | 'assignee' | 'supportTypes' | 'note';
@@ -119,6 +120,16 @@ export const TEMPLATE_ROWS = 2_000;
  * Excel carries (`XLSX_EXPORT_LIMIT`), so a whole export can be imported back.
  */
 export const MAX_IMPORT_ROWS = 20_000;
+
+/** Rows at the top of a sheet where the import looks for its headers. */
+const HEADER_ROWS = 21;
+
+/**
+ * Rows of a CSV the import reads at most: the headers as far down as they may be, the rows it
+ * imports, and one more. With them it knows the file has too many; reading on would only take
+ * memory, and a CSV of 20 MB made of empty lines has twenty million rows.
+ */
+export const MAX_CSV_ROWS = HEADER_ROWS + MAX_IMPORT_ROWS + 1;
 
 /**
  * Time limits of the transaction that stores an import. Prisma gives an interactive transaction 5 s
@@ -472,7 +483,8 @@ export function decodeCsv(file: Buffer): string {
   }
 }
 
-export function parseCsv(text: string): string[][] {
+/** The records of a CSV, at most `maxRows` of them: the text after the last one is not read. */
+export function parseCsv(text: string, maxRows = Infinity): string[][] {
   const clean = text.replace(/^﻿/, '');
   const firstLine = clean.slice(0, clean.indexOf('\n') >>> 0);
   const delimiter = (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? ';' : ',';
@@ -496,11 +508,12 @@ export function parseCsv(text: string): string[][] {
     } else if (char === '\n') {
       row.push(field);
       rows.push(row);
+      if (rows.length === maxRows) return rows;
       row = [];
       field = '';
     } else if (char !== '\r') field += char;
   }
-  if (field || row.length) {
+  if ((field || row.length) && rows.length < maxRows) {
     row.push(field);
     rows.push(row);
   }
@@ -952,7 +965,7 @@ export class TransferService {
       const cells = row.cells.map((cell) => searchKey(cellText(cell)));
       return cells.some((c) => HEADER_PATTERNS.company.test(c)) && cells.some((c) => HEADER_PATTERNS.description.test(c));
     });
-    if (headerIndex < 0 || headerIndex > 20) {
+    if (headerIndex < 0 || headerIndex >= HEADER_ROWS) {
       throw new BadRequestException('No se encontró la fila de encabezados. Se necesitan al menos las columnas "Empresa" y "Descripción".');
     }
 
@@ -1419,12 +1432,22 @@ export class TransferService {
   }
 
   private async readTable(file: { buffer: Buffer; originalname: string }): Promise<SheetRow[]> {
-    // A spreadsheet program shows each record of a CSV as one row, in order from the first.
-    if (/\.csv$/i.test(file.originalname)) return parseCsv(decodeCsv(file.buffer)).map((cells, index) => ({ number: index + 1, cells }));
+    if (/\.csv$/i.test(file.originalname)) {
+      const records = parseCsv(decodeCsv(file.buffer), MAX_CSV_ROWS);
+      if (records.length === MAX_CSV_ROWS) {
+        throw new BadRequestException(
+          `El archivo tiene más de ${MAX_IMPORT_ROWS} filas debajo de los encabezados y se pueden importar hasta ${MAX_IMPORT_ROWS} a la vez. Divídelo en varios archivos.`,
+        );
+      }
+      // A spreadsheet program shows each record of a CSV as one row, in order from the first.
+      return records.map((cells, index) => ({ number: index + 1, cells }));
+    }
     if (!/\.xlsx$/i.test(file.originalname)) {
       throw new BadRequestException('Formato no soportado. Usa un archivo .xlsx o .csv');
     }
 
+    // Before ExcelJS, which inflates the whole file into memory before a row can be counted.
+    await checkXlsxSize(file.buffer);
     const workbook = new ExcelJS.Workbook();
     try {
       await workbook.xlsx.load(file.buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);

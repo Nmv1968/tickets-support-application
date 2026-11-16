@@ -1,17 +1,19 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTROLLER_WATERMARK } from '@nestjs/common/constants';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppModule } from './app.module';
+import { JwtGuard, RolesGuard } from './common/auth';
 import { CompaniesController } from './companies/companies.controller';
 import { PreferencesController } from './preferences/preferences.controller';
 import { SupportTypesController } from './support-types/support-types.controller';
 
-// The two packages below are ES modules, which Jest does not load here. Their stand-ins have what
-// the files of the API take from them. For the configuration it is also the wanted thing: the real
-// one reads the .env files of whoever runs the tests, and all this spec asks the module for is the
-// list of what it registers.
+// @nestjs/config is published as ES modules only, which Jest does not load here (jest.esm-transform.cjs
+// turns only @nestjs/jwt into CommonJS). Its stand-in is also the wanted thing: the real one reads
+// the .env files of whoever runs the tests, and all this spec asks the module for is the list of
+// what it registers.
 jest.mock('@nestjs/config', () => ({ ConfigModule: { forRoot: () => ({ module: class ConfigModule {} }) } }));
-jest.mock('@nestjs/jwt', () => ({ JwtModule: { registerAsync: () => ({ module: class JwtModule {} }) }, JwtService: class JwtService {} }));
 
 describe('AppModule', () => {
   const registered = Reflect.getMetadata('controllers', AppModule) as unknown[];
@@ -38,6 +40,21 @@ describe('AppModule', () => {
 
   it('has the companies, the support types and the preferences of each user among them', () => {
     expect(registered).toEqual(expect.arrayContaining([CompaniesController, SupportTypesController, PreferencesController]));
+  });
+
+  // The limits per address are guards of their own (see common/throttle.ts): without them in the
+  // module, every test of the limits would pass and no request of the API would be limited. The
+  // same goes for the routes only an administrator may use: without RolesGuard they answer anyone.
+  it('limits the requests of each address before it looks at the login token, and the role after it', () => {
+    const guards = (Reflect.getMetadata('providers', AppModule) as { provide?: unknown; useClass?: unknown }[])
+      .filter((provider) => provider.provide === APP_GUARD)
+      .map((provider) => provider.useClass);
+    const imports = Reflect.getMetadata('imports', AppModule) as { module?: unknown }[];
+
+    // First: a flood of requests without a valid token is cut before each one reaches the database.
+    // Last: the role check reads the user the login check loaded.
+    expect(guards).toEqual([ThrottlerGuard, JwtGuard, RolesGuard]);
+    expect(imports.map((imported) => imported.module)).toContain(ThrottlerModule);
   });
 
   // The check above is only as good as the search it rests on.

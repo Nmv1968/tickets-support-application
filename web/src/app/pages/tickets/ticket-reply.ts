@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, model, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Auth } from '../../core/auth';
 import { Icon } from '../../core/icon';
 import { Toast } from '../../core/toast';
 import { copyText } from '../../core/ui';
@@ -47,6 +48,7 @@ import { copyText } from '../../core/ui';
 })
 export class TicketReply {
   private readonly toast = inject(Toast);
+  private readonly auth = inject(Auth);
 
   /** The reply of the draft, as it is in its box. */
   readonly reply = model.required<string>();
@@ -62,7 +64,8 @@ export class TicketReply {
   readonly generate = output<void>();
 
   protected readonly help = computed(() => {
-    if (!this.aiReady()) return 'Activa un proveedor en Configuración > IA';
+    // Configuración > IA is a tab of administrators: an agent is told who turns the AI on.
+    if (!this.aiReady()) return this.auth.isAdmin() ? 'Activa un proveedor en Configuración > IA' : 'Un administrador debe activar un proveedor en Configuración > IA';
     return this.unsaved() ? 'Actualiza o descarta los cambios primero: la IA redacta con el caso guardado' : 'Redacta el mensaje con el caso y sus observaciones';
   });
   protected readonly copied = signal(false);

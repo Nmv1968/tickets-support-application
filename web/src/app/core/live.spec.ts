@@ -228,3 +228,108 @@ describe('Live', () => {
     expect(seen).toEqual([]);
   });
 });
+
+// The token of the stream is refused when it expired or the API ended the session, and also when a
+// change of password has just replaced it in this browser.
+describe('Live, when the API refuses the token of the stream', () => {
+  let live: Live;
+  let auth: { token: string; logout: jasmine.Spy; renewed: jasmine.Spy<(refused: string | null) => Promise<string | null>> };
+  const refused = (): Response => new Response('{"statusCode":401,"message":"Unauthorized"}', { status: 401 });
+
+  beforeEach(() => {
+    auth = { token: 'token-viejo', logout: jasmine.createSpy('logout'), renewed: jasmine.createSpy('renewed') };
+    TestBed.configureTestingModule({ providers: [{ provide: Auth, useValue: auth }] });
+    live = TestBed.inject(Live);
+  });
+
+  afterEach(() => live.stop());
+
+  it('goes back to the login screen when the session is over, and does not try again', async () => {
+    const fetchSpy = spyOn(window, 'fetch').and.callFake(() => Promise.resolve(refused()));
+    auth.renewed.and.resolveTo(null);
+
+    live.start();
+    await nextTask();
+
+    expect(auth.renewed).toHaveBeenCalledOnceWith('token-viejo');
+    expect(auth.logout).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(live.connected()).toBeFalse();
+  });
+
+  it('opens again at once with the token a change of password left, and stays logged in', async () => {
+    const body = new ReadableStream<Uint8Array>();
+    const fetchSpy = spyOn(window, 'fetch').and.returnValues(Promise.resolve(refused()), Promise.resolve(new Response(body)));
+    auth.renewed.and.callFake(() => {
+      auth.token = 'token-nuevo';
+      return Promise.resolve('token-nuevo');
+    });
+
+    live.start();
+    await nextTask();
+
+    expect(auth.logout).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({ headers: { Authorization: 'Bearer token-nuevo', Accept: 'text/event-stream' } }));
+    expect(live.connected()).toBeTrue();
+  });
+
+  // The API ends an open stream with its session: a new password, another role, the user
+  // deactivated, the token expired. Live opens it again after its first wait, and that answer decides.
+  describe('after the API ended the stream', () => {
+    /** The waits before opening again (the first is two seconds), run when the test says. */
+    let retries: (() => void)[];
+
+    beforeEach(() => {
+      retries = [];
+      const realSetTimeout = window.setTimeout.bind(window);
+      spyOn(window, 'setTimeout').and.callFake(((handler: () => void, ms?: number) => {
+        if (ms !== 2_000) return realSetTimeout(handler, ms);
+        retries.push(handler);
+        return 0;
+      }) as typeof setTimeout);
+    });
+
+    /** Opens the stream, has the API end it, and lets the first wait go by: the next answer is `next`. */
+    async function endThenOpen(next: Response, meanwhile = (): void => undefined): Promise<jasmine.Spy> {
+      let end!: () => void;
+      const body = new ReadableStream<Uint8Array>({ start: (controller) => void (end = () => controller.close()) });
+      const fetchSpy = spyOn(window, 'fetch').and.returnValues(Promise.resolve(new Response(body)), Promise.resolve(next));
+      live.start();
+      await nextTask();
+      expect(live.connected()).toBeTrue();
+
+      end();
+      meanwhile();
+      await nextTask();
+      expect(live.connected()).toBeFalse();
+      expect(retries.length).toBe(1);
+      expect(auth.logout).not.toHaveBeenCalled();
+
+      retries.shift()!();
+      await nextTask();
+      return fetchSpy;
+    }
+
+    it('goes back to the login screen when opening it again is refused, and does not try again', async () => {
+      auth.renewed.and.resolveTo(null);
+
+      const fetchSpy = await endThenOpen(refused());
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(auth.renewed).toHaveBeenCalledOnceWith('token-viejo');
+      expect(auth.logout).toHaveBeenCalledTimes(1);
+      expect(retries).toEqual([]);
+    });
+
+    // Changed in this browser, the password left a new token here meanwhile: the stream opens with it.
+    it('opens it again with the token a change of password left, and stays logged in', async () => {
+      const fetchSpy = await endThenOpen(new Response(new ReadableStream<Uint8Array>()), () => (auth.token = 'token-nuevo'));
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({ headers: { Authorization: 'Bearer token-nuevo', Accept: 'text/event-stream' } }));
+      expect(auth.logout).not.toHaveBeenCalled();
+      expect(live.connected()).toBeTrue();
+    });
+  });
+});

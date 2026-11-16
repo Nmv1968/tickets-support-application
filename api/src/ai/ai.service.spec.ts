@@ -609,6 +609,28 @@ describe('draftFromAnswer', () => {
   });
 });
 
+// Every user asks for this to know whether to offer the AI actions; the configuration is for administrators.
+describe('whether the AI is ready', () => {
+  it('is only with an active provider that has a model', async () => {
+    expect(await setup().service.ready()).toBe(false);
+    expect(await setup(stored('openai', { apiKey: STORED_KEY, active: true })).service.ready()).toBe(false);
+    expect(await setup(stored('openai', { apiKey: STORED_KEY, model: 'modelo-a' })).service.ready()).toBe(false);
+    expect(await setup(stored('openai', { apiKey: STORED_KEY, model: 'modelo-a', active: true })).service.ready()).toBe(true);
+  });
+});
+
+// Agents draft too, and Configuración > IA is a tab they do not have.
+describe('drafting when the AI is not ready', () => {
+  it('tells whoever asked that an administrator turns it on in Configuración > IA, and calls no provider', async () => {
+    const off = await failure(setup().service.analyze('No me imprime la factura', []));
+    expect(off.message).toBe('La IA no está configurada. Un administrador debe guardar una API key y activar un proveedor en Configuración > IA.');
+
+    const noModel = await failure(setup(stored('openai', { apiKey: STORED_KEY, active: true })).service.analyze('No me imprime la factura', []));
+    expect(noModel.message).toBe('Falta elegir el modelo de la IA. Un administrador debe elegirlo en Configuración > IA.');
+    expect(sent).toEqual([]);
+  });
+});
+
 describe('drafting with the active provider', () => {
   const active = stored('compatible', { apiKey: STORED_KEY, baseUrl: HOME, model: 'modelo-a', active: true });
 

@@ -88,12 +88,18 @@ export class Live {
     const controller = new AbortController();
     this.abort = controller;
     try {
+      const token = this.auth.token;
       const response = await fetch('/api/events', {
-        headers: { Authorization: `Bearer ${this.auth.token ?? ''}`, Accept: 'text/event-stream' },
+        headers: { Authorization: `Bearer ${token ?? ''}`, Accept: 'text/event-stream' },
         signal: controller.signal,
       });
       if (response.status === 401) {
-        this.auth.logout();
+        // A change of password replaced the token meanwhile: the stream opens again with the new
+        // one. Otherwise the session is over (it expired, or the API ended it).
+        const renewed = await this.auth.renewed(token);
+        if (controller.signal.aborted) return;
+        if (renewed) void this.run();
+        else this.auth.logout();
         return;
       }
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);

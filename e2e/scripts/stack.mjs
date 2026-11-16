@@ -56,6 +56,13 @@ function writeEnvFile(values) {
 
 const secret = (bytes) => randomBytes(bytes).toString('hex');
 
+/**
+ * Every request of the tests reaches the API from one address, in parallel and as one of a few
+ * users, failed logins among them: the limits of an installation (failed logins per address,
+ * requests per user or address) would refuse some.
+ */
+const LIMITS = { LOGIN_RATE_LIMIT: '1000', API_RATE_LIMIT: '100000' };
+
 function newEnv(port) {
   return {
     // Hexadecimal: the database password goes inside a connection URL.
@@ -67,6 +74,7 @@ function newEnv(port) {
     ADMIN_NAME: 'Administrador E2E',
     // No assistant user: the tests do not go through the MCP server.
     MCP_PASSWORD: '',
+    ...LIMITS,
     WEB_PORT: String(port),
     TZ: 'America/Guayaquil',
   };
@@ -135,8 +143,9 @@ async function up() {
     values = newEnv(port);
     writeEnvFile(values);
     console.log(`[stack] Configuración nueva con secretos aleatorios en ${envFile}.`);
-  } else if (values.WEB_PORT !== String(port)) {
-    values = { ...values, WEB_PORT: String(port) };
+  } else if (values.WEB_PORT !== String(port) || Object.keys(LIMITS).some((key) => !(key in values))) {
+    // A file of a stack made before the limits existed gets them; its secrets stay as they are.
+    values = { ...LIMITS, ...values, WEB_PORT: String(port) };
     writeEnvFile(values);
   }
 

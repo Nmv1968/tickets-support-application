@@ -1,6 +1,6 @@
 import type { HttpRequest } from '@angular/common/http';
 import type { HttpTestingController, TestRequest } from '@angular/common/http/testing';
-import type { AiProviderConfig, Assignee, Company, SupportType, SystemModule, User } from '../core/api';
+import type { Assignee, Company, SupportType, SystemModule, User } from '../core/api';
 
 /** What the server answers to the read of the shared catalogs. A catalog a spec leaves out is empty. */
 export interface CatalogsAnswer {
@@ -10,7 +10,8 @@ export interface CatalogsAnswer {
   supportTypes?: SupportType[];
   /** Every module, the inactive ones too: the catalogs ask for them whole. */
   modules?: SystemModule[];
-  ai?: AiProviderConfig[];
+  /** Whether an AI provider is active with a model (`GET /ai/status`). False when left out. */
+  aiReady?: boolean;
 }
 
 /** A read of every module, active or not (`GET /modules?all=1`): the one of the shared catalogs, and the one the modules tab of Configuración makes for its own list. */
@@ -32,5 +33,5 @@ export function answerCatalogs(http: HttpTestingController, answer: CatalogsAnsw
   http.expectOne({ method: 'GET', url: '/api/companies' }).flush(answer.companies ?? []);
   http.expectOne({ method: 'GET', url: '/api/support-types' }).flush(answer.supportTypes ?? []);
   (modulesRead ?? http.expectOne(isEveryModuleRead)).flush(answer.modules ?? []);
-  http.expectOne({ method: 'GET', url: '/api/ai/config' }).flush(answer.ai ?? []);
+  http.expectOne({ method: 'GET', url: '/api/ai/status' }).flush({ ready: answer.aiReady ?? false });
 }

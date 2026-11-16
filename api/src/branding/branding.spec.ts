@@ -4,10 +4,6 @@ import type { PrismaService } from '../prisma.service';
 import { BrandingController } from './branding.controller';
 import { BrandingService, LOGO_MAX_BYTES, imageType } from './branding.service';
 
-// The controller imports the login decorators and, through them, @nestjs/jwt, which is published
-// as ES modules only: Jest cannot load it here. Nothing in these tests uses it.
-jest.mock('@nestjs/jwt', () => ({ JwtService: class {} }));
-
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('datos de la imagen')]);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('datos')]);
 const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0x10, 0, 0, 0]), Buffer.from('WEBPVP8 '), Buffer.from('datos')]);

@@ -13,13 +13,29 @@ export interface ChangeEvent {
   clientId: string | null;
 }
 
-/** In-memory fan-out of change events to every connected browser. One API instance, no broker. */
+/**
+ * In-memory fan-out to the open streams of events (`EventsController`): the changes, for every
+ * connected browser, and the end of the sessions of a user, for the streams of that user. One API
+ * instance, no broker.
+ */
 @Injectable()
 export class EventsService {
   private readonly subject = new Subject<ChangeEvent>();
   readonly changes$ = this.subject.asObservable();
 
+  private readonly ended = new Subject<number>();
+  /** The ids of the users whose sessions the API has just ended. */
+  readonly sessionsEnded$ = this.ended.asObservable();
+
   emit(event: ChangeEvent): void {
     this.subject.next(event);
+  }
+
+  /**
+   * Called by every write of `END_SESSIONS`, once it is committed: the streams open with the
+   * sessions of that user end at once, as each of their other requests is refused from then on.
+   */
+  sessionsEnded(userId: number): void {
+    this.ended.next(userId);
   }
 }

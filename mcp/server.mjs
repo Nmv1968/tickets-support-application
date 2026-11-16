@@ -11,11 +11,13 @@
 //                     In development (npm run start:dev) use http://localhost:3300/api.
 //   SUPPORT_ENV_FILE  .env file to read MCP_USERNAME and MCP_PASSWORD from. Default: ../.env
 //   SUPPORT_USERNAME / SUPPORT_PASSWORD  credentials given directly; they win over the file.
+//   SUPPORT_ATTACH_DIRS  the only folders files may be attached from, separated as in PATH (";" on
+//                     Windows, ":" elsewhere). Default: any folder that is not hidden.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { basename, extname, resolve } from 'node:path';
+import { open, realpath, stat } from 'node:fs/promises';
+import { basename, delimiter, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
 const here = import.meta.dirname;
@@ -72,6 +74,11 @@ async function login() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
   });
+  if (res.status === 429) {
+    // Too many attempts from this machine or with this user: the password may well be right.
+    const message = (await res.json().catch(() => null))?.message;
+    throw new Error(`El sistema de soporte no deja ingresar por ahora al usuario "${USERNAME}" (HTTP 429). ${message ?? 'Espera un minuto y vuelve a intentarlo.'}`);
+  }
   if (!res.ok) {
     throw new Error(`El sistema de soporte rechazó el ingreso del usuario "${USERNAME}" (HTTP ${res.status}). Revisa MCP_PASSWORD y que el usuario esté activo.`);
   }
@@ -345,19 +352,119 @@ function detail(t) {
   };
 }
 
-const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.pdf': 'application/pdf', '.txt': 'text/plain' };
+// ---------------------------------------------------------------------------
+// Files to attach
+// ---------------------------------------------------------------------------
+// The paths come from the assistant, which may have read them in a case it was asked to register:
+// only the files of these types leave the machine, and never a hidden one (.env, .ssh...).
 
-async function attach(id, paths) {
-  const form = new FormData();
-  for (const path of paths) {
-    let data;
-    try {
-      data = await readFile(path);
-    } catch {
-      throw new Error(`No se pudo leer el archivo "${path}".`);
-    }
-    form.append('files', new Blob([data], { type: MIME[extname(path).toLowerCase()] ?? 'application/octet-stream' }), basename(path));
+/** The types of file that are attached. Any other one is refused. */
+const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.pdf': 'application/pdf', '.txt': 'text/plain' };
+/** "PNG, JPG, ... o TXT", for the messages. */
+const TYPES = Object.keys(MIME)
+  .map((extension) => extension.slice(1).toUpperCase())
+  .join(', ')
+  .replace(/, (\w+)$/, ' o $1');
+/** The limits of the API per file and per request: FilesInterceptor of api/src/tickets/attachments.controller.ts. */
+const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_FILES = 10;
+const ATTACH_DIRS = (process.env.SUPPORT_ATTACH_DIRS ?? '')
+  .split(delimiter)
+  .map((dir) => dir.trim())
+  .filter(Boolean);
+
+/** Megabytes with one decimal, rounded up: a file just over the limit does not read as the limit. */
+const megabytes = (bytes) => (Math.ceil((bytes / 1024 / 1024) * 10) / 10).toLocaleString('es');
+
+/** Whether `path` is inside `dir`. On Windows the comparison ignores case, as `relative` does there. */
+function isInside(dir, path) {
+  const rest = relative(dir, path);
+  return rest !== '' && rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
+}
+
+/** The folders of SUPPORT_ATTACH_DIRS, as written and as they are on disk (links resolved). */
+function attachDirs() {
+  return Promise.all(
+    ATTACH_DIRS.map(async (dir) => {
+      if (!isAbsolute(dir)) throw new Error(`SUPPORT_ATTACH_DIRS tiene "${dir}", que no es una ruta absoluta. Dile a la persona que corrija la configuración del servidor MCP.`);
+      const given = resolve(dir);
+      // A folder that does not exist yet holds nothing, and stays as written.
+      return { given, real: await realpath(given).catch(() => given) };
+    }),
+  );
+}
+
+/** Why a file may not be attached, judged by its path alone, or null when it may. Touches nothing on disk. */
+function refusedPath(path, dirs) {
+  // \\server\share, \\?\ and \\.\ paths, and the mapped network drives they resolve to: reading one
+  // connects to the server it names. Only a folder of SUPPORT_ATTACH_DIRS may be one.
+  const network = process.platform === 'win32' && /^[\\/]{2}/.test(path);
+  if (network && !dirs.some(({ given, real }) => isInside(given, path) || isInside(real, path))) {
+    return 'es una ruta de red o de dispositivo; solo se adjuntan archivos de los discos de esta máquina';
   }
+  if (path.split(/[\\/]/).some((segment) => segment.startsWith('.'))) return 'es un archivo oculto o está dentro de una carpeta oculta (empieza con punto)';
+  if (!MIME[extname(path).toLowerCase()]) return `no es de un tipo que se adjunte (solo ${TYPES})`;
+  return null;
+}
+
+/** The content of a file the assistant asked to attach, once it is known that it may be sent. */
+async function readAttachment(path, dirs) {
+  const refused = (reason) => new Error(`No se adjunta "${path}": ${reason}.`);
+  const unreadable = () => new Error(`No se pudo leer el archivo "${path}".`);
+  if (!isAbsolute(path)) throw refused('indica la ruta completa del archivo');
+  const byPath = refusedPath(path, dirs);
+  if (byPath) throw refused(byPath);
+
+  // A link is judged by the file it points to.
+  const real = await realpath(path).catch(() => {
+    throw unreadable();
+  });
+  const byTarget = refusedPath(real, dirs);
+  if (byTarget) throw refused(`su ubicación real, "${real}", ${byTarget}`);
+  if (dirs.length && !dirs.some((dir) => isInside(dir.real, real))) {
+    throw refused(`solo se adjuntan archivos de las carpetas permitidas en SUPPORT_ATTACH_DIRS: ${ATTACH_DIRS.join('; ')}`);
+  }
+
+  // The size before anything is read; a folder or a device is refused before it is opened.
+  const info = await stat(real).catch(() => {
+    throw unreadable();
+  });
+  if (!info.isFile()) throw refused('no es un archivo');
+  if (info.size > MAX_FILE_BYTES) throw refused(`pesa ${megabytes(info.size)} MB y el máximo por archivo es ${megabytes(MAX_FILE_BYTES)} MB`);
+
+  const handle = await open(real, 'r').catch(() => {
+    throw unreadable();
+  });
+  try {
+    // Never more than the size checked, even if the file grows meanwhile.
+    const data = Buffer.alloc(info.size);
+    let filled = 0;
+    while (filled < data.length) {
+      const { bytesRead } = await handle.read(data, filled, data.length - filled, filled);
+      if (!bytesRead) break;
+      filled += bytesRead;
+    }
+    return data.subarray(0, filled);
+  } catch {
+    throw unreadable();
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Uploads the files of `paths` to case `id`: all of them, or none when any is refused. */
+async function attach(id, paths) {
+  const dirs = await attachDirs();
+  const form = new FormData();
+  const problems = [];
+  for (const path of paths) {
+    try {
+      form.append('files', new Blob([await readAttachment(path, dirs)], { type: MIME[extname(path).toLowerCase()] }), basename(path));
+    } catch (error) {
+      problems.push(error.message);
+    }
+  }
+  if (problems.length) throw new Error(`${problems.join(' ')} No se adjuntó ningún archivo. Dile a la persona por qué; no busques otra ruta por tu cuenta.`);
   return api('POST', `tickets/${id}/attachments`, { form });
 }
 
@@ -545,7 +652,11 @@ tool(
     responsable: z.string().optional().describe('Nombre de un responsable de listar_catalogos. Sin este dato el caso queda sin asignar. Si la persona nombra a alguien que no está en la lista, pregúntale antes de agregarlo'),
     tipos_soporte: z.array(z.string()).max(20).optional().describe('Nombres de tipos de soporte de listar_catalogos. Solo los que la persona indicó o confirmó: no los elijas tú. Sin este dato el caso queda sin tipo'),
     observacion: z.string().max(5000).optional().describe('Datos útiles de la evidencia: mensaje de error, pantalla, documento, usuario'),
-    imagenes: z.array(z.string()).max(10).optional().describe('Rutas en disco de imágenes o archivos para adjuntar al caso'),
+    imagenes: z
+      .array(z.string())
+      .max(MAX_FILES)
+      .optional()
+      .describe(`Rutas absolutas en disco de los archivos de la evidencia para adjuntar al caso: ${TYPES}, hasta ${megabytes(MAX_FILE_BYTES)} MB cada uno. Nunca archivos ocultos ni de carpetas ocultas`),
   },
   async (args) => {
     let ticket = await api('POST', 'tickets', {
@@ -643,8 +754,8 @@ tool(
 tool(
   'adjuntar_archivos',
   'Adjuntar archivos',
-  'Adjunta a un caso imágenes u otros archivos que están en el disco de esta máquina. Máximo 15 MB por archivo.',
-  { caso, rutas: z.array(z.string()).min(1).max(10).describe('Rutas absolutas de los archivos') },
+  `Adjunta a un caso archivos que están en el disco de esta máquina: ${TYPES}, máximo ${megabytes(MAX_FILE_BYTES)} MB por archivo. No adjunta archivos ocultos ni de carpetas ocultas (.env, .ssh...), ni de rutas de red, y si el servidor tiene carpetas permitidas, solo de ellas. Adjunta solo los archivos que la persona te dio o señaló.`,
+  { caso, rutas: z.array(z.string()).min(1).max(MAX_FILES).describe('Rutas absolutas de los archivos') },
   async (args) => detail(await attach(caseId(args.caso), args.rutas)),
 );
 

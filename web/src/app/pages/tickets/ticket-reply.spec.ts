@@ -1,5 +1,10 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import type { ComponentFixture } from '@angular/core/testing';
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
+import type { Role } from '../../core/api';
+import { Auth } from '../../core/auth';
 import { screenOf, toasts } from '../../testing/screen';
 import { TicketReply } from './ticket-reply';
 
@@ -23,6 +28,16 @@ describe('TicketReply', () => {
     fixture.detectChanges();
     flushMicrotasks();
     fixture.detectChanges();
+  }
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
+    signIn('AGENT');
+  });
+
+  /** The session is of someone with `role`. */
+  function signIn(role: Role): void {
+    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana', role });
   }
 
   function create(state: Partial<State> = {}): void {
@@ -85,12 +100,32 @@ describe('TicketReply', () => {
       expect(el.textContent).toContain('Para redactarlo con IA, actualiza o descarta antes los cambios: la IA lee el caso guardado.');
     }));
 
-    it('says where to turn it on when no AI provider is active, and nothing about the changes', fakeAsync(() => {
+    it('tells an administrator where to turn it on when no AI provider is active, and nothing about the changes', fakeAsync(() => {
+      signIn('ADMIN');
       create({ aiReady: false, unsaved: true });
 
       expect(button('Generar con IA').disabled).toBeTrue();
       expect(button('Generar con IA').title).toBe('Activa un proveedor en Configuración > IA');
       expect(el.textContent).not.toContain('Para redactarlo con IA');
+    }));
+
+    // Configuración > IA is not among the tabs of an agent: they would look for it in vain.
+    it('tells an agent that an administrator has to turn it on', fakeAsync(() => {
+      create({ aiReady: false, unsaved: true });
+
+      expect(button('Generar con IA').disabled).toBeTrue();
+      expect(button('Generar con IA').title).toBe('Un administrador debe activar un proveedor en Configuración > IA');
+      expect(el.textContent).not.toContain('Para redactarlo con IA');
+    }));
+
+    it('follows the role of the session when it changes on screen', fakeAsync(() => {
+      create({ aiReady: false });
+      expect(button('Generar con IA').title).toBe('Un administrador debe activar un proveedor en Configuración > IA');
+
+      // Made administrator meanwhile: the shell reads the user again (Auth.refresh).
+      signIn('ADMIN');
+      render();
+      expect(button('Generar con IA').title).toBe('Activa un proveedor en Configuración > IA');
     }));
   });
 

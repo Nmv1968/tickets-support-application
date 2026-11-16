@@ -11,10 +11,6 @@ import { TicketsController } from '../tickets/tickets.controller';
 import { UsersController } from '../users/users.controller';
 import { IdPipe, MAX_ID } from './id.pipe';
 
-// The controllers import the login decorators and, through them, @nestjs/jwt, which is published
-// as ES modules only: Jest cannot load it here. Nothing in these tests uses it.
-jest.mock('@nestjs/jwt', () => ({ JwtService: class {} }));
-
 describe('IdPipe', () => {
   const pipe = new IdPipe();
   const metadata: ArgumentMetadata = { type: 'param', data: 'id' };
@@ -33,8 +29,13 @@ describe('IdPipe', () => {
     expect(failure).toHaveProperty('message', 'El registro no existe');
   });
 
-  it.each(['abc', '1.5', '7x', ''])('answers 400 for "%s", which is not a whole number', async (value) => {
-    await expect(pipe.transform(value, metadata)).rejects.toBeInstanceOf(BadRequestException);
+  // ParseIntPipe alone answers "Validation failed (numeric string is expected)".
+  it.each(['abc', '1.5', '7x', ''])('answers 400 in Spanish for "%s", which is not a whole number, naming the parameter', async (value) => {
+    const failure = await pipe.transform(value, metadata).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(failure).toHaveProperty('message', 'El identificador «id» debe ser un número entero');
+    await expect(pipe.transform(value, { type: 'param', data: 'noteId' })).rejects.toHaveProperty('message', 'El identificador «noteId» debe ser un número entero');
   });
 });
 

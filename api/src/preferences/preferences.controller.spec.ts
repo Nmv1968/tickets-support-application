@@ -4,13 +4,9 @@ import type { AuthUser } from '../common/auth';
 import type { PrismaService } from '../prisma.service';
 import { PREFERENCE_VALUE_MAX, PreferenceKeyPipe, PreferencesController } from './preferences.controller';
 
-// The controller imports the login decorators and, through them, @nestjs/jwt, which is published
-// as ES modules only: Jest cannot load it here. Nothing in these tests uses it.
-jest.mock('@nestjs/jwt', () => ({ JwtService: class {} }));
-
 describe('preferences of a user', () => {
-  const ana: AuthUser = { id: 1, username: 'ana', name: 'Ana Torres' };
-  const jose: AuthUser = { id: 2, username: 'jose', name: 'José Pérez' };
+  const ana: AuthUser = { id: 1, username: 'ana', name: 'Ana Torres', role: 'AGENT' };
+  const jose: AuthUser = { id: 2, username: 'jose', name: 'José Pérez', role: 'AGENT' };
 
   interface Row {
     userId: number;

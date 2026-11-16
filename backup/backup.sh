@@ -39,8 +39,10 @@ backup() {
 
   # An attachment never changes once stored, so only the new ones are copied. One deleted in
   # the app stays in the copy: a backup that forgot what was deleted could not bring it back.
+  # Only the files of the folder itself: the attachments. The folder .incoming inside it holds
+  # uploads still arriving, which are no attachment yet and may never be one.
   mkdir -p "$DIR/adjuntos"
-  if ! cp -Ru /data/uploads/. "$DIR/adjuntos/"; then
+  if ! find /data/uploads -maxdepth 1 -type f -exec sh -c 'cp -u "$@" "$0"' "$DIR/adjuntos/" {} +; then
     log "ERROR: no se pudieron copiar los adjuntos. La base de datos sí quedó respaldada en $(basename "$file")."
     return 1
   fi

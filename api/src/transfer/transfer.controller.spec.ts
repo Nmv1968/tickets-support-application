@@ -5,10 +5,6 @@ import { formatDateOnly, todayDateOnly } from '../common/labels';
 import { TransferController } from './transfer.controller';
 import type { TransferService } from './transfer.service';
 
-// The controller imports the login decorators and, through them, @nestjs/jwt, which is published
-// as ES modules only: Jest cannot load it here. Nothing in these endpoints uses it.
-jest.mock('@nestjs/jwt', () => ({ JwtService: class {} }));
-
 describe('export endpoints', () => {
   const formats = [
     ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
@@ -76,7 +72,7 @@ describe('export endpoints', () => {
 });
 
 describe('import endpoint', () => {
-  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin' };
+  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin', role: 'ADMIN' };
   const file = { buffer: Buffer.from('Empresa,Descripción'), originalname: 'casos.csv' } as Express.Multer.File;
   const setup = (): { controller: TransferController; run: jest.Mock } => {
     const run = jest.fn().mockResolvedValue({ toCreate: 0 });

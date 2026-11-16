@@ -28,6 +28,8 @@ services:
     environment:
       DATABASE_URL: postgresql://support:${POSTGRES_PASSWORD}@db:5432/support?schema=public
       JWT_SECRET: ${JWT_SECRET}
+      # How long a session lasts. Empty: the default of the API (see .env.example).
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-}
       APP_SECRET: ${APP_SECRET}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
@@ -35,9 +37,22 @@ services:
       MCP_USERNAME: ${MCP_USERNAME:-claude}
       MCP_NAME: ${MCP_NAME:-Claude}
       MCP_PASSWORD: ${MCP_PASSWORD:-}
+      # Limits per client address. Empty: the default of the API (see .env.example).
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-}
+      API_RATE_LIMIT: ${API_RATE_LIMIT:-}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-}
       UPLOAD_DIR: /data/uploads
       PORT: 3000
       TZ: ${TZ:-America/Guayaquil}
+    # Memory of the API, and no swap beyond it. The heaviest work is an import of 20,000 rows:
+    # ExcelJS holds the whole sheet in memory. Measured on the end-to-end stack, from about 80 MB
+    # at rest: the heaviest sheet the API accepts (just under 50 MB uncompressed of small cells,
+    # see api/src/transfer/xlsx-size.ts) peaked at 930 MB; 20,000 cases with descriptions and
+    # observations of 1,000 characters each, imported, at 810 MB; 150 MB of attachments, at 250 MB.
+    # Node gives its heap half of this memory: with 1 GB, 524 MB, short of the 640 MB that sheet
+    # needs.
+    mem_limit: 1536m
+    memswap_limit: 1536m
     volumes:
       - uploads:/data/uploads
 

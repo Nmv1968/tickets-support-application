@@ -12,6 +12,7 @@ import { TicketsService, parseTicketFilters } from '../tickets/tickets.service';
 import type { TicketFilters } from '../tickets/tickets.service';
 import {
   IMPORT_TRANSACTION,
+  MAX_CSV_ROWS,
   MAX_IMPORT_ROWS,
   PDF_EXPORT_LIMIT,
   RULE_MESSAGE_MAX,
@@ -142,6 +143,13 @@ describe('spreadsheet import parsing', () => {
         ['27/7/2023', 'ACME'],
       ]);
     });
+
+    it('reads no more records than it is asked for, the last one without a line break included', () => {
+      expect(parseCsv('a\nb\nc\nd', 2)).toEqual([['a'], ['b']]);
+      expect(parseCsv('a\nb\nc', 3)).toEqual([['a'], ['b'], ['c']]);
+      expect(parseCsv('a\nb\nc\nd', 3)).toEqual([['a'], ['b'], ['c']]);
+      expect(parseCsv('a\nb\n', 3)).toEqual([['a'], ['b']]);
+    });
   });
 
   describe('searchKey', () => {
@@ -186,7 +194,7 @@ describe('toTimeOnly', () => {
 });
 
 describe('spreadsheet import', () => {
-  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin' };
+  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin', role: 'ADMIN' };
   const people = [{ id: 3, name: 'Ana' }];
   const companies = [
     { id: 2, name: 'ACME' },
@@ -792,6 +800,40 @@ describe('spreadsheet import', () => {
     });
   });
 
+  // Every record of a CSV is an array in memory, and 20 MB of empty lines are twenty million of them.
+  it('stops reading a CSV once it has more rows than any sheet it imports could have, and says so', async () => {
+    const tooMany = new BadRequestException(
+      `El archivo tiene más de ${MAX_IMPORT_ROWS} filas debajo de los encabezados y se pueden importar hasta ${MAX_IMPORT_ROWS} a la vez. Divídelo en varios archivos.`,
+    );
+    const emptyLines = { buffer: Buffer.alloc(20 * 1024 * 1024, '\n'), originalname: 'vacio.csv' };
+
+    await expect(serviceOn(database()).import(emptyLines, { ...plain, dryRun: true }, user)).rejects.toThrow(tooMany);
+    // The headers as far down as they may be, then the most rows an import takes: read, and counted.
+    const title = Array.from({ length: MAX_CSV_ROWS - MAX_IMPORT_ROWS - 2 }, () => 'Casos del año');
+    const rows = Array.from({ length: MAX_IMPORT_ROWS }, (_, index) => `7/27/2023,ACME,Caso ${index + 1},,,`);
+    await expect(serviceOn(database()).import(csv(...title, HEADERS, ...rows), { ...plain, dryRun: true }, user)).resolves.toMatchObject({
+      toCreate: MAX_IMPORT_ROWS,
+    });
+    await expect(serviceOn(database()).import(csv(...title, HEADERS, ...rows, 'una más'), { ...plain, dryRun: true }, user)).rejects.toThrow(tooMany);
+  });
+
+  // ExcelJS inflates the whole file into memory before a row can be counted: see xlsx-size.ts.
+  it('refuses an .xlsx too large once uncompressed before ExcelJS opens it', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const page = workbook.addWorksheet('Casos');
+    page.addRow(['Fecha', 'Empresa', 'Descripción']);
+    // Each description its own, so that the sheet keeps them all: over 50 MB together, in a file of a few.
+    for (let index = 0; index < 11_000; index++) page.addRow([day('2026-03-02'), 'ACME', `${index} ${'No imprime. '.repeat(400)}`]);
+    const file = { buffer: Buffer.from(await workbook.xlsx.writeBuffer()), originalname: 'marzo.xlsx' };
+    const opened = jest.spyOn(ExcelJS.Workbook.prototype, 'xlsx', 'get');
+
+    await expect(serviceOn(database()).import(file, { ...plain, dryRun: true }, user)).rejects.toThrow(
+      /^El archivo Excel ocupa 5\d MB sin comprimir y se pueden importar hasta 50 MB a la vez\. Divídelo en varios archivos\.$/,
+    );
+    expect(opened).not.toHaveBeenCalled();
+    opened.mockRestore();
+  });
+
   // A failure halfway used to leave part of the sheet in, with the companies it had added; importing
   // the file again skipped that part as duplicates, and nobody could tell which rows had gone in.
   describe('all or nothing', () => {
@@ -977,7 +1019,7 @@ describe('spreadsheet import', () => {
 // The template is only useful if the import reads it as written: these tests pass the file the
 // service produces back through the import, empty and filled in.
 describe('import template', () => {
-  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin' };
+  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin', role: 'ADMIN' };
   const catalogs = {
     companies: [
       { id: 2, name: 'Zeta' },
@@ -1763,7 +1805,7 @@ describe('export', () => {
 
   // People export, look at the file, and import it again, there or in another installation.
   describe('an exported spreadsheet, imported back', () => {
-    const user: AuthUser = { id: 1, username: 'admin', name: 'Admin' };
+    const user: AuthUser = { id: 1, username: 'admin', name: 'Admin', role: 'ADMIN' };
     const cases = [
       exportRow({
         id: 1,

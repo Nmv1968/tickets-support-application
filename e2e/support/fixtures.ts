@@ -11,8 +11,8 @@ interface Fixtures {
   api: Api;
   /** Unique to this test: it goes into every name the test creates, so no two tests share data. */
   uid: string;
-  /** A user of its own for the test, for what is kept per user (columns, the filter panel). */
-  newUser: () => Promise<TestUser>;
+  /** A user of its own for the test, for what is kept per user (columns, the filter panel). An agent unless asked for an administrator. */
+  newUser: (role?: TestUser['role']) => Promise<TestUser>;
   /** A browser of its own, logged in as that user. */
   pageAs: (user: TestUser) => Promise<Page>;
 }
@@ -30,10 +30,10 @@ export const test = base.extend<Fixtures>({
 
   newUser: async ({ api, uid }, use) => {
     let count = 0;
-    await use(async () => {
+    await use(async (role) => {
       count++;
       const username = `e2e.${uid}.${count}`;
-      return api.createUser({ username, name: `Usuario Demo ${count} ${uid}`, password: randomBytes(12).toString('hex') });
+      return api.createUser({ username, name: `Usuario Demo ${count} ${uid}`, password: randomBytes(12).toString('hex'), role });
     });
   },
 

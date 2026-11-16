@@ -1,7 +1,8 @@
 import { A11yModule } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, inject, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, output } from '@angular/core';
 import { Router } from '@angular/router';
 import type { Ticket } from '../core/api';
+import { Auth } from '../core/auth';
 import { Icon } from '../core/icon';
 import { Reminders } from '../core/reminders';
 import { PROMISE_CLASS, formatDateTime, formatDay, formatHours, promiseText, timeAgo } from '../core/ui';
@@ -66,7 +67,7 @@ import { ReminderCard } from './reminder-card';
             Casos olvidados ({{ reminders.stale().length }})
           </h3>
           @if (reminders.staleHours() === 0) {
-            <p class="mt-2 text-xs text-muted">Los recordatorios están apagados. Se activan en Configuración &gt; Recordatorios.</p>
+            <p class="mt-2 text-xs text-muted">Los recordatorios están apagados. {{ turnOn() }}</p>
           } @else {
             <p class="mt-1 text-2xs text-muted">
               Abiertos y sin movimiento desde hace más de {{ formatHours(reminders.staleHours()) }}. Una observación o cualquier cambio en el caso quita el aviso.
@@ -120,6 +121,7 @@ import { ReminderCard } from './reminder-card';
 export class RemindersPanel {
   protected readonly reminders = inject(Reminders);
   private readonly router = inject(Router);
+  private readonly auth = inject(Auth);
 
   readonly closed = output<void>();
 
@@ -129,6 +131,10 @@ export class RemindersPanel {
   protected readonly timeAgo = timeAgo;
   protected readonly formatHours = formatHours;
   protected readonly formatDateTime = formatDateTime;
+  /** Who turns the forgotten cases on: Configuración > Recordatorios is a tab of administrators. */
+  protected readonly turnOn = computed(() =>
+    this.auth.isAdmin() ? 'Se activan en Configuración > Recordatorios.' : 'Un administrador puede activarlos en Configuración > Recordatorios.',
+  );
 
   /** Opens the case in the list screen, which shows its detail panel. */
   protected open(ticket: Ticket): void {

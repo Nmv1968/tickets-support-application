@@ -13,7 +13,9 @@ interface BuildSettings {
 // Theme.palette reads the colours of the charts from the stylesheet, once per theme, and keeps
 // them. With "inlineCritical" (the default of a production build) the stylesheet is loaded
 // late, after the script may already have read them: the charts then stay without colours.
-// Nothing in the application code fails when the setting is lost, so it is checked here.
+// Nothing in the application code fails when the setting is lost, so it is checked here. The
+// Content-Security-Policy of nginx (web/security-headers.conf) needs it off too: the late
+// stylesheet is switched on by an inline onload handler, which the policy blocks.
 describe('The production build', () => {
   it('does not load the stylesheet late: Theme.palette reads the colours from it', () => {
     const production: BuildSettings = config.projects.web.architect.build.configurations.production;

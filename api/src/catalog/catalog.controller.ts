@@ -15,6 +15,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { AdminOnly } from '../common/auth';
 import { IdPipe, MAX_ID } from '../common/id.pipe';
 import { NO_MODULE, PRIORITIES, moduleFullName, searchKey } from '../common/labels';
 import { PrismaService } from '../prisma.service';
@@ -93,6 +94,7 @@ export class CatalogController {
   }
 
   /** New hours apply to tickets created or re-prioritised from now on. */
+  @AdminOnly()
   @Put('sla')
   async saveSla(@Body() dto: SlaInput): Promise<void> {
     await this.prisma.$transaction(

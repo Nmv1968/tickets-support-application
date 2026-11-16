@@ -783,7 +783,7 @@ describe('planTicketUpdate', () => {
 });
 
 describe('TicketsService', () => {
-  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin' };
+  const user: AuthUser = { id: 1, username: 'admin', name: 'Admin', role: 'ADMIN' };
   /** With the reminder at 48 hours, a case not touched since before this moment is forgotten. */
   const CUTOFF = new Date(NOW.getTime() - 48 * 3_600_000);
   const open = { status: { not: 'RESOLVED' } };

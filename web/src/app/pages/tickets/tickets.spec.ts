@@ -22,8 +22,8 @@ const OTHER = ticket({ id: 8, code: 'SOP-00008', companyId: 5, company: 'Bodega 
 // The users of the catalog, for "Registrado por". The other catalogs the filters and the form of a
 // new case offer are the ones of the specs (see testing/fixtures).
 const USERS: User[] = [
-  { id: 1, username: 'ana', name: 'Ana', active: true, canLogin: true },
-  { id: 2, username: 'luis', name: 'Luis', active: true, canLogin: true },
+  { id: 1, username: 'ana', name: 'Ana', active: true, canLogin: true, role: 'AGENT' },
+  { id: 2, username: 'luis', name: 'Luis', active: true, canLogin: true, role: 'AGENT' },
 ];
 
 /** The headers of the table for someone who never chose their columns. */
@@ -59,7 +59,7 @@ describe('TicketsPage', () => {
     http = TestBed.inject(HttpTestingController);
     events = TestBed.inject(TicketEvents);
     // The list is behind the login: there is always someone logged in.
-    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana' });
+    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana', role: 'AGENT' });
     catalogs = TestBed.inject(Catalogs);
     catalogs.users.set(USERS);
     catalogs.companies.set(COMPANIES);
@@ -865,7 +865,7 @@ describe('TicketsPage', () => {
 
       // Ana leaves and Luis logs in, in the same browser. He never chose his columns.
       fixture.destroy();
-      TestBed.inject(Auth).user.set({ id: 2, username: 'luis', name: 'Luis' });
+      TestBed.inject(Auth).user.set({ id: 2, username: 'luis', name: 'Luis', role: 'AGENT' });
       open();
       expect(headers()).toEqual(STARTING_COLUMNS);
 
@@ -878,7 +878,7 @@ describe('TicketsPage', () => {
 
       // And she finds hers again.
       fixture.destroy();
-      TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana' });
+      TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana', role: 'AGENT' });
       create();
       expect(headers()).not.toContain('Registro');
       expect(headers()).toContain('Empresa');
@@ -1160,7 +1160,7 @@ describe('TicketsPage', () => {
 
       // Another user of the same browser has them as they left them: closed, having never opened them.
       fixture.destroy();
-      TestBed.inject(Auth).user.set({ id: 2, username: 'luis', name: 'Luis' });
+      TestBed.inject(Auth).user.set({ id: 2, username: 'luis', name: 'Luis', role: 'AGENT' });
       open();
       expect(filters()).toBeNull();
     }));
@@ -2094,7 +2094,7 @@ describe('TicketsPage, with the code of its dialogs still on its way', () => {
       deferBlockBehavior: DeferBlockBehavior.Manual,
     });
     http = TestBed.inject(HttpTestingController);
-    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana' });
+    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana', role: 'AGENT' });
   });
 
   afterEach(() => {

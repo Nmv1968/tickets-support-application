@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import type { Priority, PromiseState, TicketStatus } from './api';
+import type { Priority, PromiseState, Role, TicketStatus } from './api';
 
 export const STATUSES: TicketStatus[] = ['UNRESOLVED', 'PENDING', 'RESOLVED'];
 
@@ -23,6 +23,14 @@ export const PRIORITY_LABEL: Record<Priority, string> = {
 
 /** The priorities as a select offers them, from the lowest. */
 export const PRIORITY_OPTIONS: readonly { id: Priority; label: string }[] = PRIORITIES.map((id) => ({ id, label: PRIORITY_LABEL[id] }));
+
+export const ROLE_LABEL: Record<Role, string> = {
+  ADMIN: 'Administrador',
+  AGENT: 'Agente',
+};
+
+/** The roles as a select offers them: the one a new user gets first. */
+export const ROLE_OPTIONS: readonly { id: Role; label: string }[] = (['AGENT', 'ADMIN'] as const).map((id) => ({ id, label: ROLE_LABEL[id] }));
 
 /** Text colour class per priority. */
 export const PRIORITY_CLASS: Record<Priority, string> = {
@@ -135,6 +143,8 @@ export function errorMessage(error: unknown): string {
     const message = (error.error as { message?: string | string[] } | null)?.message;
     if (Array.isArray(message)) return message.join('. ');
     if (typeof message === 'string') return message;
+    // The API says it in Spanish; this is for an answer without a message.
+    if (error.status === 403) return 'No tienes permiso para hacer esto. Pídeselo a un administrador.';
     // What the web server answers while the API restarts or is down: nothing the person did.
     if (error.status >= 502 && error.status <= 504) return 'El servidor no está disponible. Intenta de nuevo en un momento.';
     return `Error ${error.status}`;

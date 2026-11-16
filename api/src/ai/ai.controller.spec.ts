@@ -8,8 +8,17 @@ import { AiError } from './types';
 
 describe('AI endpoints', () => {
   /** The controller over fakes of the two services, each with only the calls the test expects. */
-  const setup = (ai: { analyze?: jest.Mock; reply?: jest.Mock }, tickets: { get?: jest.Mock } = {}): AiController =>
+  const setup = (ai: { analyze?: jest.Mock; reply?: jest.Mock; ready?: jest.Mock }, tickets: { get?: jest.Mock } = {}): AiController =>
     new AiController(ai as unknown as AiService, tickets as unknown as TicketsService);
+
+  // The only thing of the AI configuration an agent learns: whether to offer the AI actions.
+  it('says whether the AI is ready, and nothing else of its configuration', async () => {
+    const ready = jest.fn().mockResolvedValue(true);
+
+    await expect(setup({ ready }).status()).resolves.toEqual({ ready: true });
+    ready.mockResolvedValue(false);
+    await expect(setup({ ready }).status()).resolves.toEqual({ ready: false });
+  });
 
   describe('analyze', () => {
     it('refuses a text field that is not one text', () => {

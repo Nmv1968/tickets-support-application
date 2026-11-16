@@ -138,6 +138,29 @@ describe('parameters and bodies', () => {
     assert.match(SERVER, /form\.append\('files'/);
   });
 
+  test('the files server.mjs attaches fit the limits of the API, per file and per request', () => {
+    const controller = read('api', 'src', 'tickets', 'attachments.controller.ts');
+    // The constants of the limits may live in another file of the module.
+    const tickets = readdirSync(join(API_SRC, 'tickets'))
+      .filter((file) => file.endsWith('.ts') && !file.endsWith('.spec.ts'))
+      .map((file) => read('api', 'src', 'tickets', file));
+    /** The number `expression` stands for in `sources`: `15 * 1024 * 1024`, or a `const` set to one. */
+    const number = (sources, expression) => {
+      const constant = new RegExp(`const ${expression}(?::\\s*\\w+)?\\s*=\\s*([\\d\\s*_]+);`);
+      const text = /^[A-Za-z_]\w*$/.test(expression) ? sources.map((source) => constant.exec(source)?.[1]).find(Boolean) : expression;
+      assert.ok(text, `the value of ${expression} not found`);
+      const factors = text.split('*').map((factor) => Number(factor.trim().replace(/_/g, '')));
+      assert.ok(factors.every(Number.isFinite), `${expression} is not a number: ${text}`);
+      return factors.reduce((product, factor) => product * factor, 1);
+    };
+    const size = /fileSize:\s*([\w\s*]+?)\s*[,}]/.exec(controller)?.[1];
+    const count = /FilesInterceptor\('files',\s*([\w\s*]+?)\s*[,)]/.exec(controller)?.[1];
+    assert.ok(size && count, 'the limits of FilesInterceptor not found in attachments.controller.ts');
+    assert.equal(number([SERVER], 'MAX_FILE_BYTES'), number([controller, ...tickets], size));
+    assert.equal(number([SERVER], 'MAX_FILES'), number([controller, ...tickets], count));
+    assert.match(SERVER, /rutas: z\.array\(z\.string\(\)\)\.min\(1\)\.max\(MAX_FILES\)/);
+  });
+
   test('the status and priority values are the enums of the database', () => {
     const schema = read('api', 'prisma', 'schema.prisma');
     const enumValues = (name) => all(block(schema, `enum ${name} {`, '}'), /^\s*(\w+)\s*$/gm);

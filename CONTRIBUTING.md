@@ -55,7 +55,18 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
 ### API (`api/`)
 
 - NestJS con un solo módulo. Los controladores validan la entrada con DTO de `class-validator`.
-- Los mensajes de error que llegan al usuario van en español.
+- Los mensajes de error que llegan al usuario van en español. Los de validación también, sin hacer
+  nada: el `ValidationPipe` global (`validationPipe()` de `src/common/validation.ts`) escribe en
+  español cada regla de `class-validator` que no trae mensaje propio, con el nombre del campo en el
+  API (`El campo «name» no puede estar vacío`, `«items.0.hours»` dentro de una lista), y deja tal
+  cual el mensaje propio de un decorador, que se escribe cuando el nombre del campo no basta. Un
+  campo que el DTO no declara se rechaza (`El campo «x» no se admite`). Una regla de
+  `class-validator` que todavía no se usa lleva su frase en `SENTENCES` (sin ella, la respuesta dice
+  que el valor no es válido) y un valor que la rompa en `BREAKERS` de
+  `src/common/dto-messages.spec.ts`: esa prueba carga todo `src/`, recorre cada DTO con valores que
+  rompen cada regla de cada campo y falla si una respuesta trae un texto de `class-validator` en
+  inglés. Un id de la URL se lee con `IdPipe` (`src/common/id.pipe.ts`), nunca con `ParseIntPipe`,
+  cuyo 400 está en inglés.
 - Un cambio en `prisma/schema.prisma` lleva su migración (`npx prisma migrate dev --name ...`). Si
   la migración mueve datos que ya existen, se termina a mano para que no se pierdan.
 - Las empresas, los tipos de soporte y los responsables no repiten nombre, comparado sin mayúsculas
@@ -65,8 +76,47 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
 - Lo que es de todo el equipo se guarda en `settings`. Lo que cada persona elige para su propia
   vista (las columnas de la lista de casos, por ejemplo) va en `preferences`, que siempre trabaja
   sobre el usuario de la sesión: una preferencia nunca es global.
+- Toda ruta cuenta para el límite general de `src/common/throttle.ts`, sin hacer nada: por usuario
+  cuando la solicitud trae un token válido (se revisan la firma y la caducidad, sin leer la base de
+  datos) y por dirección IP cuando no. La dirección es `req.ip`, que sale del `X-Forwarded-For` de
+  nginx por el `trust proxy` de `src/app.setup.ts`, agrupada con `clientAddress`: nunca se lee ese
+  encabezado a mano.
+- El ingreso tiene además dos contadores en memoria, en `src/auth/`: los ingresos fallidos de cada
+  dirección (`AddressFailures`, `LOGIN_RATE_LIMIT`) y los intentos fallidos seguidos de cada usuario
+  (`LoginFailures`), que también cuentan las contraseñas actuales incorrectas de
+  `POST /auth/password`. Cada intento se cuenta antes de comparar la contraseña, sin nada esperado
+  entre la revisión y la cuenta, y uno correcto lo descuenta: así, intentos enviados a la vez no
+  pasan juntos la revisión. Un 429 propio se lanza con `TooManyAttemptsException`
+  (`src/common/retry-after.ts`), que escribe `Retry-After` con los segundos que faltan.
+- Toda ruta pide una sesión, salvo las marcadas `@Public()`, y está abierta a los agentes, salvo las
+  marcadas `@AdminOnly()` (`src/common/auth.ts`). `RolesGuard` responde 403 con el rol que `JwtGuard`
+  leyó de la base de datos en esa misma solicitud, nunca con el del token. Una ruta nueva solo para
+  administradores se agrega también a la lista de `src/common/auth.spec.ts`, que falla si una ruta
+  gana o pierde la marca sin que nadie lo decida.
+- Todo lo que cambia la contraseña, el rol o el estado activo de un usuario escribe además
+  `END_SESSIONS` (`src/common/session-token.ts`) en el mismo `update`: sube su `tokenVersion`, y
+  `JwtGuard` rechaza desde entonces todo token firmado antes. Un token se firma siempre con
+  `tokenPayload(user)`, que lleva esa versión. Una vez hecha la escritura (y confirmada la
+  transacción, si la hay), avisa con `EventsService.sessionsEnded(id)`: `JwtGuard` mira el token del
+  flujo de `/api/events` solo al abrirlo, y ese aviso cierra al instante los flujos de ese usuario.
+  Sin él quedarían abiertos hasta la siguiente comprobación del flujo, cada 25 segundos.
+  `src/events/events.controller.spec.ts` busca en `src/` los archivos que importan `END_SESSIONS` y
+  falla si alguno no avisa.
+- Una ruta que recibe archivos fija en `limits` de multer el tamaño y el número de archivos, y los
+  campos de texto que admite (`FEW_FIELDS` de `src/common/uploads.ts` si no lee ninguno), y pone
+  `uploadErrors(limits)` antes de su `FileInterceptor` o `FilesInterceptor`: los mensajes de multer
+  llegan en inglés. Lo que se guarda en disco va con `diskStorage` a una carpeta temporal en el mismo
+  volumen y se mueve a su lugar con sus registros, como los adjuntos
+  (`src/tickets/attachments.controller.ts`). Una subida nueva más grande que las de hoy cambia
+  también `client_max_body_size` de `web/nginx.conf`, y una lectura más pesada en memoria se mide
+  contra el `mem_limit` del API en `docker-compose.yml`.
 - Las pruebas no usan base de datos: sustituyen `PrismaService` por un objeto con las llamadas que
-  esperan.
+  esperan. `src/app.http.spec.ts` arranca el `AppModule` entero, con `configureApp` como `main.ts`, y
+  le habla por HTTP con supertest: ahí se prueba lo que solo existe al unir las piezas (los guards
+  globales y su orden, el `ValidationPipe`, el filtro de errores de Prisma). Jest carga el
+  `@nestjs/jwt` real, que se publica solo como módulo ES: `jest.esm-transform.cjs` lo pasa a
+  CommonJS (los paquetes que convierte están en `transformIgnorePatterns` de `package.json`).
+  `@nestjs/config` se sustituye siempre en las pruebas, para que nunca lean un `.env`.
 
 ### Web (`web/`)
 
@@ -75,7 +125,11 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   lee o tras un evento de su plantilla, no tras cualquier temporizador o promesa: lo que muestra
   una plantilla es un signal o un `computed`, nunca un campo que cambia sin avisar. Las pruebas
   corren igual, sin zonas (`src/test.ts`), y fallan si un valor de una plantilla cambió sin avisar.
-  zone.js queda solo en las pruebas, para `fakeAsync`.
+  zone.js queda solo en las pruebas, para `fakeAsync`. Sin zonas, Angular también actualiza la
+  pantalla por su cuenta tras un cambio, en el siguiente cuadro o la siguiente tarea del navegador,
+  lo que llegue primero: una prueba que espera la siguiente tarea (`nextTask`) no sabe si esa
+  actualización ya pasó. Lo que una prueba revisa a medio camino no se responde solo: lo responde la
+  prueba (ver `src/app/core/loading.spec.ts`).
 - `npm run lint` (ESLint con angular-eslint, en `eslint.config.mjs`) revisa el código y las
   plantillas sin cambiar nada. Exige lo que se describe aquí: `OnPush`, `input()`, `output()` y
   `viewChild()` en vez de sus decoradores, `@if` y `@for` en vez de `*ngIf` y `*ngFor`, componentes
@@ -98,9 +152,24 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   `src/app/testing/ng-select.ts`. Las demás ayudas de las pruebas (un caso de ejemplo, botones,
   campos, avisos) están en `src/app/testing/`. La ventana de Karma tiene el ancho de un teléfono:
   una prueba de una pantalla que se dibuja distinto en una pantalla ancha (`wideScreen()`, de
-  `src/app/core/wide-screen.ts`) elige su ancho con `provideScreenWidth`.
+  `src/app/core/wide-screen.ts`) elige su ancho con `provideScreenWidth`. Una prueba de si algo cabe
+  en un ancho le da ese ancho al elemento del componente (`users-tab.spec.ts`): las clases de
+  Tailwind de un contenedor (`@container`, `@min-[…]:`) responden a él; las de la pantalla (`md:`,
+  `lg:`), no.
 - Lo que no se puede deshacer (eliminar) pregunta antes con el servicio `Confirm`, no con el
   `confirm` del navegador.
+- Lo que solo puede usar un administrador (pestañas, botones) se oculta a un agente con
+  `Auth.isAdmin()`, no se deshabilita. El API responde 403 de todas formas: ocultarlo es para no
+  ofrecer lo que no va a funcionar. La configuración de la IA no se lee para saber si está lista:
+  para eso está `Catalogs.aiReady`, que sale de `GET /ai/status`. Un texto que manda a una pestaña
+  de administradores (Usuarios, SLA, Recordatorios, IA, Logo) le dice a un agente, que no la ve,
+  que eso lo hace un administrador, y su prueba revisa los dos roles. Un mensaje del API que llega
+  también a un agente (los de la IA sin configurar, en `ai.service.ts`) lo dice para cualquiera de
+  los dos: "Un administrador debe ... en Configuración > IA".
+- El token de la sesión solo lo guarda `Auth` (`src/app/core/auth.ts`). Un 401 vuelve a la pantalla
+  de ingreso, salvo cuando un cambio de contraseña acaba de dejar otro token (`Auth.changePassword`,
+  en esta pestaña o en otra del mismo usuario): entonces la petición sale otra vez con el nuevo.
+  El cambio de contraseña mismo no espera a nada: si el API lo rechaza con 401, vuelve al ingreso.
 - El fondo oscuro de un diálogo o de un panel lateral lleva la clase `modal-backdrop` o
   `panel-backdrop` de `src/styles.css`. Por ella un desplegable abierto sabe que el clic que cierra
   su lista no debe cerrar también el diálogo. Un diálogo se cierra con un clic en su fondo con
@@ -115,6 +184,16 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   cancela.
 - Las preferencias de vista de cada persona se leen y se guardan con `Api.preference` y
   `Api.savePreference`, no en la configuración que comparten todos.
+- La web corre bajo la `Content-Security-Policy` de `web/security-headers.conf`: solo los scripts
+  de su compilación, sin `eval` ni scripts o manejadores en línea (por eso `angular.json` deja
+  `inlineCritical` apagado: carga el resto de los estilos con un `onload`), sin fuentes, scripts ni
+  conexiones de otros sitios, e imágenes propias, `blob:` o `data:`. La aplica el nginx de la
+  imagen de Docker, no `ng serve`: una infracción se ve en las pruebas de extremo a extremo, o en la
+  consola del navegador con la pila de esas pruebas. Lo que necesite otra cosa cambia también la
+  política, a propósito, y `e2e/tests/security-headers.spec.ts`, que comprueba cada directiva y
+  recorre las pantallas buscando infracciones: una pantalla o un diálogo nuevo se agrega a ese
+  recorrido. Un bloque `location` de `web/nginx.conf` con un `add_header` propio incluye otra vez
+  ese archivo, porque nginx no le pasa las cabeceras del bloque `server`; la misma prueba lo revisa.
 
 ### Asistentes (`mcp/`, `skills/`)
 
@@ -139,7 +218,9 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
 - Cada prueba crea sus propios datos, con nombres únicos (el `uid` de `support/fixtures.ts`), a
   través del API o de la pantalla. Ninguna depende de otra ni del orden: corren en paralelo sobre la
   misma base de datos. Lo que se guarda por usuario (columnas, filtros a la vista) se prueba con un
-  usuario propio de la prueba (`newUser` y `pageAs`).
+  usuario propio de la prueba (`newUser` y `pageAs`). `newUser()` crea un agente y
+  `newUser('ADMIN')`, un administrador; las pruebas que no dicen con quién corren como el
+  administrador de la pila.
 - Los selectores son los que usa una persona: roles, etiquetas y textos en español de las
   plantillas. Los desplegables se eligen con `chooseOption` de `support/ui.ts`.
 - Sin esperas fijas: se espera lo que muestra la pantalla o la respuesta del API.

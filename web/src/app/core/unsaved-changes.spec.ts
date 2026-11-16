@@ -41,7 +41,7 @@ describe('UnsavedChanges, on leaving a screen', () => {
     });
     router = TestBed.inject(Router);
     unsaved = TestBed.inject(UnsavedChanges);
-    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana Torres' });
+    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana Torres', role: 'AGENT' });
     answer = true;
     asked = 0;
     await RouterTestingHarness.create('/casos');

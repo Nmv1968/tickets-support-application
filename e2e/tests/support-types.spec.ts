@@ -12,6 +12,9 @@ test('crea un tipo de soporte con su color, lo pone en un caso y se ve su chip',
   await page.getByLabel('Color del tipo nuevo, en hexadecimal').fill(color);
   await page.getByRole('button', { name: 'Agregar' }).click();
   await expect(toast(page, 'Tipo de soporte agregado')).toBeVisible();
+  // The form empties once the catalogs are read again. Until then its preview chip carries the name
+  // too, and the list may already have the new type: a change elsewhere reads them again sooner.
+  await expect(page.getByLabel('Nombre del tipo de soporte')).toHaveValue('');
   // In the catalog, as its chip: its name on its colour.
   const chip = page.locator('app-type-chip', { hasText: name });
   await expect(chip).toBeVisible();

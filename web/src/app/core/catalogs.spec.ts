@@ -4,7 +4,7 @@ import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { answerCatalogs } from '../testing/catalogs';
 import type { CatalogsAnswer } from '../testing/catalogs';
 import { toasts } from '../testing/screen';
-import type { AiProviderConfig, Assignee, Company, SupportType, SystemModule } from './api';
+import type { Assignee, Company, SupportType, SystemModule } from './api';
 import { Catalogs, companyCreator, findByName, offered } from './catalogs';
 import { errorMessage } from './ui';
 
@@ -18,17 +18,6 @@ describe('Catalogs', () => {
   const company = (id: number, name: string, active = true): Company => ({ id, name, active, tickets: 0 });
   const type = (id: number, name: string, active = true): SupportType => ({ id, name, color: '#64748b', active, tickets: 0 });
   const module = (id: number, name: string, active = true): SystemModule => ({ id, name, parentId: null, active, fullName: name });
-  const provider = (active: boolean, model: string | null): AiProviderConfig => ({
-    id: 'compatible',
-    label: 'Compatible con OpenAI',
-    needsBaseUrl: true,
-    keyOptional: true,
-    hasKey: true,
-    keyHint: '…a1b2',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    model,
-    active,
-  });
 
   beforeEach(() => {
     TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
@@ -57,7 +46,7 @@ describe('Catalogs', () => {
 
   it('reads the companies and the support types with the rest', fakeAsync(() => {
     load({
-      users: [{ id: 1, username: 'ana', name: 'Ana Torres', active: true, canLogin: true }],
+      users: [{ id: 1, username: 'ana', name: 'Ana Torres', active: true, canLogin: true, role: 'AGENT' }],
       assignees: [person(4, 'Ana')],
       companies: [company(1, 'Acme')],
       supportTypes: [type(2, 'Falla del sistema')],
@@ -108,7 +97,8 @@ describe('Catalogs', () => {
     const read = http.expectOne((request) => request.url === '/api/modules');
     expect(read.request.params.get('all')).toBe('1');
     read.flush([]);
-    for (const url of ['users', 'assignees', 'companies', 'support-types', 'ai/config']) http.expectOne(`/api/${url}`).flush([]);
+    for (const url of ['users', 'assignees', 'companies', 'support-types']) http.expectOne(`/api/${url}`).flush([]);
+    http.expectOne('/api/ai/status').flush({ ready: false });
     tick();
   }));
 
@@ -236,12 +226,14 @@ describe('Catalogs', () => {
     });
   });
 
-  it('says the AI is ready only with an active provider that has a model', fakeAsync(() => {
-    load({ ai: [provider(true, null), provider(false, 'un-modelo')] });
+  // The configuration of the AI, with its key and its address, is only for an administrator to read.
+  it('asks the server only whether the AI is ready, never for its configuration', fakeAsync(() => {
+    load({ aiReady: false });
     expect(catalogs.aiReady()).toBeFalse();
 
-    load({ ai: [provider(true, 'un-modelo')] });
+    load({ aiReady: true });
     expect(catalogs.aiReady()).toBeTrue();
+    http.expectNone('/api/ai/config');
   }));
 });
 

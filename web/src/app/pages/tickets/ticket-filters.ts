@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, inject, input, model, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, model, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Priority, TicketFilters, TicketStatus } from '../../core/api';
+import { Auth } from '../../core/auth';
 import { AssigneeSelect, CompanySelect, ModuleSelect, PrioritySelect, StatusSelect, SupportTypeSelect } from '../../core/case-selects';
 import { Catalogs } from '../../core/catalogs';
 import { Icon } from '../../core/icon';
@@ -197,7 +198,7 @@ export function activeFilters(filters: ListFilters): number {
         <input type="checkbox" class="accent-danger" [ngModel]="f.overdue" (ngModelChange)="set('overdue', $event)" />
         Vencidos
       </label>
-      <label class="flex cursor-pointer items-center gap-1.5 py-1 text-xs" title="Abiertos y sin movimiento desde hace más del tiempo configurado en Recordatorios">
+      <label class="flex cursor-pointer items-center gap-1.5 py-1 text-xs" [title]="staleHint()">
         <input type="checkbox" class="accent-warning" [ngModel]="f.stale" (ngModelChange)="set('stale', $event)" />
         Olvidados
       </label>
@@ -210,6 +211,7 @@ export function activeFilters(filters: ListFilters): number {
 })
 export class TicketFiltersPanel {
   protected readonly catalogs = inject(Catalogs);
+  private readonly auth = inject(Auth);
 
   readonly filters = model.required<ListFilters>();
   /** There is something to clear: a filter of the panel, or a text in the search box, which "Limpiar filtros" empties too. */
@@ -219,6 +221,12 @@ export class TicketFiltersPanel {
 
   protected readonly promiseOptions = PROMISE_OPTIONS;
   protected readonly archivedOptions = ARCHIVED_OPTIONS;
+  /** What "Olvidados" means. Configuración > Recordatorios, where its time is set, is a tab of administrators. */
+  protected readonly staleHint = computed(() =>
+    this.auth.isAdmin()
+      ? 'Abiertos y sin movimiento desde hace más del tiempo configurado en Configuración > Recordatorios'
+      : 'Abiertos y sin movimiento desde hace más del tiempo que un administrador fija en Configuración > Recordatorios',
+  );
 
   protected set<K extends keyof ListFilters>(field: K, value: ListFilters[K]): void {
     this.filters.update((filters) => ({ ...filters, [field]: value }));

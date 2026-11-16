@@ -21,7 +21,7 @@ describe('Reminders', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])] });
     http = TestBed.inject(HttpTestingController);
-    TestBed.inject(Auth).user.set({ id: 7, username: 'ana', name: 'Ana' });
+    TestBed.inject(Auth).user.set({ id: 7, username: 'ana', name: 'Ana', role: 'AGENT' });
     reminders = TestBed.inject(Reminders);
   });
 

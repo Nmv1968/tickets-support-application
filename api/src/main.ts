@@ -1,7 +1,9 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { configureApp } from './app.setup';
 import { checkEnv } from './common/env-check';
 
 async function bootstrap(): Promise<void> {
@@ -20,9 +22,8 @@ async function bootstrap(): Promise<void> {
   // program handles it: without this, `docker stop` waits for its kill timeout on every redeploy.
   process.once('SIGTERM', () => process.exit(0));
 
-  const app = await NestFactory.create(AppModule);
-  app.setGlobalPrefix('api');
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  configureApp(app);
   await app.listen(process.env.PORT ?? 3000);
 }
 

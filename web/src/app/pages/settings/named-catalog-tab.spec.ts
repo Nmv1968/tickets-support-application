@@ -52,7 +52,7 @@ interface Case {
 }
 
 // A user with the name of a responsible: the two lists have nothing to do with each other.
-const userAna: User = { id: 1, username: 'ana', name: 'Ana', active: true, canLogin: true };
+const userAna: User = { id: 1, username: 'ana', name: 'Ana', active: true, canLogin: true, role: 'AGENT' };
 
 const CASES: Case[] = [
   {

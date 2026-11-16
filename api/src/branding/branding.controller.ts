@@ -14,14 +14,16 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { Public } from '../common/auth';
+import { AdminOnly, Public } from '../common/auth';
+import { FEW_FIELDS, uploadErrors } from '../common/uploads';
 import { BrandingService } from './branding.service';
 
 /**
  * Hard stop for the upload itself, well above what the service accepts: a file between the two
- * gets the service's message in Spanish instead of the generic one of the upload library.
+ * gets the message of the service, which names the size a logo may really have.
  */
 const UPLOAD_LIMIT_BYTES = 8 * 1024 * 1024;
+const LOGO_LIMITS = { fileSize: UPLOAD_LIMIT_BYTES, files: 1, ...FEW_FIELDS };
 
 @Controller('branding')
 export class BrandingController {
@@ -55,13 +57,15 @@ export class BrandingController {
     return new StreamableFile(logo.data);
   }
 
+  @AdminOnly()
   @Put('logo')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: UPLOAD_LIMIT_BYTES } }))
+  @UseInterceptors(uploadErrors(LOGO_LIMITS), FileInterceptor('file', { limits: LOGO_LIMITS }))
   async setLogo(@UploadedFile() file: Express.Multer.File | undefined): Promise<{ logoVersion: string }> {
     if (!file) throw new BadRequestException('No se recibió ninguna imagen');
     return { logoVersion: (await this.branding.setLogo(file.buffer)).version };
   }
 
+  @AdminOnly()
   @Delete('logo')
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeLogo(): Promise<void> {

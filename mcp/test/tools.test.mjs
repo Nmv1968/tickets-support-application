@@ -286,7 +286,7 @@ describe('crear_caso', () => {
 
   test('attaches the images after creating the case', async () => {
     const image = join(files, 'pantalla.png');
-    const log = join(files, 'registro.log');
+    const log = join(files, 'registro.txt');
     await writeFile(image, 'png');
     await writeFile(log, 'texto del registro');
     const created = ok(await mcp.call('crear_caso', { empresa: 'Acme Logística', descripcion: 'Error.', imagenes: [image, log] }));
@@ -294,10 +294,10 @@ describe('crear_caso', () => {
       onlyCall('POST', 'tickets/21/attachments').body.files.map(({ field, name, type, text }) => ({ field, name, type, text })),
       [
         { field: 'files', name: 'pantalla.png', type: 'image/png', text: 'png' },
-        { field: 'files', name: 'registro.log', type: 'application/octet-stream', text: 'texto del registro' },
+        { field: 'files', name: 'registro.txt', type: 'text/plain', text: 'texto del registro' },
       ],
     );
-    assert.deepEqual(created.adjuntos, ['pantalla.png', 'registro.log']);
+    assert.deepEqual(created.adjuntos, ['pantalla.png', 'registro.txt']);
   });
 
   test('a file that cannot be read leaves the case registered, with a warning', async () => {
@@ -574,6 +574,20 @@ describe('login and errors of the API', () => {
     api.state.rejectLogin = true;
     fails(await mcp.call('ver_caso', { caso: '7' }), `El sistema de soporte rechazó el ingreso del usuario "${TEST_USERNAME}" (HTTP 401)`, 'MCP_PASSWORD');
     api.state.rejectLogin = false;
+    ok(await mcp.call('ver_caso', { caso: '7' }));
+  });
+
+  // The limit of logins per address, or the lock of the user after failed attempts.
+  test('a login refused for too many attempts says to wait, not to check the password', async () => {
+    api.expireTokens();
+    const message = 'Demasiados intentos de ingreso desde este equipo. Espera un minuto y vuelve a intentarlo.';
+    api.answerNext('POST', 'auth/login', 429, { message, error: 'Too Many Requests', statusCode: 429 });
+    const result = await mcp.call('ver_caso', { caso: '7' });
+    fails(result, `El sistema de soporte no deja ingresar por ahora al usuario "${TEST_USERNAME}" (HTTP 429). ${message}`);
+    assert.ok(!result.text.includes('MCP_PASSWORD'), result.text);
+
+    api.answerNext('POST', 'auth/login', 429, null);
+    fails(await mcp.call('ver_caso', { caso: '7' }), '(HTTP 429). Espera un minuto y vuelve a intentarlo.');
     ok(await mcp.call('ver_caso', { caso: '7' }));
   });
 

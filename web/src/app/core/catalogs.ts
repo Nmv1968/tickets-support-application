@@ -49,14 +49,15 @@ export class Catalogs {
       this.api.supportTypes(),
       // Asked for whole: left alone, the server lists only the active ones.
       this.api.modules(true),
-      this.api.aiConfig(),
+      // Not the configuration of the AI, which only an administrator may read.
+      this.api.aiStatus(),
     ]);
     this.users.set(users);
     this.assignees.set(assignees);
     this.companies.set(companies);
     this.supportTypes.set(supportTypes);
     this.modules.set(modules);
-    this.aiReady.set(ai.some((provider) => provider.active && !!provider.model));
+    this.aiReady.set(ai.ready);
     this.loaded = true;
   }
 

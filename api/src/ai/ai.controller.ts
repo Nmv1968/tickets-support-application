@@ -14,7 +14,9 @@ import {
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { AdminOnly } from '../common/auth';
 import { IdPipe } from '../common/id.pipe';
+import { FEW_FIELDS, MB, uploadErrors } from '../common/uploads';
 import { TicketsService } from '../tickets/tickets.service';
 import type { TicketDetailDto } from '../tickets/tickets.service';
 import { AiService } from './ai.service';
@@ -37,6 +39,9 @@ class ModelsDto {
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGES = 4;
+/** The text goes in a field of the form, and may be a long chat pasted whole: up to 1 MB, of which the AI is given the start. */
+const ANALYZE_LIMITS = { fileSize: MAX_IMAGE_BYTES, files: MAX_IMAGES, fields: FEW_FIELDS.fields, fieldSize: MB };
 
 function providerId(value: string): ProviderId {
   if (!isProviderId(value)) throw new BadRequestException('Proveedor de IA desconocido');
@@ -60,23 +65,37 @@ export class AiController {
     private readonly tickets: TicketsService,
   ) {}
 
+  /**
+   * Whether the AI can be asked for something now: an active provider with a model chosen. For
+   * every user, to offer the AI actions; the configuration itself, with the key and the address,
+   * is for administrators.
+   */
+  @Get('status')
+  async status(): Promise<{ ready: boolean }> {
+    return { ready: await this.ai.ready() };
+  }
+
+  @AdminOnly()
   @Get('config')
   config(): Promise<ProviderConfigDto[]> {
     return this.ai.config();
   }
 
+  @AdminOnly()
   @Put('config/:provider')
   @HttpCode(HttpStatus.NO_CONTENT)
   save(@Param('provider') provider: string, @Body() dto: SaveConfigDto): Promise<void> {
     return this.ai.save(providerId(provider), dto);
   }
 
+  @AdminOnly()
   @Post('models')
   @HttpCode(HttpStatus.OK)
   models(@Body() dto: ModelsDto): Promise<AiModelInfo[]> {
     return run(() => this.ai.models(providerId(dto.provider), { apiKey: dto.apiKey, baseUrl: dto.baseUrl }));
   }
 
+  @AdminOnly()
   @Post('test/:provider')
   @HttpCode(HttpStatus.OK)
   test(@Param('provider') provider: string): Promise<{ ok: boolean; message: string; ms: number }> {
@@ -93,7 +112,7 @@ export class AiController {
 
   @Post('analyze')
   @HttpCode(HttpStatus.OK)
-  @UseInterceptors(FilesInterceptor('images', 4, { limits: { fileSize: MAX_IMAGE_BYTES } }))
+  @UseInterceptors(uploadErrors(ANALYZE_LIMITS), FilesInterceptor('images', MAX_IMAGES, { limits: ANALYZE_LIMITS }))
   analyze(@UploadedFiles() files: Express.Multer.File[] | undefined, @Body('text') text?: unknown): Promise<TicketDraft> {
     const images = files ?? [];
     // Nothing checks a single value of the body before it gets here: a form field sent twice

@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Put } from '@nestjs/common';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { AdminOnly } from '../common/auth';
 import { SettingsService } from './settings.service';
 
 /** Each field is optional: a screen saves only the reminder it edits. A null counts as not sent. */
@@ -20,6 +21,7 @@ export class SettingsController {
     return { staleHours, promiseSoonDays };
   }
 
+  @AdminOnly()
   @Put('reminders')
   @HttpCode(HttpStatus.NO_CONTENT)
   async saveReminders(@Body() dto: RemindersDto): Promise<void> {

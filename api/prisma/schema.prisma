@@ -21,6 +21,13 @@ enum Priority {
   CRITICAL
 }
 
+/// What a user may do. An agent works the cases and adds entries to the catalogs; an administrator
+/// also manages the users and the settings of the whole team (SLA, reminders, AI, logo).
+enum Role {
+  ADMIN
+  AGENT
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   username     String   @unique
@@ -28,6 +35,11 @@ model User {
   /// Null only on old rows: a user without a password cannot log in.
   passwordHash String?
   active       Boolean  @default(true)
+  /// A new user is an agent until an administrator says otherwise.
+  role         Role     @default(AGENT)
+  /// Goes in every login token, and the token is refused once it no longer matches (`JwtGuard`). One
+  /// more when the password, the role or the active state changes: the sessions open before end.
+  tokenVersion Int      @default(0)
   createdAt    DateTime @default(now())
 
   created     Ticket[]         @relation("TicketCreator")
