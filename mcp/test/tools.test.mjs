@@ -152,6 +152,14 @@ describe('names that are not in a catalog are never created', () => {
 
   test('a responsible that more than one name starts with is put to the person', async () => {
     fails(await mcp.call('crear_caso', { ...base, responsable: 'mar' }), 'Hay varios responsables que coinciden con "mar": María Pérez, Mario Ruiz', 'Pregunta a la persona');
+    fails(await mcp.call('crear_caso', { ...base, responsables: ['Cliente', 'mar'] }), 'Hay varios responsables que coinciden con "mar"');
+    noWrites();
+  });
+
+  test('one unknown or inactive name in a list of responsibles sends nothing', async () => {
+    fails(await mcp.call('crear_caso', { ...base, responsables: ['María Pérez', 'Pedro Sánchez'] }), 'No existe el responsable "Pedro Sánchez"', 'crear_responsable');
+    fails(await mcp.call('crear_caso', { ...base, responsables: ['Lucía Gómez', 'Mario Ruiz'] }), '"Lucía Gómez" está en la lista de responsables pero inactivo');
+    fails(await mcp.call('actualizar_caso', { caso: '7', responsables: ['Mario', 'Pedro'] }), 'crear_responsable');
     noWrites();
   });
 });
@@ -237,7 +245,7 @@ describe('crear_caso', () => {
         modulo: 'ventas > notas de credito',
         minutos_estimados: 45,
         promesa_entrega: '2026-11-20',
-        responsable: 'maria',
+        responsables: ['mario', 'maria', 'María Pérez'],
         tipos_soporte: ['FALLA DEL SISTEMA', 'capacitacion', 'Falla del sistema'],
         observacion: 'Error 500 al imprimir.',
       }),
@@ -252,8 +260,8 @@ describe('crear_caso', () => {
       moduleId: 2,
       estimatedMinutes: 45,
       promisedDate: '2026-11-20',
-      assigneeId: 1,
-      // A type named twice counts once.
+      // A responsible or a type named twice counts once.
+      assigneeIds: [2, 1],
       supportTypeIds: [1, 2],
       note: 'Error 500 al imprimir.',
       aiGenerated: true,
@@ -263,10 +271,27 @@ describe('crear_caso', () => {
     assert.equal(created.estado, 'Sin resolver');
     assert.equal(created.prioridad, 'Crítica');
     assert.equal(created.modulo, 'Ventas > Notas de crédito');
-    assert.equal(created.responsable, 'María Pérez');
+    // By name, as the support types.
+    assert.deepEqual(created.responsables, ['María Pérez', 'Mario Ruiz']);
+    assert.equal('responsable' in created, false);
     assert.deepEqual(created.tipos_soporte, ['Capacitación', 'Falla del sistema']);
     assert.equal(created.minutos_estimados, 45);
     assert.deepEqual(created.observaciones.map((n) => n.texto), ['Error 500 al imprimir.']);
+  });
+
+  // What assistants sent before a case could have several: one name, which is a list of one.
+  test('still takes a single `responsable`, but not together with `responsables`', async () => {
+    const created = ok(await mcp.call('crear_caso', { empresa: 'Acme Logística', descripcion: 'Saldos.', responsable: 'maria' }));
+    assert.deepEqual(onlyCall('POST', 'tickets').body.assigneeIds, [1]);
+    assert.deepEqual(created.responsables, ['María Pérez']);
+
+    api.reset();
+    ok(await mcp.call('crear_caso', { empresa: 'Acme Logística', descripcion: 'Saldos.', responsable: 'ninguno' }));
+    assert.deepEqual(onlyCall('POST', 'tickets').body.assigneeIds, []);
+
+    api.reset();
+    fails(await mcp.call('crear_caso', { empresa: 'Acme Logística', descripcion: 'Saldos.', responsable: 'maria', responsables: ['Mario Ruiz'] }), 'solo en `responsables`');
+    noWrites();
   });
 
   test('a module is found by its own name too', async () => {
@@ -283,12 +308,12 @@ describe('crear_caso', () => {
       moduleId: null,
       estimatedMinutes: null,
       promisedDate: null,
-      assigneeId: null,
+      assigneeIds: [],
       supportTypeIds: [],
       aiGenerated: true,
     });
     assert.equal(created.estado, 'Pendiente');
-    assert.equal(created.responsable, 'Sin asignar');
+    assert.deepEqual(created.responsables, []);
     assert.equal(created.prioridad, null);
     assert.equal(created.archivado, false);
     assert.equal(created.aviso, undefined);
@@ -342,7 +367,7 @@ describe('actualizar_caso', () => {
       status: 'PENDING',
       priority: 'LOW',
       moduleId: 3,
-      assigneeId: 2,
+      assigneeIds: [2],
       companyId: 5,
       description: 'Nueva descripción.',
       date: '2026-11-09',
@@ -363,7 +388,7 @@ describe('actualizar_caso', () => {
     assert.deepEqual(onlyCall('PATCH', 'tickets/7').body, {
       priority: null,
       moduleId: null,
-      assigneeId: null,
+      assigneeIds: [],
       supportTypeIds: [],
       time: null,
       promisedDate: null,
@@ -371,6 +396,28 @@ describe('actualizar_caso', () => {
       customerReply: '',
       archived: false,
     });
+  });
+
+  test('replaces the responsibles with the list given, reading the case once for it and the types', async () => {
+    const updated = ok(await mcp.call('actualizar_caso', { caso: '7', responsables: ['Mario Ruiz', 'María Pérez', 'Cliente'], tipos_soporte: ['Capacitación'] }));
+    assert.deepEqual(onlyCall('PATCH', 'tickets/7').body, { assigneeIds: [2, 1, 4], supportTypeIds: [2] });
+    assert.equal(onlyCall('GET', 'tickets/7').method, 'GET');
+    assert.deepEqual(updated.responsables, ['Cliente', 'María Pérez', 'Mario Ruiz']);
+
+    api.reset();
+    ok(await mcp.call('actualizar_caso', { caso: '7', responsables: [] }));
+    assert.deepEqual(onlyCall('PATCH', 'tickets/7').body, { assigneeIds: [] });
+  });
+
+  test('an inactive responsible the case already has may stay; a new inactive one may not', async () => {
+    // Case 12 is given the inactive "Lucía Gómez" by hand, as the web lets a case keep her.
+    api.data.tickets.find((t) => t.id === 12).assignees = [{ id: 3, name: 'Lucía Gómez' }];
+    ok(await mcp.call('actualizar_caso', { caso: '12', responsables: ['Lucía Gómez', 'Mario Ruiz'] }));
+    assert.deepEqual(onlyCall('PATCH', 'tickets/12').body, { assigneeIds: [3, 2] });
+
+    api.reset();
+    fails(await mcp.call('actualizar_caso', { caso: '7', responsables: ['Lucía Gómez'] }), '"Lucía Gómez" está en la lista de responsables pero inactivo');
+    noWrites();
   });
 
   test('an inactive support type the case already carries may stay; a new inactive one may not', async () => {
@@ -404,7 +451,7 @@ describe('buscar_casos', () => {
       empresa: 'Acme Industrial S.A.',
       descripcion: 'No se puede emitir una nota de crédito.',
       estado: 'Sin resolver',
-      responsable: 'María Pérez',
+      responsables: ['María Pérez'],
       prioridad: 'Alta',
       modulo: 'Ventas > Notas de crédito',
       tipos_soporte: ['Falla del sistema', 'Migración'],
@@ -501,7 +548,7 @@ describe('ver_caso, agregar_observacion, adjuntar_archivos, cerrar_caso', () => 
     const archived = ok(await mcp.call('ver_caso', { caso: '12' }));
     assert.equal(archived.archivado, true);
     assert.equal(archived.estado, 'Resuelto');
-    assert.equal(archived.responsable, 'Sin asignar');
+    assert.deepEqual(archived.responsables, []);
     assert.equal(archived.respuesta_cliente, 'El cierre ya cuadra.');
   });
 

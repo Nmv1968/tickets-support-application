@@ -188,9 +188,9 @@ const MAX_IMAGES = 4;
                 }
               </div>
               <div>
-                <label class="label" for="ai-assignee">Responsable</label>
+                <label class="label" for="ai-assignee">Responsables</label>
                 <!-- Empty unless someone is chosen: registering a case makes nobody its responsible. -->
-                <app-assignee-select inputId="ai-assignee" [items]="catalogs.activeAssignees()" [(value)]="assigneeId" />
+                <app-assignee-select inputId="ai-assignee" multiple [items]="catalogs.activeAssignees()" [(value)]="assigneeIds" />
               </div>
               <div>
                 <label class="label" for="ai-priority">Prioridad</label>
@@ -303,8 +303,8 @@ export class AiDraftDialog implements OnInit {
   /** A company of the catalog. Null until one is chosen: the case cannot be saved without it. */
   protected readonly companyId = signal<number | null>(null);
   protected readonly description = signal('');
-  /** Null: the new case has no responsible. Nobody is one by registering it. */
-  protected readonly assigneeId = signal<number | null>(null);
+  /** Empty: the new case has no responsible. Nobody is one by registering it. */
+  protected readonly assigneeIds = signal<number[]>([]);
   protected readonly priority = signal<Priority | null>(null);
   protected readonly moduleId = signal<number | null>(null);
   protected readonly supportTypeIds = signal<number[]>([]);
@@ -498,6 +498,7 @@ export class AiDraftDialog implements OnInit {
       this.focusFirstProblem();
       return;
     }
+    const people = this.assigneeIds();
     const types = this.supportTypeIds();
     this.busy.set(true);
     this.error.set('');
@@ -509,7 +510,7 @@ export class AiDraftDialog implements OnInit {
         status: this.status(),
         companyId,
         description: this.description().trim(),
-        assigneeId: this.assigneeId(),
+        assigneeIds: people.length ? people : undefined,
         priority: this.priority(),
         moduleId: this.moduleId(),
         supportTypeIds: types.length ? types : undefined,

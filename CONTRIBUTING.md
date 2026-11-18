@@ -89,8 +89,8 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   de un caso, `TICKET_NOT_FOUND`; el 400 de una entrada que no está en su catálogo, `MISSING_ENTRY`,
   que es el mismo texto que da el catálogo), un límite (`TEXT_MAX`, lo más largo de una descripción,
   una observación o una respuesta), una regla (`tooLong` de `src/common/validation.ts` para el texto
-  demasiado largo de un campo; `byName` y `supportTypesText` de `src/common/labels.ts` para el orden
-  y el texto de los tipos de soporte). Un nombre de usuario se guarda con `loginName` y una
+  demasiado largo de un campo; `byName` y `namesText` de `src/common/labels.ts` para el orden
+  y el texto de los tipos de soporte y de los responsables). Un nombre de usuario se guarda con `loginName` y una
   contraseña con `hashPassword` (`src/users/credentials.ts`), en el ingreso, en Configuración >
   Usuarios y en el arranque: un solo costo de bcrypt, el de `DUMMY_HASH`. Los usuarios que crea el
   arranque (el asistente y el primer administrador) se leen del .env con `seededUsernames`, el mismo
@@ -233,8 +233,10 @@ Un pull request pequeño y con un solo propósito se revisa mucho más rápido q
   lado dice lleva `label`.
 - Lo que se repite en varias pantallas va a una clase de `@layer components` o a un componente.
 - Los desplegables son `ng-select`, con un solo tema en `src/styles.css`: no se les da estilo en
-  cada componente. Los de los campos de un caso (empresa, estado, responsable, prioridad, módulo y
+  cada componente. Los de los campos de un caso (empresa, estado, responsables, prioridad, módulo y
   tipos de soporte) son los de `src/app/core/case-selects.ts`: cada pantalla les da sus opciones.
+  Los responsables y los tipos de soporte de un caso son un conjunto, y su select es `multiple`
+  (los chips con su "×", la lista abierta tras cada elección); en un filtro se elige uno solo.
   En las pruebas se manejan como lo haría una persona, con las funciones de
   `src/app/testing/ng-select.ts`. Las demás ayudas de las pruebas (un caso de ejemplo, botones,
   campos, avisos, el texto de un elemento con `textOf`, y `httpTestBed()` para la prueba que

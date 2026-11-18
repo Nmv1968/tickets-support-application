@@ -43,12 +43,14 @@ const MAX_MINUTES = 1_000_000;
 const minutesRange = (field: string): { message: string } => ({ message: `${field} debe estar entre 0 y ${MAX_MINUTES} minutos` });
 // An id that no record can have. Passed on, the database rejects the number and the answer is a 500.
 const noCompany = { message: MISSING_ENTRY.company };
-const noPerson = { message: MISSING_ENTRY.assignee };
+const noPerson = { message: MISSING_ENTRY.assignee, each: true };
 const noModule = { message: MISSING_ENTRY.module };
 const noSupportType = { message: MISSING_ENTRY.supportType, each: true };
 
 /** Support types one case can carry. */
 export const MAX_SUPPORT_TYPES = 20;
+/** Responsibles one case can have. */
+export const MAX_ASSIGNEES = 20;
 
 /**
  * Used for both create and update. Create additionally requires company and description.
@@ -64,8 +66,18 @@ export class TicketInput {
   @IsOptional() @IsInt() @Min(1, noCompany) @Max(MAX_ID, noCompany) companyId?: number;
   @IsOptional() @IsString() @MaxLength(TEXT_MAX, tooLong('La descripción', TEXT_MAX)) description?: string;
   @IsOptional() @IsEnum(TicketStatus) status?: TicketStatus;
-  /** Null leaves the case without a responsible person. */
-  @IsOptional() @IsInt() @Min(1, noPerson) @Max(MAX_ID, noPerson) assigneeId?: number | null;
+  /**
+   * Responsibles of the case, as ids of the catalog, as the support types: the whole set, which on
+   * an edit replaces the one the case had. An empty list leaves the case without any, which is also
+   * how a new case starts. A repeated id counts once.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_ASSIGNEES, { message: `Un caso no puede tener más de ${MAX_ASSIGNEES} responsables` })
+  @IsInt({ each: true })
+  @Min(1, noPerson)
+  @Max(MAX_ID, noPerson)
+  assigneeIds?: number[];
   /**
    * "Tipos de soporte" of the case, as ids of the catalog. The whole set: on an edit it replaces
    * the one the case had, and an empty list leaves the case without any. A repeated id counts once.

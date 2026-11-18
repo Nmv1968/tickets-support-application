@@ -16,7 +16,15 @@ export type SupportTypeRow = typeof TRAINING;
 /** The support types of a case as the database returns them: one row per type the case carries. */
 export const carrying = (...types: SupportTypeRow[]): StoredTicket['supportTypes'] => types.map((supportType) => ({ supportType }));
 
-/** A case as stored. */
+// Responsibles of the catalog. By name they go: Ana, Cliente, Luis.
+export const ANA = { id: 3, name: 'Ana' };
+export const LUIS = { id: 5, name: 'Luis' };
+export const CLIENT = { id: 8, name: 'Cliente' };
+export type AssigneeRow = typeof ANA;
+/** The responsibles of a case as the database returns them: one row per person. */
+export const assignedTo = (...people: AssigneeRow[]): StoredTicket['assignees'] => people.map((assignee) => ({ assignee }));
+
+/** A case as stored. Ana is its responsible. */
 export const stored = (changes: Partial<StoredTicket> = {}): StoredTicket => ({
   id: 7,
   date: day('2026-11-02'),
@@ -26,8 +34,7 @@ export const stored = (changes: Partial<StoredTicket> = {}): StoredTicket => ({
   description: 'No abre la factura',
   searchText: 'acme no abre la factura',
   status: 'PENDING',
-  assigneeId: 3,
-  assignee: { id: 3, name: 'Ana' },
+  assignees: assignedTo(ANA),
   supportTypes: [],
   priority: null,
   estimatedMinutes: null,

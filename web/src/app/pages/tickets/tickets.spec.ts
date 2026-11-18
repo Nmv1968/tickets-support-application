@@ -15,7 +15,7 @@ import { TicketEvents } from '../../core/ticket-events';
 import { todayIso } from '../../core/ui';
 import { ASSIGNEES, COMPANIES, FAILURE, MODULES, SUPPORT_TYPES, TRAINING, ticket, ticketPage } from '../../testing/fixtures';
 import { httpTestBed } from '../../testing/http';
-import { clearSelect, closeSelect, ngSelect, optionTexts, typeInSelect } from '../../testing/ng-select';
+import { clearSelect, closeSelect, ngSelect, optionTexts, removeChosen, typeInSelect } from '../../testing/ng-select';
 import { heardOnFocus, isDisabled, paste, said, screenOf, toasts } from '../../testing/screen';
 import { DESKTOP, PHONE, ScreenWidth, provideScreenWidth } from '../../testing/screen-width';
 import { textOf } from '../../testing/text';
@@ -32,7 +32,7 @@ const USERS: User[] = [
 ];
 
 /** The headers of the table for someone who never chose their columns. */
-const STARTING_COLUMNS = ['Código', 'Fecha del caso', 'Registro', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Tipos de soporte', 'Observación'];
+const STARTING_COLUMNS = ['Código', 'Fecha del caso', 'Registro', 'Empresa', 'Descripción', 'Estado', 'Responsables', 'Tipos de soporte', 'Observación'];
 const STARTING_IDS = ['code', 'date', 'createdAt', 'company', 'description', 'status', 'assignee', 'supportTypes', 'lastNote'];
 
 const REFUSED = { status: 400, statusText: 'Bad Request' };
@@ -149,14 +149,16 @@ describe('TicketsPage', () => {
     const full = ticket({
       time: '14:35',
       status: 'RESOLVED',
-      assigneeId: 4,
-      assigneeName: 'Ana',
+      assignees: [
+        { id: 4, name: 'Ana' },
+        { id: 5, name: 'Luis' },
+      ],
       supportTypes: [TRAINING, FAILURE],
       lastNote: 'Se llamó al cliente',
       notesCount: 2,
     });
 
-    it('shows the case in words: its status as a badge, its responsible as text and its support types as chips', fakeAsync(() => {
+    it('shows the case in words: its status as a badge, its responsibles as text and its support types as chips', fakeAsync(() => {
       open([full, OTHER]);
 
       expect(cell('Código').textContent).toContain('SOP-00007');
@@ -167,7 +169,8 @@ describe('TicketsPage', () => {
       const status = cell('Estado').querySelector('.badge')!;
       expect(status.textContent?.trim()).toBe('Resuelto');
       expect(status.classList).toContain('st-RESOLVED');
-      expect(cell('Responsable').textContent?.trim()).toBe('Ana');
+      // All of them, by name and separated by commas, as the exports write them.
+      expect(cell('Responsables').textContent?.trim()).toBe('Ana, Luis');
       const chips = Array.from(cell('Tipos de soporte').querySelectorAll<HTMLElement>('app-type-chip'));
       expect(chips.map((chip) => chip.textContent?.trim())).toEqual(['Capacitación', 'Falla del sistema']);
       // Each in the colour the team gave it.
@@ -175,7 +178,7 @@ describe('TicketsPage', () => {
       expect(cell('Observación').textContent).toContain('Se llamó al cliente');
 
       // A case nobody has says so, and one without support types has no chip.
-      expect(cell('Responsable', rows()[1]).textContent?.trim()).toBe('Sin asignar');
+      expect(cell('Responsables', rows()[1]).textContent?.trim()).toBe('Sin asignar');
       expect(cell('Tipos de soporte', rows()[1]).querySelector('app-type-chip')).toBeNull();
     }));
 
@@ -213,7 +216,7 @@ describe('TicketsPage', () => {
       render();
 
       visit(cell('Estado').querySelector<HTMLElement>('.badge')!, full);
-      visit(cell('Responsable', rows()[1]), OTHER);
+      visit(cell('Responsables', rows()[1]), OTHER);
       visit(cell('Tipos de soporte').querySelector<HTMLElement>('app-type-chip')!, full);
       visit(cell('Observación'), full);
 
@@ -603,13 +606,13 @@ describe('TicketsPage', () => {
     // A company of 200 letters and no space ran 743 px past its column, over four others, and
     // widened the table to 1652 px on a laptop where the columns fit.
     it('on a laptop: a long name stays in its column, three lines at most, and the table fits the screen', fakeAsync(() => {
-      openOn(1280, 800, [ticket({ company: UNBROKEN, assigneeName: 'FernandaGisellaVillavicencioQuiñónez'.repeat(2) })]);
+      openOn(1280, 800, [ticket({ company: UNBROKEN, assignees: [{ id: 4, name: 'FernandaGisellaVillavicencioQuiñónez'.repeat(2) }] })]);
       const scroller = find('table').parentElement!;
       const company = cell('Empresa');
       const lines = company.querySelector<HTMLElement>('.line-clamp-3')!;
 
       expect(company.scrollWidth).toBeLessThanOrEqual(company.clientWidth);
-      expect(cell('Responsable').scrollWidth).toBeLessThanOrEqual(cell('Responsable').clientWidth);
+      expect(cell('Responsables').scrollWidth).toBeLessThanOrEqual(cell('Responsables').clientWidth);
       expect(getComputedStyle(lines).webkitLineClamp).toBe('3');
       expect(lines.scrollHeight).toBeGreaterThan(lines.clientHeight);
       // The table of a laptop with the menu at its side, as the app has it: 1280 less 224 and the padding.
@@ -910,7 +913,7 @@ describe('TicketsPage', () => {
         'Empresa',
         'Descripción',
         'Estado',
-        'Responsable',
+        'Responsables',
         'Prioridad',
         'Módulo',
         'Tipos de soporte',
@@ -930,7 +933,7 @@ describe('TicketsPage', () => {
       open([ticket({ priority: 'HIGH' })]);
       toggle('Registro');
 
-      expect(headers()).toEqual(['Código', 'Fecha del caso', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Tipos de soporte', 'Observación']);
+      expect(headers()).toEqual(['Código', 'Fecha del caso', 'Empresa', 'Descripción', 'Estado', 'Responsables', 'Tipos de soporte', 'Observación']);
       const visible = ['code', 'date', 'company', 'description', 'status', 'assignee', 'supportTypes', 'lastNote'];
       // The request names no user: the server keeps it for whoever is logged in.
       const save = columnsSave();
@@ -941,7 +944,7 @@ describe('TicketsPage', () => {
       expect(JSON.parse(localStorage.getItem(COPY)!)).toEqual({ visible });
 
       toggle('Prioridad');
-      expect(headers()).toEqual(['Código', 'Fecha del caso', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Prioridad', 'Tipos de soporte', 'Observación']);
+      expect(headers()).toEqual(['Código', 'Fecha del caso', 'Empresa', 'Descripción', 'Estado', 'Responsables', 'Prioridad', 'Tipos de soporte', 'Observación']);
       expect(cell('Prioridad').textContent?.trim()).toBe('Alta');
       columnsSave().flush(null, STORED);
       settle();
@@ -977,7 +980,7 @@ describe('TicketsPage', () => {
       preferenceRead('tickets.filters-open').flush({ value: null });
       listRead().flush(ticketPage([ticket()], 50));
       settle();
-      expect(headers()).toEqual(['Código', 'Estado', 'Responsable']);
+      expect(headers()).toEqual(['Código', 'Estado', 'Responsables']);
       expect(JSON.parse(localStorage.getItem(COPY)!)).toEqual({ visible: ['code', 'status', 'assignee'] });
     }));
 
@@ -1267,10 +1270,18 @@ describe('TicketsPage', () => {
     // On a phone the list is cards, not a table: they follow the same choice.
     it('are also what each card of the phone list shows of its case', fakeAsync(() => {
       const card = (): string => find('button.card').textContent ?? '';
-      const whole = ticket({ priority: 'HIGH', assigneeId: 4, assigneeName: 'Ana', supportTypes: [TRAINING], archivedAt: '2026-11-08T09:00:00.000Z' });
+      const whole = ticket({
+        priority: 'HIGH',
+        assignees: [
+          { id: 4, name: 'Ana' },
+          { id: 6, name: 'Zoe' },
+        ],
+        supportTypes: [TRAINING],
+        archivedAt: '2026-11-08T09:00:00.000Z',
+      });
       TestBed.inject(ScreenWidth).set(PHONE);
       open([whole]);
-      for (const shown of ['SOP-00007', '05/11/2026', 'Archivado', 'Pendiente', 'Acme', 'No imprime', 'Capacitación', 'Ana', 'Registro: 05/11/2026']) {
+      for (const shown of ['SOP-00007', '05/11/2026', 'Archivado', 'Pendiente', 'Acme', 'No imprime', 'Capacitación', 'Ana, Zoe', 'Registro: 05/11/2026']) {
         expect(card()).toContain(shown);
       }
       expect(card()).not.toContain('Prioridad');
@@ -1812,7 +1823,7 @@ describe('TicketsPage', () => {
       click(register());
 
       const save = caseSave();
-      expect(sent(save)).toEqual({ date: today, companyId: 5, description: 'No abre la caja', status: 'PENDING', assigneeId: null });
+      expect(sent(save)).toEqual({ date: today, companyId: 5, description: 'No abre la caja', status: 'PENDING' });
       // While it is on its way a second press sends nothing, from the button or from the keyboard.
       expect(isDisabled(register())).toBeTrue();
       expect(register().textContent).toContain('Registrando…');
@@ -1827,7 +1838,7 @@ describe('TicketsPage', () => {
     }));
 
     // The list has nothing to edit a case with: what a case needs can be given as it is registered.
-    it('registers everything the form has: date, time, status, responsible, priority, module, support types and a first observation', fakeAsync(() => {
+    it('registers everything the form has: date, time, status, responsibles, priority, module, support types and a first observation', fakeAsync(() => {
       open();
       openForm();
       type(caseDate(), '2026-11-03');
@@ -1836,6 +1847,10 @@ describe('TicketsPage', () => {
       type(description(), 'No imprime');
       pick('nt-status', 'Resuelto');
       pick('nt-assignee', 'Luis');
+      pick('nt-assignee', 'Ana');
+      closeSelect(select('nt-assignee'));
+      render();
+      expect(chosen('nt-assignee')).toEqual(['Luis', 'Ana']);
       pick('nt-priority', 'Alta');
       pick('nt-module', 'Ventas / Facturas');
       pick('nt-types', 'Falla del sistema');
@@ -1853,7 +1868,7 @@ describe('TicketsPage', () => {
         companyId: 1,
         description: 'No imprime',
         status: 'RESOLVED',
-        assigneeId: 5,
+        assigneeIds: [5, 4],
         priority: 'HIGH',
         moduleId: 2,
         supportTypeIds: [2, 1],
@@ -1887,11 +1902,11 @@ describe('TicketsPage', () => {
       type(description(), 'No imprime');
       click(register());
       const save = caseSave();
-      expect(sent(save)).toEqual({ date: today, companyId: 1, description: 'No imprime', status: 'PENDING', assigneeId: null });
+      expect(sent(save)).toEqual({ date: today, companyId: 1, description: 'No imprime', status: 'PENDING' });
       answer(save);
     }));
 
-    it('stays open for the next case: emptied, with the date and the responsible of the one before', fakeAsync(() => {
+    it('stays open for the next case: emptied, with the date and the responsibles of the one before', fakeAsync(() => {
       open();
       openForm();
       type(caseDate(), '2026-11-03');
@@ -1900,6 +1915,7 @@ describe('TicketsPage', () => {
       type(description(), 'No imprime');
       pick('nt-status', 'Resuelto');
       pick('nt-assignee', 'Luis');
+      closeSelect(select('nt-assignee'));
       pick('nt-priority', 'Alta');
       pick('nt-module', 'Ventas');
       pick('nt-types', 'Capacitación');
@@ -1929,7 +1945,7 @@ describe('TicketsPage', () => {
       type(description(), 'No abre la caja');
       click(register());
       const second = caseSave();
-      expect(sent(second)).toEqual({ date: '2026-11-03', companyId: 5, description: 'No abre la caja', status: 'PENDING', assigneeId: 5 });
+      expect(sent(second)).toEqual({ date: '2026-11-03', companyId: 5, description: 'No abre la caja', status: 'PENDING', assigneeIds: [5] });
       answer(second, ticket({ id: 9, code: 'SOP-00009' }));
       expect(toasts()).toEqual(['Caso SOP-00008 registrado', 'Caso SOP-00009 registrado']);
     }));
@@ -2107,7 +2123,7 @@ describe('TicketsPage', () => {
       http.expectNone((request) => request.url === '/api/tickets');
     }));
 
-    describe('the responsible', () => {
+    describe('the responsibles', () => {
       /** The catalogs as they arrive from the server, some time after the screen is on. */
       function catalogsArrive(): void {
         // The logged-in user has the name of a responsible, and is not that responsible.
@@ -2125,6 +2141,7 @@ describe('TicketsPage', () => {
         catalogsArrive();
 
         expect(offers('nt-assignee')).toEqual(['Ana', 'Luis']);
+        closeSelect(select('nt-assignee'));
       }));
 
       // Users are not responsibles: registering a case makes nobody its responsible.
@@ -2139,20 +2156,27 @@ describe('TicketsPage', () => {
         expect(select('nt-assignee').textContent).toContain('Sin asignar');
       }));
 
-      it('keeps the one chosen when the catalogs are read again', fakeAsync(() => {
+      it('keeps the ones chosen when the catalogs are read again', fakeAsync(() => {
         open();
         openForm();
         pick('nt-assignee', 'Luis');
+        closeSelect(select('nt-assignee'));
 
         catalogsArrive();
 
         expect(chosen('nt-assignee')).toEqual(['Luis']);
       }));
 
-      it('can be taken off again before registering', fakeAsync(() => {
+      it('can be taken off again before registering, one by one or all at once', fakeAsync(() => {
         open();
         openForm();
         pick('nt-assignee', 'Luis');
+        pick('nt-assignee', 'Ana');
+        closeSelect(select('nt-assignee'));
+        render();
+        removeChosen(select('nt-assignee'), 'Luis');
+        render();
+        expect(chosen('nt-assignee')).toEqual(['Ana']);
         clearSelect(select('nt-assignee'));
         render();
         pick('nt-company', 'Acme');
@@ -2160,7 +2184,7 @@ describe('TicketsPage', () => {
         click(register());
 
         const save = caseSave();
-        expect(sent(save)).toEqual(jasmine.objectContaining({ assigneeId: null }));
+        expect(sent(save)).not.toEqual(jasmine.objectContaining({ assigneeIds: jasmine.anything() }));
         answer(save);
       }));
     });

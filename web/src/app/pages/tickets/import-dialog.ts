@@ -23,7 +23,7 @@ const COLUMN_LABEL: Record<keyof ImportResult['columns'], string> = {
   status: 'Estado',
   priority: 'Prioridad',
   module: 'Módulo',
-  assignee: 'Responsable',
+  assignees: 'Responsable',
   supportTypes: 'Tipo de soporte',
   note: 'Observación',
 };
@@ -273,7 +273,7 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
                           <th class="px-2 py-1.5">Empresa</th>
                           <th class="px-2 py-1.5">Descripción</th>
                           <th class="px-2 py-1.5">Estado</th>
-                          <th class="px-2 py-1.5">Responsable</th>
+                          <th class="px-2 py-1.5">Responsables</th>
                           <!-- The columns a sheet may not have are shown only for a sheet that has them. -->
                           @if (p.columns.priority) {
                             <th class="px-2 py-1.5">Prioridad</th>
@@ -293,7 +293,7 @@ function byCatalog(lists: Partial<ImportUnknown>): CatalogValues[] {
                             <td class="px-2 py-1.5">{{ row.company }}</td>
                             <td class="px-2 py-1.5">{{ row.description }}</td>
                             <td class="px-2 py-1.5 whitespace-nowrap">{{ statusLabel[row.status] }}</td>
-                            <td class="px-2 py-1.5">{{ row.assignee ?? '' }}</td>
+                            <td class="px-2 py-1.5">{{ row.assignees.join(', ') }}</td>
                             @if (p.columns.priority) {
                               <td class="px-2 py-1.5 whitespace-nowrap">{{ row.priority ? priorityLabel[row.priority] : '' }}</td>
                             }

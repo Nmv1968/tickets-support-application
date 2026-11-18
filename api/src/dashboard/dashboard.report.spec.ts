@@ -29,7 +29,7 @@ const ticket = (changes: Partial<ReportRow> = {}): ReportRow => ({
   estimatedMinutes: null,
   spentMinutes: 0,
   company: { name: 'ACME' },
-  assignee: null,
+  assignees: [],
   module: null,
   supportTypes: [],
   createdBy: null,
@@ -81,10 +81,10 @@ describe('summarize', () => {
 
   it('counts every company and every responsible by status, most cases first and then by name', () => {
     const rows = [
-      ...cases(2, { company: { name: 'Zeta' }, assignee: { name: 'Ana Torres' } }),
+      ...cases(2, { company: { name: 'Zeta' }, assignees: [{ assignee: { name: 'Ana Torres' } }] }),
       ...cases(1, { company: { name: 'Zeta' }, status: 'RESOLVED' }),
-      ...cases(2, { company: { name: 'Corporación Ñandú' }, status: 'UNRESOLVED', assignee: { name: 'José Pérez' } }),
-      ...cases(2, { company: { name: 'Beta' }, assignee: { name: 'José Pérez' } }),
+      ...cases(2, { company: { name: 'Corporación Ñandú' }, status: 'UNRESOLVED', assignees: [{ assignee: { name: 'José Pérez' } }] }),
+      ...cases(2, { company: { name: 'Beta' }, assignees: [{ assignee: { name: 'José Pérez' } }] }),
     ];
 
     const { byCompany, byAssignee } = summarize(rows, now);
@@ -99,6 +99,22 @@ describe('summarize', () => {
       { name: 'Ana Torres', unresolved: 0, pending: 2, resolved: 0, total: 2 },
       { name: 'Sin asignar', unresolved: 0, pending: 0, resolved: 1, total: 1 },
     ]);
+  });
+
+  // As a case with two support types counts for both.
+  it('counts a case with two responsibles for each of them, and the case without any once, under "Sin asignar"', () => {
+    const both = [{ assignee: { name: 'Ana Torres' } }, { assignee: { name: 'José Pérez' } }];
+    const rows = [ticket({ assignees: both }), ticket({ status: 'RESOLVED', assignees: [both[1]] }), ticket()];
+
+    const { byAssignee, totals } = summarize(rows, now);
+
+    expect(byAssignee).toEqual([
+      { name: 'José Pérez', unresolved: 0, pending: 1, resolved: 1, total: 2 },
+      { name: 'Ana Torres', unresolved: 0, pending: 1, resolved: 0, total: 1 },
+      { name: 'Sin asignar', unresolved: 0, pending: 1, resolved: 0, total: 1 },
+    ]);
+    // The cases themselves are counted once.
+    expect(totals.total).toBe(3);
   });
 
   it('counts a case with two support types in both, and the cases without one last, as "Sin tipo"', () => {
@@ -197,7 +213,7 @@ describe('report spreadsheet', () => {
       archivedAt: new Date(2026, 10, 10, 8, 0),
       estimatedMinutes: 60,
       spentMinutes: 45,
-      assignee: { name: 'Ana Torres' },
+      assignees: [{ assignee: { name: 'Ana Torres' } }],
       module: { name: 'Facturas', parent: { name: 'Ventas' } },
       supportTypes: [FAILURE, TRAINING],
       createdBy: { name: 'José Pérez' },
@@ -310,7 +326,7 @@ describe('report spreadsheet', () => {
       'Empresa',
       'Descripción',
       'Estado',
-      'Responsable',
+      'Responsables',
       'Prioridad',
       'Módulo',
       'Tipos de soporte',
@@ -360,12 +376,20 @@ describe('report spreadsheet', () => {
       expect(cell(second, 'Vencido')).toBe('Sí');
       expect(cell(second, 'Archivado')).toBe('No');
       expect(cell(second, 'Empresa')).toBe('Corporación Ñandú');
-      for (const header of ['Hora', 'Responsable', 'Módulo', 'Minutos estimados', 'Minutos reales', 'Promesa de entrega', 'Resuelto el', 'Horas hasta resolver', 'Registrado por']) {
+      for (const header of ['Hora', 'Responsables', 'Módulo', 'Minutos estimados', 'Minutos reales', 'Promesa de entrega', 'Resuelto el', 'Horas hasta resolver', 'Registrado por']) {
         expect(cell(second, header)).toBeUndefined();
       }
       expect(third.slice(0, 1)).toEqual(['SOP-00003']);
       expect(cell(third, 'Tipos de soporte')).toBeUndefined();
       expect(cell(third, 'Prioridad')).toBeUndefined();
+    });
+
+    it('writes the responsibles of a case in one cell, by name and separated by commas, as its support types', async () => {
+      const assignees = [{ assignee: { name: 'José Pérez' } }, { assignee: { name: 'Ana Torres' } }];
+      const [, row] = table(await written([ticket({ assignees, supportTypes: [FAILURE, TRAINING] })]), 'Datos');
+
+      expect(row[HEADERS.indexOf('Responsables')]).toBe('Ana Torres, José Pérez');
+      expect(row[HEADERS.indexOf('Tipos de soporte')]).toBe('Capacitación, Falla del sistema');
     });
 
     it('shows its dates as dates and its times as times', async () => {
@@ -455,7 +479,7 @@ describe('report PDF', () => {
 
   it('gives each breakdown as a table, with the numbers of the summary', () => {
     const rows = [
-      ticket({ status: 'RESOLVED', assignee: { name: 'Ana Torres' }, module: { name: 'Facturas', parent: { name: 'Ventas' } }, priority: 'HIGH', supportTypes: [TRAINING, FAILURE] }),
+      ticket({ status: 'RESOLVED', assignees: [{ assignee: { name: 'Ana Torres' } }], module: { name: 'Facturas', parent: { name: 'Ventas' } }, priority: 'HIGH', supportTypes: [TRAINING, FAILURE] }),
       ticket({ date: day('2026-10-20'), company: { name: 'Corporación Ñandú' }, supportTypes: [TRAINING] }),
       ticket({ date: day('2026-10-21'), status: 'UNRESOLVED' }),
     ];
@@ -577,8 +601,8 @@ describe('report PDF', () => {
     // The longest names the catalogs take, without a space to break them at.
     const person = `${'jose.perez.administracion.sistemas'.padEnd(68, '.contabilidad')}@example.com`;
     const rows = [
-      ticket({ company: { name: 'x'.repeat(200) }, assignee: { name: person }, module: { name: 'm'.repeat(80), parent: { name: 'p'.repeat(80) } }, supportTypes: [{ supportType: { name: 't'.repeat(60), color: '#0c7beb' } }] }),
-      ticket({ assignee: { name: 'Ana Torres' }, supportTypes: [TRAINING] }),
+      ticket({ company: { name: 'x'.repeat(200) }, assignees: [{ assignee: { name: person } }], module: { name: 'm'.repeat(80), parent: { name: 'p'.repeat(80) } }, supportTypes: [{ supportType: { name: 't'.repeat(60), color: '#0c7beb' } }] }),
+      ticket({ assignees: [{ assignee: { name: 'Ana Torres' } }], supportTypes: [TRAINING] }),
     ];
     expect(person).toHaveLength(80);
 
@@ -642,7 +666,7 @@ describe('report PDF', () => {
 
   it('is drawn as a PDF, with names that Helvetica cannot write and more rows than fit in a page', async () => {
     const rows = [
-      ...Array.from({ length: 30 }, (_, index) => ticket({ date: day(`20${String(index + 10)}-01-15`), assignee: { name: `Persona ${index + 1}` }, module: { name: `Módulo ${index + 1}`, parent: null } })),
+      ...Array.from({ length: 30 }, (_, index) => ticket({ date: day(`20${String(index + 10)}-01-15`), assignees: [{ assignee: { name: `Persona ${index + 1}` } }], module: { name: `Módulo ${index + 1}`, parent: null } })),
       ticket({ company: { name: 'Café “El Ñandú” ✓ 東京' }, supportTypes: [{ supportType: { name: 'Consulta → rápida', color: '#64748b' } }] }),
     ];
 

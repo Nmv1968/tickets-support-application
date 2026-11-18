@@ -106,7 +106,7 @@ export class TicketsService {
     const description = dto.description?.trim();
     if (dto.companyId == null) throw new BadRequestException('La empresa es obligatoria');
     if (!description) throw new BadRequestException('La descripción es obligatoria');
-    const { companyName, supportTypes, slaHours } = await this.lookups(dto);
+    const { companyName, assignees, supportTypes, slaHours } = await this.lookups(dto);
     // `lookups` has already refused a company that is not in the catalog: this only tells the compiler.
     if (companyName === null) throw new BadRequestException(MISSING_ENTRY.company);
 
@@ -123,8 +123,8 @@ export class TicketsService {
         description,
         searchText: ticketSearchKey(companyName, description),
         status,
-        // Nobody unless one is chosen: registering a case does not make a person responsible for it.
-        assigneeId: dto.assigneeId ?? null,
+        // Nobody unless they are chosen: registering a case does not make a person responsible for it.
+        assignees: assignees?.length ? { create: assignees.map((person) => ({ assigneeId: person.id })) } : undefined,
         supportTypes: supportTypes?.length ? { create: supportTypes.map((type) => ({ supportTypeId: type.id })) } : undefined,
         archivedAt: dto.archived ? now : null,
         priority: dto.priority ?? null,
@@ -231,26 +231,27 @@ export class TicketsService {
   }
 
   /**
-   * Loads what the input points to: its company, its person, its module, its support types and
-   * the SLA of its priority. Any of the first four that does not exist is a 400.
+   * Loads what the input points to: its company, its responsibles, its module, its support types
+   * and the SLA of its priority. Any of the first four that does not exist is a 400.
    */
   private async lookups(dto: TicketInput): Promise<Omit<TicketUpdateContext, 'now'>> {
-    // Null for a null too: the list is optional, and null means "not sent".
+    // Null for a null too: the lists are optional, and null means "not sent".
+    const personIds = dto.assigneeIds ? [...new Set(dto.assigneeIds)] : null;
     const typeIds = dto.supportTypeIds ? [...new Set(dto.supportTypeIds)] : null;
-    const [company, assignee, module, supportTypes, sla] = await Promise.all([
+    const [company, assignees, module, supportTypes, sla] = await Promise.all([
       dto.companyId != null ? this.prisma.company.findUnique({ where: { id: dto.companyId }, select: { name: true } }) : null,
-      dto.assigneeId != null ? this.prisma.assignee.findUnique({ where: { id: dto.assigneeId }, select: { name: true } }) : null,
+      personIds?.length ? this.prisma.assignee.findMany({ where: { id: { in: personIds } }, select: { id: true, name: true } }) : [],
       dto.moduleId != null ? this.prisma.systemModule.findUnique({ where: { id: dto.moduleId }, select: baseInclude.module.select }) : null,
       typeIds?.length ? this.prisma.supportType.findMany({ where: { id: { in: typeIds } }, select: { id: true, name: true } }) : [],
       dto.priority ? this.prisma.slaPolicy.findUnique({ where: { priority: dto.priority } }) : null,
     ]);
     if (dto.companyId != null && !company) throw new BadRequestException(MISSING_ENTRY.company);
-    if (dto.assigneeId != null && !assignee) throw new BadRequestException(MISSING_ENTRY.assignee);
+    if (personIds && assignees.length !== personIds.length) throw new BadRequestException(MISSING_ENTRY.assignee);
     if (dto.moduleId != null && !module) throw new BadRequestException(MISSING_ENTRY.module);
     if (typeIds && supportTypes.length !== typeIds.length) throw new BadRequestException(MISSING_ENTRY.supportType);
     return {
       companyName: company?.name ?? null,
-      assigneeName: assignee?.name ?? null,
+      assignees: personIds ? assignees : null,
       moduleName: moduleName(module),
       supportTypes: typeIds ? supportTypes : null,
       slaHours: sla?.hours ?? null,

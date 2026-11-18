@@ -1,6 +1,20 @@
 import type { Ticket } from '../../core/api';
 import type { IconName } from '../../core/icons';
-import { PRIORITY_CLASS, PRIORITY_ICON, PRIORITY_LABEL, PROMISE_CLASS, PROMISE_ICON, formatCaseDate, formatDateTime, formatDay, formatMinutes, formatMomentDay, promiseText, timeAgo } from '../../core/ui';
+import {
+  PRIORITY_CLASS,
+  PRIORITY_ICON,
+  PRIORITY_LABEL,
+  PROMISE_CLASS,
+  PROMISE_ICON,
+  assigneesText,
+  formatCaseDate,
+  formatDateTime,
+  formatDay,
+  formatMinutes,
+  formatMomentDay,
+  promiseText,
+  timeAgo,
+} from '../../core/ui';
 import type { ColumnId } from './ticket-columns';
 
 /**
@@ -56,6 +70,7 @@ export function caseRow(t: Ticket, userNames: ReadonlyMap<number, string>): Case
     lastActivityAgo: timeAgo(t.lastActivityAt),
     text: {
       createdAt: formatMomentDay(t.createdAt),
+      assignee: assigneesText(t),
       priority: t.priority ? PRIORITY_LABEL[t.priority] : '',
       module: t.moduleName ?? '',
       promisedDate: t.promisedDate ? promiseDay + (promiseDue ? ' · ' + promiseDue : '') : '',

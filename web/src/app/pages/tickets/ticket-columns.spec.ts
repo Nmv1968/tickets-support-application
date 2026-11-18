@@ -15,7 +15,7 @@ describe('the columns a person starts with', () => {
   const starting = COLUMNS.filter((column) => DEFAULT_COLUMNS.includes(column.id));
 
   it('are the ones the list always had, and the support types', () => {
-    expect(starting.map((column) => column.label)).toEqual(['Código', 'Fecha del caso', 'Registro', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Tipos de soporte', 'Observación']);
+    expect(starting.map((column) => column.label)).toEqual(['Código', 'Fecha del caso', 'Registro', 'Empresa', 'Descripción', 'Estado', 'Responsables', 'Tipos de soporte', 'Observación']);
   });
 
   // 1280: the most common laptop, where the last column was out of sight.

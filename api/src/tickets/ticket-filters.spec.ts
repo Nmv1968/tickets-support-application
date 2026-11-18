@@ -166,8 +166,9 @@ describe('ticket list filters', () => {
     });
 
     it('filters by responsible: a person of the catalog, or the cases nobody is responsible for', () => {
-      expect(buildWhere({ assignee: 12 })).toEqual({ AND: [active, { assigneeId: 12 }] });
-      expect(buildWhere({ assignee: 'none' })).toEqual({ AND: [active, { assigneeId: null }] });
+      // "Some": a case with that person and others is found too, as with a support type.
+      expect(buildWhere({ assignee: 12 })).toEqual({ AND: [active, { assignees: { some: { assigneeId: 12 } } }] });
+      expect(buildWhere({ assignee: 'none' })).toEqual({ AND: [active, { assignees: { none: {} } }] });
     });
 
     it('filters by company, by who registered the case and by a support type the case carries', () => {
@@ -179,7 +180,7 @@ describe('ticket list filters', () => {
 
     it('applies together every filter that is sent', () => {
       expect(buildWhere(parseTicketFilters({ companyId: '4', assignee: 'none', supportType: '5', createdBy: '3', moduleId: '8', priority: 'HIGH' }))).toEqual({
-        AND: [active, { assigneeId: null }, { companyId: 4 }, { priority: 'HIGH' }, { moduleId: 8 }, { supportTypes: { some: { supportTypeId: 5 } } }, { createdById: 3 }],
+        AND: [active, { assignees: { none: {} } }, { companyId: 4 }, { priority: 'HIGH' }, { moduleId: 8 }, { supportTypes: { some: { supportTypeId: 5 } } }, { createdById: 3 }],
       });
     });
 

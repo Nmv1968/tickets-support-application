@@ -29,6 +29,8 @@ Recordatorios que la guía desarrolla:
   `crear_responsable`, `crear_modulo`, `crear_tipo_soporte`), si usas uno de los existentes o si
   el caso queda sin ese dato. La empresa es el único dato que no puede faltar.
 - Los tipos de soporte de un caso los decide la persona, entre los del catálogo.
+- Un caso puede tener varios responsables, o ninguno: en `crear_caso` y `actualizar_caso`,
+  `responsables` es la lista completa, como `tipos_soporte`.
 - Archivar guarda un caso sin eliminarlo (`actualizar_caso` con `archivar`), solo cuando la
   persona lo pide. `buscar_casos` deja fuera los archivados salvo que se los pidas.
 

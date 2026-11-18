@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { day } from '../common/testing';
-import { FAILURE, NOW, TRAINING, USER_ERROR, carrying, stored } from './testing';
-import type { SupportTypeRow } from './testing';
+import { ANA, CLIENT, FAILURE, LUIS, NOW, TRAINING, USER_ERROR, assignedTo, carrying, stored } from './testing';
+import type { AssigneeRow, SupportTypeRow } from './testing';
 import { TicketInput } from './ticket-input';
 import { planTicketUpdate } from './ticket-update';
 import type { TicketUpdateContext } from './ticket-update';
@@ -10,7 +10,7 @@ describe('planTicketUpdate', () => {
   const context = (changes: Partial<TicketUpdateContext> = {}): TicketUpdateContext => ({
     now: NOW,
     companyName: null,
-    assigneeName: null,
+    assignees: null,
     supportTypes: null,
     moduleName: null,
     slaHours: null,
@@ -72,37 +72,64 @@ describe('planTicketUpdate', () => {
     });
   });
 
-  describe('responsible', () => {
-    const unassigned = { assigneeId: null, assignee: null };
+  describe('responsibles', () => {
+    const unassigned = { assignees: [] };
+    /** The responsibles of the input as `lookups` finds them. */
+    const found = (...people: AssigneeRow[]): TicketUpdateContext['assignees'] => people;
 
     it('gives the case to another person of the catalog', () => {
-      const { data, history } = planTicketUpdate(stored(), { assigneeId: 5 }, context({ assigneeName: 'Luis' }));
-      expect(data).toEqual({ lastActivityAt: NOW, assigneeId: 5 });
-      expect(history).toEqual([{ field: 'Responsable', oldValue: 'Ana', newValue: 'Luis' }]);
+      const { data, history } = planTicketUpdate(stored(), { assigneeIds: [5] }, context({ assignees: found(LUIS) }));
+      expect(data).toEqual({
+        lastActivityAt: NOW,
+        assignees: { deleteMany: { assigneeId: { in: [3] } }, createMany: { data: [{ assigneeId: 5 }] } },
+      });
+      expect(history).toEqual([{ field: 'Responsables', oldValue: 'Ana', newValue: 'Luis' }]);
     });
 
     it('gives a responsible to a case that had none', () => {
-      const { data, history } = planTicketUpdate(stored(unassigned), { assigneeId: 5 }, context({ assigneeName: 'Luis' }));
-      expect(data).toMatchObject({ assigneeId: 5 });
-      expect(history).toEqual([{ field: 'Responsable', oldValue: null, newValue: 'Luis' }]);
+      const { data, history } = planTicketUpdate(stored(unassigned), { assigneeIds: [5] }, context({ assignees: found(LUIS) }));
+      expect(data.assignees).toEqual({ deleteMany: undefined, createMany: { data: [{ assigneeId: 5 }] } });
+      expect(history).toEqual([{ field: 'Responsables', oldValue: null, newValue: 'Luis' }]);
     });
 
-    it('leaves the case without responsible when the person is removed', () => {
-      const { data, history } = planTicketUpdate(stored(), { assigneeId: null }, context());
-      expect(data).toEqual({ lastActivityAt: NOW, assigneeId: null });
-      expect(history).toEqual([{ field: 'Responsable', oldValue: 'Ana', newValue: null }]);
+    it('adds a second responsible and keeps the first one, written only as the difference', () => {
+      const { data, history } = planTicketUpdate(stored(), { assigneeIds: [5, 3] }, context({ assignees: found(LUIS, ANA) }));
+      expect(data.assignees).toEqual({ deleteMany: undefined, createMany: { data: [{ assigneeId: 5 }] } });
+      // By name, as the support types.
+      expect(history).toEqual([{ field: 'Responsables', oldValue: 'Ana', newValue: 'Ana, Luis' }]);
     });
 
-    it('does nothing when the responsible sent is the one the case has, nobody included', () => {
-      expect(planTicketUpdate(stored(), { assigneeId: 3 }, context({ assigneeName: 'Ana' }))).toEqual(untouched);
-      expect(planTicketUpdate(stored(unassigned), { assigneeId: null }, context())).toEqual(untouched);
+    it('takes one of several off', () => {
+      const before = stored({ assignees: assignedTo(LUIS, ANA, CLIENT) });
+      const { data, history } = planTicketUpdate(before, { assigneeIds: [3, 8] }, context({ assignees: found(ANA, CLIENT) }));
+      expect(data.assignees).toEqual({ deleteMany: { assigneeId: { in: [5] } }, createMany: undefined });
+      expect(history).toEqual([{ field: 'Responsables', oldValue: 'Ana, Cliente, Luis', newValue: 'Ana, Cliente' }]);
+    });
+
+    it('leaves the case without responsible when the list is empty', () => {
+      const { data, history } = planTicketUpdate(stored({ assignees: assignedTo(ANA, LUIS) }), { assigneeIds: [] }, context({ assignees: [] }));
+      expect(data).toEqual({ lastActivityAt: NOW, assignees: { deleteMany: { assigneeId: { in: [3, 5] } }, createMany: undefined } });
+      expect(history).toEqual([{ field: 'Responsables', oldValue: 'Ana, Luis', newValue: null }]);
+    });
+
+    it('does nothing when the responsibles sent are the ones the case has, in any order, nobody included', () => {
+      expect(planTicketUpdate(stored(), { assigneeIds: [3] }, context({ assignees: found(ANA) }))).toEqual(untouched);
+      const both = stored({ assignees: assignedTo(ANA, LUIS) });
+      expect(planTicketUpdate(both, { assigneeIds: [5, 3] }, context({ assignees: found(LUIS, ANA) }))).toEqual(untouched);
+      expect(planTicketUpdate(stored(unassigned), { assigneeIds: [] }, context({ assignees: [] }))).toEqual(untouched);
+    });
+
+    // As for the support types: null is "not sent", and the case keeps the ones it has.
+    it('leaves them alone when the input does not carry them, or carries a null', () => {
+      expect(planTicketUpdate(stored(), { status: 'RESOLVED' }, context()).data).not.toHaveProperty('assignees');
+      const unsent = { assigneeIds: null } as unknown as TicketInput;
+      expect(planTicketUpdate(stored(), unsent, context())).toEqual(untouched);
     });
 
     // "Cliente" was a switch of the case that won over the person. It is a responsible of the catalog now.
     it('names "Cliente" in the history like any other responsible', () => {
-      const { data, history } = planTicketUpdate(stored(), { assigneeId: 8 }, context({ assigneeName: 'Cliente' }));
-      expect(data).toEqual({ lastActivityAt: NOW, assigneeId: 8 });
-      expect(history).toEqual([{ field: 'Responsable', oldValue: 'Ana', newValue: 'Cliente' }]);
+      const { history } = planTicketUpdate(stored(), { assigneeIds: [8] }, context({ assignees: found(CLIENT) }));
+      expect(history).toEqual([{ field: 'Responsables', oldValue: 'Ana', newValue: 'Cliente' }]);
     });
   });
 
@@ -270,19 +297,19 @@ describe('planTicketUpdate', () => {
         companyId: 5,
         description: 'No imprime',
         status: 'RESOLVED',
-        assigneeId: 9,
+        assigneeIds: [5],
         supportTypeIds: [1],
         archived: true,
         moduleId: 4,
       };
-      const names = { companyName: 'Corporación Ñandú', assigneeName: 'Luis', supportTypes: [{ id: 1, name: 'Capacitación' }], moduleName: 'Ventas > Facturas' };
+      const names = { companyName: 'Corporación Ñandú', assignees: [LUIS], supportTypes: [{ id: 1, name: 'Capacitación' }], moduleName: 'Ventas > Facturas' };
       const { history } = planTicketUpdate(stored(), dto, context(names));
       expect(history).toEqual([
         { field: 'Fecha del caso', oldValue: '2026-11-02', newValue: '2026-11-05' },
         { field: 'Empresa', oldValue: 'ACME', newValue: 'Corporación Ñandú' },
         { field: 'Descripción', oldValue: null, newValue: null },
         { field: 'Estado', oldValue: 'Pendiente', newValue: 'Resuelto' },
-        { field: 'Responsable', oldValue: 'Ana', newValue: 'Luis' },
+        { field: 'Responsables', oldValue: 'Ana', newValue: 'Luis' },
         { field: 'Tipos de soporte', oldValue: null, newValue: 'Capacitación' },
         { field: 'Archivado', oldValue: 'No', newValue: 'Sí' },
         { field: 'Módulo', oldValue: null, newValue: 'Ventas > Facturas' },
@@ -294,18 +321,18 @@ describe('planTicketUpdate', () => {
         date: '2026-11-02',
         companyId: 2,
         description: 'No abre la factura',
-        assigneeId: 3,
+        assigneeIds: [3],
         supportTypeIds: [],
         archived: false,
         estimatedMinutes: 30,
         spentMinutes: 20,
         customerReply: ' Listo ',
       };
-      const { data, history } = planTicketUpdate(stored(), dto, context({ companyName: 'ACME', assigneeName: 'Ana', supportTypes: [] }));
+      const { data, history } = planTicketUpdate(stored(), dto, context({ companyName: 'ACME', assignees: [ANA], supportTypes: [] }));
       expect(history).toEqual([]);
       expect(data).toMatchObject({ estimatedMinutes: 30, spentMinutes: 20, customerReply: 'Listo' });
       expect(data).not.toHaveProperty('companyId');
-      expect(data).not.toHaveProperty('assigneeId');
+      expect(data).not.toHaveProperty('assignees');
       expect(data).not.toHaveProperty('supportTypes');
       expect(data).not.toHaveProperty('archivedAt');
     });

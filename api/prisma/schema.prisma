@@ -49,7 +49,7 @@ model User {
 }
 
 /// People a case can be assigned to ("Responsable"). Managed from the UI. They are not users of
-/// the app: a name is all a responsible has.
+/// the app: a name is all a responsible has. A case has zero or more (`TicketAssignee`).
 model Assignee {
   id        Int      @id @default(autoincrement())
   name      String
@@ -60,7 +60,19 @@ model Assignee {
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  tickets Ticket[]
+  tickets TicketAssignee[]
+}
+
+/// One responsible of one case. A case has zero or more, as it has support types.
+model TicketAssignee {
+  ticketId   Int
+  assigneeId Int
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// Restrict, as a support type: a responsible with cases is not deleted (see `NamedCatalogService.remove`).
+  assignee   Assignee @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
+
+  @@id([ticketId, assigneeId])
+  @@index([assigneeId])
 }
 
 /// Client companies that report cases. Managed from the UI.
@@ -145,8 +157,6 @@ model Ticket {
   /// against this. No default on purpose: a write that forgets it must not compile. See `ticketSearchKey`.
   searchText       String
   status           TicketStatus  @default(PENDING)
-  assigneeId       Int?
-  assignee         Assignee?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
   priority         Priority?
   estimatedMinutes Int?
   spentMinutes     Int           @default(0)
@@ -175,13 +185,13 @@ model Ticket {
   attachments  Attachment[]
   history      TicketHistory[]
   supportTypes TicketSupportType[]
+  assignees    TicketAssignee[]
 
   /// One for each column a list, an export or the bell filters or orders the cases by: the guard in
   /// tickets.service.spec.ts walks those queries and fails on a column without one.
   @@index([status])
   @@index([date])
   @@index([companyId])
-  @@index([assigneeId])
   @@index([moduleId])
   @@index([createdById])
   @@index([dueAt])

@@ -18,6 +18,8 @@ import { todayIso } from '../../core/ui';
 import { TicketPanel } from './ticket-panel';
 
 const OTHER = ticket({ id: 8, code: 'SOP-00008', date: '2026-11-03', companyId: 5, company: 'Bodega Sur', description: 'No abre la caja' });
+/** The responsibles of the catalog of the specs, as a case has them. Zoe is deactivated. */
+const [ANA, LUIS, ZOE] = ASSIGNEES.map(({ id, name }) => ({ id, name }));
 
 const REFUSED = { status: 400, statusText: 'Bad Request' };
 const NOTE = { id: 1, text: 'Se llamó al cliente', authorName: 'Ana', createdAt: '2026-11-06T09:00:00.000Z' };
@@ -164,6 +166,7 @@ describe('TicketPanel', () => {
       pick('tp-company', 'Bodega Sur');
       pick('tp-status', 'Resuelto');
       pick('tp-assignee', 'Luis');
+      closeSelect(select('tp-assignee'));
       pick('tp-priority', 'Alta');
       pick('tp-module', 'Ventas / Facturas');
       pick('tp-types', 'Capacitación');
@@ -205,10 +208,11 @@ describe('TicketPanel', () => {
       type(description(), 'No imprime desde el lunes');
       pick('tp-status', 'Sin resolver');
       pick('tp-assignee', 'Luis');
+      closeSelect(select('tp-assignee'));
 
       const sent = update();
-      expect(sent.request.body).toEqual({ description: 'No imprime desde el lunes', status: 'UNRESOLVED', assigneeId: 5 });
-      sent.flush(ticket({ description: 'No imprime desde el lunes', status: 'UNRESOLVED', assigneeId: 5, assigneeName: 'Luis' }));
+      expect(sent.request.body).toEqual({ description: 'No imprime desde el lunes', status: 'UNRESOLVED', assigneeIds: [5] });
+      sent.flush(ticket({ description: 'No imprime desde el lunes', status: 'UNRESOLVED', assignees: [LUIS] }));
       settle();
 
       expect(toasts()).toEqual(['Caso actualizado']);
@@ -289,7 +293,7 @@ describe('TicketPanel', () => {
     }));
 
     it('"Descartar cambios" puts every field back as the case has it, and sends nothing', fakeAsync(() => {
-      open(ticket({ time: '09:00', assigneeId: 4, assigneeName: 'Ana', supportTypes: [FAILURE], estimatedMinutes: 20, promisedDate: '2026-12-24', promiseState: 'later', customerReply: 'Listo.' }));
+      open(ticket({ time: '09:00', assignees: [ANA], supportTypes: [FAILURE], estimatedMinutes: 20, promisedDate: '2026-12-24', promiseState: 'later', customerReply: 'Listo.' }));
       type(description(), 'Otra cosa');
       type(caseDate(), '2026-11-01');
       type(caseTime(), '10:30');
@@ -820,35 +824,87 @@ describe('TicketPanel', () => {
     });
   });
 
-  describe('the responsible', () => {
+  // As the support types: a set of the case, each one a chip with its "×".
+  describe('the responsibles', () => {
+    const people = (): HTMLElement => select('tp-assignee');
+
+    it('are the chips of the case, each with a "×" that names who it takes off', fakeAsync(() => {
+      open(ticket({ assignees: [ANA, LUIS] }));
+
+      expect(find('label[for=tp-assignee]').textContent).toBe('Responsables');
+      expect(chosen('tp-assignee')).toEqual(['Ana', 'Luis']);
+      const removers = Array.from(people().querySelectorAll('app-type-chip button')).map((button) => button.getAttribute('aria-label'));
+      expect(removers).toEqual(['Quitar Ana', 'Quitar Luis']);
+      // The "×" of the select empties all of them, and says so.
+      expect(people().querySelector('.ng-clear-wrapper')?.getAttribute('title')).toBe('Quitar todos los responsables');
+    }));
+
     // "Cliente" is not an option of its own. A deactivated responsible is offered only to the case that has it.
-    it('is one of the active responsibles of the catalog, the one the case has, or nobody', fakeAsync(() => {
-      open(ticket({ assigneeId: 6, assigneeName: 'Zoe' }));
+    it('are chosen among the active responsibles of the catalog and the ones the case has, or none', fakeAsync(() => {
+      open(ticket({ assignees: [ZOE] }));
       expect(chosen('tp-assignee')).toEqual(['Zoe']);
       expect(offers('tp-assignee')).toEqual(['Ana', 'Luis', 'Zoe']);
+      closeSelect(people());
 
       moveTo(OTHER);
       expect(chosen('tp-assignee')).toEqual([]);
-      expect(select('tp-assignee').textContent).toContain('Sin asignar');
+      expect(people().textContent).toContain('Sin asignar');
       expect(offers('tp-assignee')).toEqual(['Ana', 'Luis']);
+      closeSelect(people());
     }));
 
-    it('is saved by its number, and as nobody when the select is emptied', fakeAsync(() => {
-      open();
+    it('chosen and taken off, are saved as the whole set, in one save', fakeAsync(() => {
+      open(ticket({ assignees: [ANA] }));
+      // The list stays open to choose several in a row.
       pick('tp-assignee', 'Luis');
-      const assign = update();
-      expect(assign.request.body).toEqual({ assigneeId: 5 });
-      assign.flush(ticket({ assigneeId: 5, assigneeName: 'Luis' }));
-      settle();
-      expect(chosen('tp-assignee')).toEqual(['Luis']);
+      expect(document.querySelector('.ng-dropdown-panel')).not.toBeNull();
+      closeSelect(people());
+      render();
+      expect(chosen('tp-assignee')).toEqual(['Ana', 'Luis']);
+      noPatch();
 
-      clearSelect(select('tp-assignee'));
+      const assign = update();
+      expect(assign.request.body).toEqual({ assigneeIds: [4, 5] });
+      assign.flush(ticket({ assignees: [ANA, LUIS] }));
+      settle();
+      expect(chosen('tp-assignee')).toEqual(['Ana', 'Luis']);
+      expect(unsaved()).toBeFalse();
+
+      removeChosen(people(), 'Ana');
       render();
       const unassign = update();
-      expect(unassign.request.body).toEqual({ assigneeId: null });
-      unassign.flush(ticket());
+      expect(unassign.request.body).toEqual({ assigneeIds: [5] });
+      unassign.flush(ticket({ assignees: [LUIS] }));
+      settle();
+      expect(chosen('tp-assignee')).toEqual(['Luis']);
+    }));
+
+    it('all taken off with the "×" of the select, are saved as none', fakeAsync(() => {
+      open(ticket({ assignees: [ANA, LUIS] }));
+      clearSelect(people());
+      render();
+
+      const sent = update();
+      expect(sent.request.body).toEqual({ assigneeIds: [] });
+      sent.flush(ticket());
       settle();
       expect(chosen('tp-assignee')).toEqual([]);
+      expect(people().textContent).toContain('Sin asignar');
+    }));
+
+    // They are a set: the same people in another order are the same people.
+    it('taken off and chosen again are nothing to save', fakeAsync(() => {
+      open(ticket({ assignees: [ANA, LUIS] }));
+      removeChosen(people(), 'Ana');
+      render();
+      expect(unsaved()).toBeTrue();
+
+      pick('tp-assignee', 'Ana');
+      closeSelect(people());
+      render();
+      expect(chosen('tp-assignee')).toEqual(['Luis', 'Ana']);
+      expect(unsaved()).toBeFalse();
+      expect(isDisabled(save())).toBeTrue();
     }));
   });
 
@@ -937,7 +993,7 @@ describe('TicketPanel', () => {
       for (const [name, label] of [
         ['tp-company', 'Empresa'],
         ['tp-status', 'Estado'],
-        ['tp-assignee', 'Responsable'],
+        ['tp-assignee', 'Responsables'],
         ['tp-priority', 'Prioridad'],
         ['tp-module', 'Módulo'],
         ['tp-types', 'Tipos de soporte'],

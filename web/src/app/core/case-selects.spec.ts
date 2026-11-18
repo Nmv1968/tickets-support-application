@@ -26,6 +26,8 @@ import { Catalogs, NOBODY } from './catalogs';
     <label for="priority">Prioridad</label>
     <app-priority-select inputId="priority" [(value)]="priority" />
     <app-assignee-select ariaLabel="Filtrar por responsable" placeholder="Responsable: todos" [items]="catalogs.assigneeFilterOptions()" [(value)]="assignee" />
+    <label for="people">Responsables</label>
+    <app-assignee-select inputId="people" multiple [items]="catalogs.activeAssignees()" [(value)]="assigneeIds" />
     <label for="module">Módulo</label>
     <app-module-select inputId="module" [items]="modules" [(value)]="moduleId" />
     <label for="types">Tipos de soporte</label>
@@ -44,6 +46,7 @@ class CaseForm {
   readonly filterStatus = signal<TicketStatus | null>('RESOLVED');
   readonly priority = signal<Priority | null>(null);
   readonly assignee = signal<number | 'none' | null>(null);
+  readonly assigneeIds = signal<number[]>([]);
   readonly moduleId = signal<number | null>(null);
   readonly typeIds = signal<number[]>([]);
   readonly typeId = signal<number | null>(null);
@@ -63,7 +66,10 @@ describe('The selects of the fields of a case', () => {
       { id: 1, name: 'Acme', active: true, tickets: 3 },
       { id: 6, name: 'Taller Viejo', active: false, tickets: 2 },
     ]);
-    catalogs.assignees.set([{ id: 4, name: 'Ana', active: true, tickets: 1 }]);
+    catalogs.assignees.set([
+      { id: 4, name: 'Ana', active: true, tickets: 1 },
+      { id: 5, name: 'Luis', active: true, tickets: 0 },
+    ]);
     fixture = TestBed.createComponent(CaseForm);
     form = fixture.componentInstance;
     el = fixture.nativeElement as HTMLElement;
@@ -180,9 +186,37 @@ describe('The selects of the fields of a case', () => {
 
     expect(box('Filtrar por responsable').getAttribute('aria-label')).toBe('Filtrar por responsable');
     expect(placeholder('Filtrar por responsable')).toBe('Responsable: todos');
-    expect(offers('Filtrar por responsable')).toEqual([NOBODY.name, 'Ana']);
+    expect(offers('Filtrar por responsable')).toEqual([NOBODY.name, 'Ana', 'Luis']);
     pick('Filtrar por responsable', 'Sin asignar');
     expect(form.assignee()).toBe('none');
+    // One person, written as the select writes a value: no chip, and no "×" of its own.
+    pick('Filtrar por responsable', 'Ana');
+    expect(form.assignee()).toBe(4);
+    expect(chosen('Filtrar por responsable')).toEqual(['Ana']);
+    expect(select('Filtrar por responsable').querySelector('.ng-value app-type-chip')).toBeNull();
+    expect(document.querySelector('.ng-dropdown-panel')).toBeNull();
+  }));
+
+  // As the support types of a case.
+  it('the responsibles of a case are several, each a chip with its "×", and the list stays open after each choice', fakeAsync(() => {
+    render();
+    expect(placeholder('people')).toBe('Sin asignar');
+
+    pick('people', 'Luis');
+    expect(document.querySelector('.ng-dropdown-panel')).not.toBeNull();
+    pick('people', 'Ana');
+    closeSelect(select('people'));
+    render();
+    expect(form.assigneeIds()).toEqual([5, 4]);
+    expect(chosen('people')).toEqual(['Luis', 'Ana']);
+    // A chip without a colour of its own, whose "×" names who it takes off.
+    const chips = Array.from(select('people').querySelectorAll<HTMLElement>('.ng-value app-type-chip'));
+    expect(chips.map((chip) => chip.classList.contains('bg-elevated'))).toEqual([true, true]);
+    expect(chips.map((chip) => chip.querySelector('button')?.getAttribute('aria-label'))).toEqual(['Quitar Luis', 'Quitar Ana']);
+
+    removeChosen(select('people'), 'Luis');
+    render();
+    expect(form.assigneeIds()).toEqual([4]);
   }));
 
   it('the module goes by its full name', fakeAsync(() => {
@@ -228,6 +262,7 @@ describe('The selects of the fields of a case', () => {
     form.companyId.set(1);
     form.priority.set('HIGH');
     form.assignee.set(4);
+    form.assigneeIds.set([4]);
     form.moduleId.set(MODULES[0].id);
     form.typeIds.set([TRAINING.id]);
     form.typeId.set(FAILURE.id);
@@ -238,6 +273,7 @@ describe('The selects of the fields of a case', () => {
     expect(clear('filter-status')).toBe('Quitar estado');
     expect(clear('priority')).toBe('Quitar prioridad');
     expect(el.querySelector('app-assignee-select .ng-clear-wrapper')!.getAttribute('title')).toBe('Quitar responsable');
+    expect(clear('people')).toBe('Quitar todos los responsables');
     expect(clear('module')).toBe('Quitar módulo');
     expect(clear('types')).toBe('Quitar todos los tipos de soporte');
     expect(clear('type')).toBe('Quitar tipo de soporte');

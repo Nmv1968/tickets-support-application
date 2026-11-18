@@ -36,8 +36,9 @@ export function edgeOf(color: string): string | undefined {
 /**
  * A support type ("Tipo de soporte") as a chip in its own colour: `<app-type-chip [type]="type" />`.
  * The colour is whatever the team chose, so the text is black or white, whichever can be read on it.
+ * Something without a colour (a responsible) is a chip in the elevated gray, with the text of the page.
  *
- * In a select of several types each chosen one is a chip with a "×":
+ * In a select of several types, or of several responsibles, each chosen one is a chip with a "×":
  * `<app-type-chip [type]="item" removable (removed)="clear(item)" />` inside its `ng-label-tmp`.
  *
  * A name can be long, and the chip goes in narrow places (a column of the table, a card of the
@@ -57,6 +58,7 @@ export function edgeOf(color: string): string | undefined {
   // what the chip is in then never counts its name as a width it has to make room for.
   host: {
     class: 'badge inline-grid max-w-full grid-flow-col grid-cols-[minmax(0,1fr)] rounded-xl',
+    '[class.bg-elevated]': '!type().color',
     '[style.background-color]': 'type().color',
     '[style.color]': 'ink()',
     '[style.box-shadow]': 'edge()',
@@ -87,11 +89,12 @@ export function edgeOf(color: string): string | undefined {
   `,
 })
 export class TypeChip {
-  readonly type = input.required<{ name: string; color: string }>();
+  /** Without a colour, the chip is in the gray of the elevated surfaces. */
+  readonly type = input.required<{ name: string; color?: string }>();
   /** Shows the "×" that asks to take the type off. */
   readonly removable = input(false, { transform: booleanAttribute });
   readonly removed = output<void>();
 
-  protected readonly ink = computed(() => readableOn(this.type().color));
-  protected readonly edge = computed(() => edgeOf(this.type().color));
+  protected readonly ink = computed(() => readableOn(this.type().color ?? ''));
+  protected readonly edge = computed(() => edgeOf(this.type().color ?? ''));
 }

@@ -55,19 +55,20 @@ export function moduleFullName(module: { name: string; parent?: { name: string }
   return module.parent ? `${module.parent.name} > ${module.name}` : module.name;
 }
 
-/** Support types in the order people read them everywhere: by name. */
+/** Support types and responsibles in the order people read them everywhere: by name. */
 export function byName<T extends { name: string }>(types: T[]): T[] {
   return [...types].sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
 /**
- * Some support types as one text, the way every place writes them: their names in alphabetical
- * order and separated by commas ("Capacitación, Falla del sistema"). The "Tipos de soporte" cell
- * of the exports and the history of a case say them so, and the import reads the cell back.
+ * Some support types, or some responsibles, as one text, the way every place writes them: their
+ * names in alphabetical order and separated by commas ("Capacitación, Falla del sistema", "Ana,
+ * Luis"). The "Tipos de soporte" and "Responsable" cells of the exports and the history of a case
+ * say them so, and the import reads the cells back.
  */
-export function supportTypesText(types: { name: string }[]): string {
-  return byName(types)
-    .map((type) => type.name)
+export function namesText(entries: { name: string }[]): string {
+  return byName(entries)
+    .map((entry) => entry.name)
     .join(', ');
 }
 

@@ -20,6 +20,10 @@ describe('caseRow', () => {
         time: '14:35',
         createdAt: '2026-11-06T15:00:00.000Z',
         priority: 'CRITICAL',
+        assignees: [
+          { id: 4, name: 'Ana' },
+          { id: 5, name: 'Luis' },
+        ],
         moduleName: 'Ventas / Facturas',
         dueAt: '2026-11-06T10:00:00.000Z',
         estimatedMinutes: 95,
@@ -38,6 +42,8 @@ describe('caseRow', () => {
     expect(row.lastActivityAgo).toMatch(/^hace \d+ días$/);
     expect(row.text).toEqual({
       createdAt: '06/11/2026',
+      // Every responsible, as the API orders them: by name.
+      assignee: 'Ana, Luis',
       priority: 'Crítica',
       module: 'Ventas / Facturas',
       promisedDate: '',
@@ -56,7 +62,7 @@ describe('caseRow', () => {
     expect(row.dayAndTime).toBe(row.day);
     expect(row.archived).toBe('');
     expect(row.priorityClass).toBe('');
-    for (const column of ['priority', 'module', 'promisedDate', 'dueAt', 'estimatedMinutes', 'spentMinutes', 'lastNote', 'createdBy'] as const) {
+    for (const column of ['assignee', 'priority', 'module', 'promisedDate', 'dueAt', 'estimatedMinutes', 'spentMinutes', 'lastNote', 'createdBy'] as const) {
       expect(row.text[column]).withContext(column).toBe('');
     }
   });

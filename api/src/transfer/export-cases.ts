@@ -8,7 +8,7 @@ import type { TicketFilters } from '../tickets/ticket-filters';
 
 const exportInclude = {
   company: { select: { name: true } },
-  assignee: { select: { name: true } },
+  assignees: { select: { assignee: { select: { name: true } } } },
   module: { select: { name: true, parent: { select: { name: true } } } },
   supportTypes: { select: { supportType: { select: { name: true } } } },
   notes: { orderBy: { createdAt: 'asc' }, select: { text: true, createdAt: true } },

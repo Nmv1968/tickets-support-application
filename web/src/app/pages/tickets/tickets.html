@@ -217,8 +217,8 @@
                   }
                   @case ('assignee') {
                     <td class="p-2">
-                      @if (t.assigneeName) {
-                        {{ t.assigneeName }}
+                      @if (row.text.assignee) {
+                        {{ row.text.assignee }}
                       } @else {
                         <span class="text-muted">Sin asignar</span>
                       }
@@ -343,8 +343,8 @@
                 }
               </div>
             }
-            @if (shown().has('assignee') && t.assigneeName) {
-              <div class="mt-1 text-xs text-muted"><app-icon name="account-outline" /> {{ t.assigneeName }}</div>
+            @if (shown().has('assignee') && row.text.assignee) {
+              <div class="mt-1 text-xs text-muted"><app-icon name="account-outline" /> {{ row.text.assignee }}</div>
             }
             @for (column of cardLines(); track column.id) {
               @if (row.text[column.id]; as value) {

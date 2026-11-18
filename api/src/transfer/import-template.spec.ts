@@ -48,7 +48,20 @@ describe('import template', () => {
   /** The values of a column of a sheet, from its first row down. */
   const columnValues = (sheet: ExcelJS.Worksheet, column: number): unknown[] => (sheet.getColumn(column).values as unknown[]).slice(1);
   const preview = { dryRun: true, dateOrder: 'dmy', createMissing: false } as const;
-  const HEADERS = ['Fecha', 'Hora', 'Empresa', 'Descripción', 'Estado', 'Prioridad', 'Módulo', 'Responsable', 'Tipo de soporte', 'Otro tipo de soporte', 'Observación'];
+  const HEADERS = [
+    'Fecha',
+    'Hora',
+    'Empresa',
+    'Descripción',
+    'Estado',
+    'Prioridad',
+    'Módulo',
+    'Responsable',
+    'Otro responsable',
+    'Tipo de soporte',
+    'Otro tipo de soporte',
+    'Observación',
+  ];
 
   it('has the sheet to fill in first, with one column per field the import reads', async () => {
     const workbook = await open(await serviceOn(database()).template());
@@ -74,7 +87,7 @@ describe('import template', () => {
       status: 'Estado',
       priority: 'Prioridad',
       module: 'Módulo',
-      assignee: 'Responsable',
+      assignees: 'Responsable, Otro responsable',
       supportTypes: 'Tipo de soporte, Otro tipo de soporte',
       note: 'Observación',
     });
@@ -89,9 +102,22 @@ describe('import template', () => {
     const sheet = workbook.worksheets[0];
     // Day 3 of month 4: read as a date cell it cannot be taken for March 4th, whatever order is chosen.
     // The time as Excel stores it when a person types 14:35 in the cell: the part of the day gone by.
-    sheet.addRow([day('2026-04-03'), (14 * 60 + 35) / 1440, 'ACME', 'No imprime', 'Sin resolver', 'Crítica', 'Ventas > Facturas', 'Luis Ñáñez', 'Capacitación', 'Falla del sistema', 'Se cambió el cable']);
-    sheet.addRow([null, null, 'Corporación Ñandú', 'No abre', 'Resuelto', 'Baja', 'Inventario', 'Ana', null, 'Capacitación', null]);
-    sheet.addRow([null, null, 'Zeta', 'Pide una capacitación', null, null, null, null, null, null, null]);
+    sheet.addRow([
+      day('2026-04-03'),
+      (14 * 60 + 35) / 1440,
+      'ACME',
+      'No imprime',
+      'Sin resolver',
+      'Crítica',
+      'Ventas > Facturas',
+      'Luis Ñáñez',
+      'Ana',
+      'Capacitación',
+      'Falla del sistema',
+      'Se cambió el cable',
+    ]);
+    sheet.addRow([null, null, 'Corporación Ñandú', 'No abre', 'Resuelto', 'Baja', 'Inventario', null, 'Ana', null, 'Capacitación', null]);
+    sheet.addRow([null, null, 'Zeta', 'Pide una capacitación', null, null, null, null, null, null, null, null]);
 
     const result = await service.import(await asUpload(workbook), { ...preview, dateOrder: 'mdy' }, user);
 
@@ -106,7 +132,7 @@ describe('import template', () => {
         status: 'UNRESOLVED',
         priority: 'CRITICAL',
         module: 'Ventas > Facturas',
-        assignee: 'Luis Ñáñez',
+        assignees: ['Luis Ñáñez', 'Ana'],
         supportTypes: ['Capacitación', 'Falla del sistema'],
         note: 'Se cambió el cable',
       },
@@ -118,7 +144,7 @@ describe('import template', () => {
         status: 'RESOLVED',
         priority: 'LOW',
         module: 'Inventario',
-        assignee: 'Ana',
+        assignees: ['Ana'],
         supportTypes: ['Capacitación'],
         note: null,
       },
@@ -130,7 +156,7 @@ describe('import template', () => {
         status: 'PENDING',
         priority: null,
         module: null,
-        assignee: null,
+        assignees: [],
         supportTypes: [],
         note: null,
       },
@@ -175,8 +201,9 @@ describe('import template', () => {
         ['F', list('$C$2:$C$5')],
         ['G', list('$D$2:$D$4')],
         ['H', list('$E$2:$E$3')],
-        ['I', list('$F$2:$F$3')],
+        ['I', list('$E$2:$E$3')],
         ['J', list('$F$2:$F$3')],
+        ['K', list('$F$2:$F$3')],
       ];
       for (const [column, formula] of lists) {
         // Strict: Excel refuses a value that is not in the list, as the import would reject its row.
@@ -184,7 +211,7 @@ describe('import template', () => {
       }
       // Free text: nothing to check.
       expect(sheet.getCell(`D${row}`).dataValidation).toBeUndefined();
-      expect(sheet.getCell(`K${row}`).dataValidation).toBeUndefined();
+      expect(sheet.getCell(`L${row}`).dataValidation).toBeUndefined();
     }
     expect(sheet.getCell(`A${TEMPLATE_ROWS + 2}`).dataValidation).toBeUndefined();
     expect(sheet.getCell(`C${TEMPLATE_ROWS + 2}`).dataValidation).toBeUndefined();
@@ -202,13 +229,14 @@ describe('import template', () => {
     });
     expect(refusal('G2').error).toContain('regístralo primero en Configuración > Módulos');
     expect(refusal('H2').error).toContain('regístralo primero en Configuración > Responsables');
-    expect(refusal('I2').error).toContain('regístralo primero en Configuración > Tipos de soporte');
-    expect(refusal('J2')).toEqual(refusal('I2'));
+    expect(refusal('I2')).toEqual(refusal('H2'));
+    expect(refusal('J2').error).toContain('regístralo primero en Configuración > Tipos de soporte');
+    expect(refusal('K2')).toEqual(refusal('J2'));
     // A status and a priority are not registered anywhere: the message names the ones there are.
     expect(refusal('E2').error).toBe('Elige Pendiente, Resuelto, Sin resolver. Vacío se toma como Pendiente.');
     expect(refusal('F2').error).toBe('Elige Baja, Media, Alta, Crítica. Vacía: el caso queda sin prioridad.');
     // Excel cuts a longer title or message, or reports the file as damaged.
-    for (const cell of ['A2', 'B2', 'C2', 'E2', 'F2', 'G2', 'H2', 'I2', 'J2']) {
+    for (const cell of ['A2', 'B2', 'C2', 'E2', 'F2', 'G2', 'H2', 'I2', 'J2', 'K2']) {
       expect(refusal(cell).errorTitle?.length).toBeLessThanOrEqual(RULE_TITLE_MAX);
       expect(refusal(cell).error?.length).toBeLessThanOrEqual(RULE_MESSAGE_MAX);
     }
@@ -220,7 +248,7 @@ describe('import template', () => {
     const sheet = buildTemplate({ companies: ['ACME'], modules: ['Ventas'], assignees: ['Ana'], supportTypes: ['Capacitación'] }).worksheets[0];
     const rules = (sheet as unknown as { dataValidations: { model: Record<string, unknown> } }).dataValidations.model;
 
-    expect(Object.keys(rules).sort()).toEqual(['A', 'B', 'C', 'E', 'F', 'G', 'H', 'I', 'J'].map((column) => `${column}2:${column}${TEMPLATE_ROWS + 1}`));
+    expect(Object.keys(rules).sort()).toEqual(['A', 'B', 'C', 'E', 'F', 'G', 'H', 'I', 'J', 'K'].map((column) => `${column}2:${column}${TEMPLATE_ROWS + 1}`));
   });
 
   // There are no cells to point a list at. The column is left open: the import is what rejects.
@@ -230,7 +258,7 @@ describe('import template', () => {
     const [sheet, lists, guide] = (await open(file)).worksheets;
     const note = (cell: string): string => JSON.stringify(sheet.getCell(cell).note);
 
-    for (const cell of ['C2', 'G2', 'H2', 'I2', 'J2']) expect(sheet.getCell(cell).dataValidation).toBeUndefined();
+    for (const cell of ['C2', 'G2', 'H2', 'I2', 'J2', 'K2']) expect(sheet.getCell(cell).dataValidation).toBeUndefined();
     // The lists that do not come from a catalog are always there.
     expect(sheet.getCell('E2').dataValidation).toMatchObject({ type: 'list' });
     expect(sheet.getCell('F2').dataValidation).toMatchObject({ type: 'list' });
@@ -239,10 +267,11 @@ describe('import template', () => {
     expect(note('C1')).toContain('Obligatoria. Empresa que reporta el caso. Todavía no hay empresas registradas en Configuración > Empresas.');
     expect(note('G1')).toContain('Todavía no hay módulos registrados en Configuración > Módulos.');
     expect(note('H1')).toContain('Todavía no hay responsables registrados en Configuración > Responsables.');
-    expect(note('I1')).toContain('Todavía no hay tipos de soporte registrados en Configuración > Tipos de soporte.');
+    expect(note('I1')).toContain('Todavía no hay responsables registrados en Configuración > Responsables.');
     expect(note('J1')).toContain('Todavía no hay tipos de soporte registrados en Configuración > Tipos de soporte.');
+    expect(note('K1')).toContain('Todavía no hay tipos de soporte registrados en Configuración > Tipos de soporte.');
     // No list to choose from: the help does not send the person to one.
-    for (const cell of ['C1', 'G1', 'H1', 'I1', 'J1']) expect(note(cell)).not.toContain('Se elige de la lista');
+    for (const cell of ['C1', 'G1', 'H1', 'I1', 'J1', 'K1']) expect(note(cell)).not.toContain('Se elige de la lista');
     expect(note('E1')).not.toContain('Todavía no hay');
     expect(JSON.stringify(guide.getSheetValues())).toContain('Todavía no hay empresas registradas en Configuración > Empresas.');
 
@@ -257,7 +286,8 @@ describe('import template', () => {
     expect(note('C1')).toContain('Obligatoria. Empresa que reporta el caso. Se elige de la lista: las empresas registradas en Configuración > Empresas.');
     expect(note('G1')).toContain('Vacío: sin módulo. Se elige de la lista: los módulos registrados en Configuración > Módulos.');
     expect(note('H1')).toContain('Vacío: sin asignar. Se elige de la lista: los responsables registrados en Configuración > Responsables.');
-    expect(note('J1')).toContain('Se elige de la lista: los tipos de soporte registrados en Configuración > Tipos de soporte.');
+    expect(note('I1')).toContain('Un segundo responsable, para el caso que tiene más de uno. Se elige de la lista: los responsables registrados en Configuración > Responsables.');
+    expect(note('K1')).toContain('Se elige de la lista: los tipos de soporte registrados en Configuración > Tipos de soporte.');
     expect(JSON.stringify(sheet.getRow(1).values)).not.toContain('Todavía no hay');
     expect(JSON.stringify(guide.getSheetValues())).not.toContain('Todavía no hay');
   });
@@ -293,5 +323,8 @@ describe('import template', () => {
     expect(guideText).toContain('una prioridad o un estado que no existe en el sistema se rechaza');
     expect(guideText).toContain('los módulos, las prioridades y los estados, no.');
     expect(guideText).toContain('Valores del sistema');
+    // A case with several responsibles or types: the second columns, or several to a cell.
+    expect(guideText).toContain('usa las columnas \\"Otro responsable\\" y \\"Otro tipo de soporte\\"');
+    expect(guideText).toContain('separados por comas o punto y coma');
   });
 });

@@ -514,6 +514,19 @@
   @apply rounded-l-full pl-2;
 }
 
+/*
+ * The box to type in after the chips of a multiple select is a target too: 24 px a side at least
+ * (WCAG 2.5.8). With the chips of the responsibles filling a half-width field, the library left it a
+ * few pixels wide at the end of their line; now it goes to a line of its own instead.
+ */
+.ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-input {
+  @apply min-w-6;
+}
+
+.ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-input > input {
+  @apply min-h-6;
+}
+
 /* Out of the flow (the library places it so): kept off the arrow. */
 .ng-select.ng-select-multiple .ng-select-container .ng-value-container .ng-placeholder {
   @apply max-w-[calc(100%-2.75rem)] pl-1;

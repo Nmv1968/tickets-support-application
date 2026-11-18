@@ -103,9 +103,9 @@ import { MISSING_COMPANY, MISSING_DESCRIPTION, futureDate } from './ticket-form'
         <app-status-select inputId="nt-status" [(value)]="status" />
       </div>
       <div class="xl:col-span-2">
-        <label class="label" for="nt-assignee">Responsable</label>
+        <label class="label" for="nt-assignee">Responsables</label>
         <!-- Empty unless someone is chosen: registering a case makes nobody its responsible. -->
-        <app-assignee-select inputId="nt-assignee" [items]="catalogs.activeAssignees()" [(value)]="assigneeId" />
+        <app-assignee-select inputId="nt-assignee" multiple [items]="catalogs.activeAssignees()" [(value)]="assigneeIds" />
       </div>
       <div class="xl:col-span-2">
         <label class="label" for="nt-priority">Prioridad</label>
@@ -156,8 +156,8 @@ export class NewTicketForm {
   protected readonly companyId = signal<number | null>(null);
   protected readonly description = signal('');
   protected readonly status = signal<TicketStatus>('PENDING');
-  /** Null: the new case has no responsible. Nobody is one by registering it. */
-  protected readonly assigneeId = signal<number | null>(null);
+  /** Empty: the new case has no responsible. Nobody is one by registering it. */
+  protected readonly assigneeIds = signal<number[]>([]);
   /** Null: the case has no priority, and so no deadline. */
   protected readonly priority = signal<Priority | null>(null);
   protected readonly moduleId = signal<number | null>(null);
@@ -199,6 +199,7 @@ export class NewTicketForm {
       this.focusFirstProblem();
       return;
     }
+    const people = this.assigneeIds();
     const types = this.supportTypeIds();
     this.saving.set(true);
     try {
@@ -209,7 +210,7 @@ export class NewTicketForm {
         companyId,
         description,
         status: this.status(),
-        assigneeId: this.assigneeId(),
+        assigneeIds: people.length ? people : undefined,
         priority: this.priority() ?? undefined,
         moduleId: this.moduleId() ?? undefined,
         supportTypeIds: types.length ? types : undefined,
@@ -236,8 +237,8 @@ export class NewTicketForm {
 
   /**
    * Leaves the form ready for another case. What belongs to the one just registered is emptied.
-   * The date and the responsible stay: cases typed in a row are often of the same day, and
-   * taken by the same person.
+   * The date and the responsibles stay: cases typed in a row are often of the same day, and
+   * taken by the same people.
    */
   private startNext(): void {
     this.date.update((date) => date || todayIso());

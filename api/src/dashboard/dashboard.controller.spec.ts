@@ -25,7 +25,7 @@ describe('dashboard', () => {
     estimatedMinutes: null,
     spentMinutes: 0,
     company: { name: 'ACME' },
-    assignee: null,
+    assignees: [],
     module: null,
     supportTypes: [],
     createdBy: null,
@@ -71,17 +71,20 @@ describe('dashboard', () => {
 
   // "Cliente" is a responsible of the catalog like the others: nothing in a case marks it apart.
   it('counts the cases of each responsible, and the ones nobody is responsible for under "Sin asignar"', async () => {
-    const tickets = [...cases(2, { assignee: { name: 'Ana Torres' } }), ...cases(1, { assignee: { name: 'Cliente' }, status: 'RESOLVED' }), ...cases(3, {})];
+    const ana = { assignee: { name: 'Ana Torres' } };
+    const client = { assignee: { name: 'Cliente' } };
+    // The resolved case has both: it counts for each of them, as a case with two support types.
+    const tickets = [...cases(2, { assignees: [ana] }), ...cases(1, { assignees: [client, ana], status: 'RESOLVED' }), ...cases(3, {})];
     const { db, controller } = setup(tickets);
 
     const { byAssignee } = await controller.get();
 
     expect(byAssignee).toEqual([
+      { name: 'Ana Torres', unresolved: 0, pending: 2, resolved: 1, total: 3 },
       { name: 'Sin asignar', unresolved: 0, pending: 3, resolved: 0, total: 3 },
-      { name: 'Ana Torres', unresolved: 0, pending: 2, resolved: 0, total: 2 },
       { name: 'Cliente', unresolved: 0, pending: 0, resolved: 1, total: 1 },
     ]);
-    expect(asked(db).select.assignee).toEqual({ select: { name: true } });
+    expect(asked(db).select.assignees).toEqual({ select: { assignee: { select: { name: true } } } });
   });
 
   it('counts the cases of each support type with its colour: a case with two in both, and the ones without any as "Sin tipo"', async () => {

@@ -5,7 +5,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Say } from '../../core/announcer';
 import { Api } from '../../core/api';
-import type { TicketDetail, TicketInput, TicketSupportType } from '../../core/api';
+import type { TicketAssignee, TicketDetail, TicketInput, TicketSupportType } from '../../core/api';
 import { AssigneeSelect, CompanySelect, ModuleSelect, PrioritySelect, StatusSelect, SupportTypeSelect } from '../../core/case-selects';
 import { Catalogs, offered } from '../../core/catalogs';
 import { Confirm } from '../../core/confirm';
@@ -215,8 +215,8 @@ import { TicketTimes } from './ticket-times';
                 <app-status-select inputId="tp-status" [value]="d.status" (valueChange)="set('status', $event)" />
               </div>
               <div>
-                <label class="label" for="tp-assignee">Responsable</label>
-                <app-assignee-select inputId="tp-assignee" [items]="assigneeOptions()" [value]="d.assigneeId" (valueChange)="set('assigneeId', $event)" />
+                <label class="label" for="tp-assignee">Responsables</label>
+                <app-assignee-select inputId="tp-assignee" multiple [items]="assigneeOptions()" [value]="d.assigneeIds" (valueChange)="set('assigneeIds', $event)" />
               </div>
               <div>
                 <label class="label" for="tp-priority">Prioridad</label>
@@ -459,10 +459,7 @@ export class TicketPanel {
     const ticket = this.stored();
     return offered<{ id: number; name: string }>(this.catalogs.companies(), ticket ? [{ id: ticket.companyId, name: ticket.company }] : []);
   });
-  protected readonly assigneeOptions = computed(() => {
-    const ticket = this.stored();
-    return offered<{ id: number; name: string }>(this.catalogs.assignees(), ticket?.assigneeId ? [{ id: ticket.assigneeId, name: ticket.assigneeName ?? '' }] : []);
-  });
+  protected readonly assigneeOptions = computed(() => offered<TicketAssignee>(this.catalogs.assignees(), this.stored()?.assignees ?? []));
   protected readonly moduleOptions = computed(() => {
     const ticket = this.stored();
     return offered<{ id: number; fullName: string }>(this.catalogs.modules(), ticket?.moduleId ? [{ id: ticket.moduleId, fullName: ticket.moduleName ?? '' }] : []);

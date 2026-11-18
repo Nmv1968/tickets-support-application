@@ -12,7 +12,7 @@ import {
   formatMomentEs,
   moduleFullName,
   parseDateOnly,
-  supportTypesText,
+  namesText,
   ticketCode,
 } from '../common/labels';
 import { PDF_COLOR, PDF_HEADER_CELL, PDF_STATUS_COLOR, pdfFrame, pdfSafe } from '../common/pdf';
@@ -32,7 +32,7 @@ export const summarySelect = {
   estimatedMinutes: true,
   spentMinutes: true,
   company: { select: { name: true } },
-  assignee: { select: { name: true } },
+  assignees: { select: { assignee: { select: { name: true } } } },
   // The full name, as the case shows it everywhere else: two submodules can share their own name.
   module: { select: { name: true, parent: { select: { name: true } } } },
   supportTypes: { select: { supportType: { select: { name: true, color: true } } } },
@@ -70,7 +70,10 @@ export interface Summary {
   /** Sums over cases that have an estimate. */
   estimatedMinutes: number;
   spentMinutes: number;
-  /** Most cases first. The cases nobody is responsible for go under "Sin asignar". */
+  /**
+   * Most cases first. A case with two responsibles counts for both, as a case with two support
+   * types does. The cases nobody is responsible for go under "Sin asignar".
+   */
   byAssignee: StatusCount[];
   /** Every company with a case, most cases first. */
   byCompany: StatusCount[];
@@ -84,6 +87,9 @@ export interface Summary {
   /** Every month with a case, oldest first. */
   monthly: { month: string; total: number; resolved: number; open: number }[];
 }
+
+/** How the numbers name the cases nobody is responsible for. No responsible can be called so (`meansNobody`). */
+const NOBODY = 'Sin asignar';
 
 const STATUS_KEY = { UNRESOLVED: 'unresolved', PENDING: 'pending', RESOLVED: 'resolved' } as const satisfies Record<TicketStatus, string>;
 
@@ -125,10 +131,8 @@ export function summarize(rows: SummaryRow[], now: Date): Summary {
     const resolved = t.status === 'RESOLVED';
     totals[statusKey]++;
 
-    for (const [counts, name] of [
-      [assignees, t.assignee?.name ?? 'Sin asignar'],
-      [companies, t.company.name],
-    ] as const) {
+    const people = t.assignees.length ? t.assignees.map((link) => link.assignee.name) : [NOBODY];
+    for (const [counts, name] of [...people.map((person) => [assignees, person] as const), [companies, t.company.name] as const]) {
       const entry = counts.get(name) ?? { name, unresolved: 0, pending: 0, resolved: 0, total: 0 };
       entry[statusKey]++;
       entry.total++;
@@ -232,10 +236,10 @@ const DATA_COLUMNS: { name: string; width: number; numFmt?: string; value: (t: R
   { name: 'Empresa', width: 28, value: (t) => t.company.name },
   { name: 'Descripción', width: 60, value: (t) => t.description },
   { name: 'Estado', width: 14, value: (t) => STATUS_LABEL[t.status] },
-  { name: 'Responsable', width: 20, value: (t) => t.assignee?.name ?? null },
+  { name: 'Responsables', width: 24, value: (t) => namesText(t.assignees.map((link) => link.assignee)) || null },
   { name: 'Prioridad', width: 11, value: (t) => (t.priority ? PRIORITY_LABEL[t.priority] : null) },
   { name: 'Módulo', width: 26, value: (t) => (t.module ? moduleFullName(t.module) : null) },
-  { name: 'Tipos de soporte', width: 28, value: (t) => supportTypesText(t.supportTypes.map((link) => link.supportType)) || null },
+  { name: 'Tipos de soporte', width: 28, value: (t) => namesText(t.supportTypes.map((link) => link.supportType)) || null },
   { name: 'Minutos estimados', width: 18, value: (t) => t.estimatedMinutes },
   { name: 'Minutos reales', width: 15, value: (t) => t.spentMinutes || null },
   { name: 'Fecha límite', width: 17, numFmt: EXCEL_FORMAT.moment, value: (t) => excelMoment(t.dueAt) },

@@ -1,6 +1,8 @@
+import { BadRequestException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ASSIGNEES } from '../assignees/assignees.service';
+import { validationPipe } from '../common/validation';
 import { COMPANIES } from '../companies/companies.service';
 import { SUPPORT_TYPES } from '../support-types/support-types.service';
 import { MISSING_ENTRY, TicketInput } from './ticket-input';
@@ -51,11 +53,11 @@ describe('ticket input limits', () => {
     // Beyond 2147483647 the database cannot even hold the number.
     for (const id of [0, -1, 2_147_483_648, 99_999_999_999]) {
       expect(await errors({ companyId: id })).toEqual(['La empresa no existe']);
-      expect(await errors({ assigneeId: id })).toEqual(['El responsable no existe']);
+      expect(await errors({ assigneeIds: [1, id] })).toEqual(['El responsable no existe']);
       expect(await errors({ moduleId: id })).toEqual(['El módulo no existe']);
       expect(await errors({ supportTypeIds: [1, id] })).toEqual(['El tipo de soporte no existe']);
     }
-    expect(await errors({ companyId: 1, assigneeId: 1, moduleId: 2_147_483_647, supportTypeIds: [1, 2_147_483_647] })).toEqual([]);
+    expect(await errors({ companyId: 1, assigneeIds: [1, 2_147_483_647], moduleId: 2_147_483_647, supportTypeIds: [1, 2_147_483_647] })).toEqual([]);
   });
 
   // Out of range here, or not found by the service: either way the entry is not in its catalog,
@@ -76,7 +78,35 @@ describe('ticket input limits', () => {
   });
 
   it('still accepts null where it removes the value', async () => {
-    expect(await errors({ assigneeId: null, moduleId: null, priority: null, estimatedMinutes: null, promisedDate: null, customerReply: null })).toEqual([]);
+    expect(await errors({ moduleId: null, priority: null, estimatedMinutes: null, promisedDate: null, customerReply: null })).toEqual([]);
+  });
+});
+
+describe('ticket input responsibles', () => {
+  const ids = (count: number): number[] => Array.from({ length: count }, (_, index) => index + 1);
+
+  it('accepts a list of ids of the catalog: empty, with one repeated, or with up to 20', async () => {
+    for (const assigneeIds of [[], [3], [3, 1, 3], ids(20)]) expect(await errors({ assigneeIds })).toEqual([]);
+  });
+
+  it('says in Spanish that a case cannot have more than 20', async () => {
+    expect(await errors({ assigneeIds: ids(21) })).toEqual(['Un caso no puede tener más de 20 responsables']);
+  });
+
+  it('refuses what is not a list of whole numbers', async () => {
+    for (const assigneeIds of [3, '3', { id: 3 }, [1.5], ['3'], [null], ['Ana']]) {
+      expect(await errors({ assigneeIds })).not.toEqual([]);
+    }
+  });
+
+  // The one responsible a case used to have. A client that still sends it is told so, in Spanish,
+  // by the pipe every request goes through.
+  it('no longer takes a single assigneeId', async () => {
+    const refusal: unknown = await validationPipe()
+      .transform({ assigneeId: 3 }, { type: 'body', metatype: TicketInput })
+      .catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(BadRequestException);
+    expect((refusal as BadRequestException).getResponse()).toMatchObject({ message: ['El campo «assigneeId» no se admite'] });
   });
 });
 

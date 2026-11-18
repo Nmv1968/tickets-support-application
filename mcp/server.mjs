@@ -190,22 +190,28 @@ async function moduleId(name) {
   );
 }
 
-/**
- * "ninguno", "sin asignar" or empty → nobody (null); otherwise the id of the responsible of the
- * catalog called `name`, or of the only one whose name starts with it. `reading` is for a filter:
- * it takes an inactive responsible too, because their cases are still there to be found.
- */
-async function assigneeId(name, { reading = false } = {}) {
+/** "ninguno", "sin asignar" or empty: a name that means nobody, not a person to look for. */
+function meansNobody(name) {
   const wanted = key(name);
-  if (!wanted || wanted === 'ninguno' || wanted === 'sin asignar') return null;
-  const everyone = await api('GET', 'assignees');
-  const people = everyone.filter((person) => person.active || reading);
+  return !wanted || wanted === 'ninguno' || wanted === 'sin asignar';
+}
+
+/**
+ * The id of the responsible of `everyone` (the whole catalog) called `name`, or of the only one
+ * whose name starts with it. Two situations take an inactive responsible too, as with a support
+ * type. `carried`, the responsibles the case already has: sending its list again must not take one
+ * off. And `reading`, for a filter: their cases are still there to be found.
+ */
+function findAssignee(everyone, name, { reading = false, carried = [] } = {}) {
+  const wanted = key(name);
+  const offered = everyone.filter((person) => person.active || reading);
+  const people = everyone.filter((person) => person.active || reading || carried.some((own) => own.id === person.id));
   const exact = people.filter((person) => key(person.name) === wanted);
   const matches = exact.length ? exact : people.filter((person) => key(person.name).startsWith(wanted));
   if (matches.length === 1) return matches[0].id;
 
   // As with a module: the choice is put to the person, never made here.
-  const list = people.length ? `Responsables existentes: ${people.map((person) => person.name).join(', ')}.` : 'Todavía no hay responsables en la lista.';
+  const list = offered.length ? `Responsables existentes: ${offered.map((person) => person.name).join(', ')}.` : 'Todavía no hay responsables en la lista.';
   if (matches.length > 1) {
     throw new Error(`Hay varios responsables que coinciden con "${name}": ${matches.map((person) => person.name).join(', ')}. Pregunta a la persona cuál es.`);
   }
@@ -223,6 +229,36 @@ async function assigneeId(name, { reading = false } = {}) {
     `No existe el responsable "${name}". No lo agregues ni elijas otro por tu cuenta: pregunta a la persona si quiere que lo agregues ` +
       `a la lista (herramienta crear_responsable), asignar el caso a uno de los existentes o dejarlo sin asignar. ${list}`,
   );
+}
+
+/** For a filter: nobody (null) for the words that mean it, otherwise the id of the responsible called `name` (see findAssignee). */
+async function assigneeId(name, { reading = false } = {}) {
+  if (meansNobody(name)) return null;
+  return findAssignee(await api('GET', 'assignees'), name, { reading });
+}
+
+/**
+ * The ids of the responsibles called `names`, each once (see findAssignee). The words that mean
+ * nobody add no one: an empty list, or only those words, leaves the case without responsibles.
+ */
+async function assigneeIds(names, { carried = [] } = {}) {
+  const wanted = names.filter((name) => !meansNobody(name));
+  if (!wanted.length) return [];
+  const everyone = await api('GET', 'assignees');
+  return [...new Set(wanted.map((name) => findAssignee(everyone, name, { carried })))];
+}
+
+/**
+ * The names of the responsibles a tool was given: `responsables`, the list, or `responsable`, the
+ * one name the tools took before a case could have several ("ninguno" for nobody), which an
+ * assistant may still send. Undefined when it sent neither.
+ */
+function responsibleNames(args) {
+  if (args.responsables !== undefined && args.responsable !== undefined) {
+    throw new Error('Envía los responsables solo en `responsables`, la lista completa; `responsable` es para un solo nombre y no se combina con ella.');
+  }
+  if (args.responsables !== undefined) return args.responsables;
+  return args.responsable !== undefined ? [args.responsable] : undefined;
 }
 
 /** The words of a name that tell it from another one: "de", "la" or the letters of "S.A." are in too many. */
@@ -322,7 +358,8 @@ function brief(t) {
     empresa: t.company,
     descripcion: t.description,
     estado: STATUS_LABEL[t.status],
-    responsable: t.assigneeName ?? 'Sin asignar',
+    // By name, as the support types. Empty for a case nobody is responsible for.
+    responsables: t.assignees.map((person) => person.name),
     prioridad: t.priority ? PRIORITY_LABEL[t.priority] : null,
     modulo: t.moduleName,
     tipos_soporte: t.supportTypes.map((type) => type.name),
@@ -590,7 +627,7 @@ tool(
     texto: z.string().optional().describe('Palabras de la empresa, la descripción o una observación'),
     estado: estado.optional(),
     empresa: z.string().optional().describe('Nombre exacto de una empresa del catálogo: solo sus casos. Para buscar por una parte del nombre usa `texto`'),
-    responsable: z.string().optional().describe('Nombre de un responsable, o "ninguno" para los casos sin asignar'),
+    responsable: z.string().optional().describe('Nombre de un responsable: los casos que tiene, solo o con otros. "ninguno" para los casos sin asignar'),
     tipo_soporte: z.string().optional().describe('Nombre de un tipo de soporte del catálogo: solo los casos que lo llevan'),
     desde: fecha.optional().describe('Fecha del caso desde, AAAA-MM-DD'),
     hasta: fecha.optional().describe('Fecha del caso hasta, AAAA-MM-DD'),
@@ -649,7 +686,12 @@ tool(
     modulo: z.string().optional().describe('Nombre de un módulo de listar_catalogos. Si la persona nombra uno que no existe, pregúntale antes de crearlo'),
     minutos_estimados: z.number().int().min(1).max(100000).optional(),
     promesa_entrega: fecha.optional().describe('Día en que se le prometió al cliente tener el caso resuelto, AAAA-MM-DD. Solo si la persona lo indicó; no la propongas tú'),
-    responsable: z.string().optional().describe('Nombre de un responsable de listar_catalogos. Sin este dato el caso queda sin asignar. Si la persona nombra a alguien que no está en la lista, pregúntale antes de agregarlo'),
+    responsables: z
+      .array(z.string())
+      .max(20)
+      .optional()
+      .describe('Nombres de responsables de listar_catalogos: quienes van a atender el caso, uno o varios. Sin este dato el caso queda sin asignar. Si la persona nombra a alguien que no está en la lista, pregúntale antes de agregarlo'),
+    responsable: z.string().optional().describe('Un solo responsable, como `responsables` con un nombre. Queda por compatibilidad: usa `responsables`'),
     tipos_soporte: z.array(z.string()).max(20).optional().describe('Nombres de tipos de soporte de listar_catalogos. Solo los que la persona indicó o confirmó: no los elijas tú. Sin este dato el caso queda sin tipo'),
     observacion: z.string().max(5000).optional().describe('Datos útiles de la evidencia: mensaje de error, pantalla, documento, usuario'),
     imagenes: z
@@ -671,7 +713,7 @@ tool(
         estimatedMinutes: args.minutos_estimados ?? null,
         promisedDate: args.promesa_entrega ?? null,
         // Without an explicit responsible the case stays unassigned: the assistant does not own cases.
-        assigneeId: await assigneeId(args.responsable),
+        assigneeIds: await assigneeIds(responsibleNames(args) ?? []),
         supportTypeIds: await supportTypeIds(args.tipos_soporte ?? []),
         note: args.observacion,
         aiGenerated: true,
@@ -698,7 +740,15 @@ tool(
     estado: estado.optional(),
     prioridad: prioridad.nullable().optional().describe('null quita la prioridad'),
     modulo: z.string().optional().describe('Nombre de un módulo. Cadena vacía quita el módulo'),
-    responsable: z.string().optional().describe('Nombre de un responsable, o "ninguno" para dejar el caso sin asignar'),
+    responsables: z
+      .array(z.string())
+      .max(20)
+      .optional()
+      .describe('Lista completa de los responsables del caso, con nombres de listar_catalogos: reemplaza la que tenía. Para agregar uno, envía también los que ya tiene (ver_caso los muestra). Lista vacía deja el caso sin asignar'),
+    responsable: z
+      .string()
+      .optional()
+      .describe('Un solo responsable, que reemplaza a los que tenga el caso, o "ninguno" para dejarlo sin asignar. Queda por compatibilidad: usa `responsables`'),
     tipos_soporte: z
       .array(z.string())
       .max(20)
@@ -723,12 +773,13 @@ tool(
     if (args.estado !== undefined) body.status = STATUS[args.estado];
     if (args.prioridad !== undefined) body.priority = args.prioridad ? PRIORITY[args.prioridad] : null;
     if (args.modulo !== undefined) body.moduleId = await moduleId(args.modulo);
-    if (args.responsable !== undefined) body.assigneeId = await assigneeId(args.responsable);
-    if (args.tipos_soporte !== undefined) {
-      // The list replaces the one the case has, so an inactive type the case already carries is allowed to stay in it.
-      const current = await api('GET', `tickets/${id}`);
-      body.supportTypeIds = await supportTypeIds(args.tipos_soporte, { carried: current.supportTypes });
-    }
+    // The lists replace the ones the case has, so an inactive responsible or type the case already
+    // has is allowed to stay in them. The case is read once, for either.
+    let current;
+    const stored = async () => (current ??= await api('GET', `tickets/${id}`));
+    const people = responsibleNames(args);
+    if (people !== undefined) body.assigneeIds = await assigneeIds(people, { carried: (await stored()).assignees });
+    if (args.tipos_soporte !== undefined) body.supportTypeIds = await supportTypeIds(args.tipos_soporte, { carried: (await stored()).supportTypes });
     if (args.empresa !== undefined) body.companyId = await companyId(args.empresa);
     if (args.descripcion !== undefined) body.description = args.descripcion;
     if (args.fecha_caso !== undefined) body.date = args.fecha_caso;

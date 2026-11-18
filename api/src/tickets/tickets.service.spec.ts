@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { ADMIN_USER, day } from '../common/testing';
 import type { PrismaService } from '../prisma.service';
 import type { SettingsService } from '../settings/settings.service';
-import { FAILURE, NOW, TODAY, TRAINING, USER_ERROR, carrying, stored } from './testing';
+import { ANA, CLIENT, FAILURE, LUIS, NOW, TODAY, TRAINING, USER_ERROR, assignedTo, carrying, stored } from './testing';
 import type { TicketFilters } from './ticket-filters';
 import { TicketInput } from './ticket-input';
 import type { StoredTicket } from './ticket-mappers';
@@ -53,9 +53,11 @@ describe('TicketsService', () => {
     },
     ticketNote: { create: jest.fn().mockResolvedValue({}), deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
     ticketHistory: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
-    // The catalogs: the companies 2 and 5, any responsible, and the three support types above.
+    // The catalogs: the companies 2 and 5, the three responsibles and the three support types of testing.ts.
     company: { findUnique: jest.fn(({ where }: { where: { id: number } }) => Promise.resolve(where.id in COMPANY_NAMES ? { name: COMPANY_NAMES[where.id] } : null)) },
-    assignee: { findUnique: jest.fn().mockResolvedValue({ name: 'Luis' }) },
+    assignee: {
+      findMany: jest.fn(({ where }: { where: { id: { in: number[] } } }) => Promise.resolve([LUIS, ANA, CLIENT].filter((person) => where.id.in.includes(person.id)))),
+    },
     supportType: {
       findMany: jest.fn(({ where }: { where: { id: { in: number[] } } }) =>
         Promise.resolve([FAILURE, TRAINING, USER_ERROR].filter((type) => where.id.in.includes(type.id)).map(({ id, name }) => ({ id, name }))),
@@ -103,11 +105,11 @@ describe('TicketsService', () => {
       expect(db.ticket.count).toHaveBeenLastCalledWith({ where: {} });
     });
 
-    it('shows each case with its company, its responsible, its support types by name and whether it is archived', async () => {
+    it('shows each case with its company, its responsibles and its support types by name, and whether it is archived', async () => {
       const archivedAt = new Date('2026-11-05T12:00:00.000Z');
       const rows = [
-        row({ id: 1, supportTypes: carrying(FAILURE, USER_ERROR, TRAINING), createdById: 4 }),
-        row({ id: 2, companyId: 5, company: { id: 5, name: 'Corporación Ñandú' }, assigneeId: null, assignee: null, archivedAt, createdById: null }),
+        row({ id: 1, assignees: assignedTo(LUIS, ANA), supportTypes: carrying(FAILURE, USER_ERROR, TRAINING), createdById: 4 }),
+        row({ id: 2, companyId: 5, company: { id: 5, name: 'Corporación Ñandú' }, assignees: [], archivedAt, createdById: null }),
       ];
 
       const { items } = await serviceOn(listDb(rows)).list({ archived: 'all' });
@@ -116,15 +118,17 @@ describe('TicketsService', () => {
         code: 'SOP-00001',
         companyId: 2,
         company: 'ACME',
-        assigneeId: 3,
-        assigneeName: 'Ana',
+        assignees: [ANA, LUIS],
         supportTypes: [TRAINING, USER_ERROR, FAILURE],
         archivedAt: null,
         createdById: 4,
       });
-      expect(items[1]).toMatchObject({ companyId: 5, company: 'Corporación Ñandú', assigneeId: null, assigneeName: null, supportTypes: [], archivedAt, createdById: null });
-      // The responsible is a person of the catalog or nobody: the client is no longer a switch of the case.
+      expect(items[1]).toMatchObject({ companyId: 5, company: 'Corporación Ñandú', assignees: [], supportTypes: [], archivedAt, createdById: null });
+      // The responsibles are people of the catalog or nobody: the client is no longer a switch of the case.
       expect(items[0]).not.toHaveProperty('assignedToClient');
+      // The one responsible a case used to have is not answered any more.
+      expect(items[0]).not.toHaveProperty('assigneeId');
+      expect(items[0]).not.toHaveProperty('assigneeName');
     });
 
     it('answers the first 50 cases when no page is asked for', async () => {
@@ -392,7 +396,7 @@ describe('TicketsService', () => {
               searchText: 'acme no abre',
               status: 'PENDING',
               spentMinutes: 0,
-              assigneeId: null,
+              assignees: undefined,
               supportTypes: undefined,
               archivedAt: null,
               aiGenerated: false,
@@ -418,22 +422,24 @@ describe('TicketsService', () => {
 
     // Whoever registers a case used to take it. Users are not responsibles any more: id 1 only registers it.
     it('leaves the case without a responsible unless one is chosen', async () => {
-      expect(await created(caseDb(), {})).toMatchObject({ assigneeId: null, createdById: 1 });
-      expect(await created(caseDb(), { assigneeId: null })).toMatchObject({ assigneeId: null });
+      const none = caseDb();
+      expect(await created(none, {})).toMatchObject({ assignees: undefined, createdById: 1 });
+      expect((await created(caseDb(), { assigneeIds: [] })).assignees).toBeUndefined();
+      // Nothing to look up in the catalog.
+      expect(none.assignee.findMany).not.toHaveBeenCalled();
     });
 
-    it('gives the case to the responsible chosen', async () => {
+    it('gives the case the responsibles chosen, each once however many times its id is sent', async () => {
       const db = caseDb();
 
-      expect(await created(db, { assigneeId: 9 })).toMatchObject({ assigneeId: 9 });
-      expect(db.assignee.findUnique).toHaveBeenCalledWith({ where: { id: 9 }, select: { name: true } });
+      expect(await created(db, { assigneeIds: [5, 3, 5] })).toMatchObject({ assignees: { create: [{ assigneeId: 5 }, { assigneeId: 3 }] } });
+      expect(db.assignee.findMany).toHaveBeenCalledWith({ where: { id: { in: [5, 3] } }, select: { id: true, name: true } });
     });
 
-    it('refuses a responsible that is not in the catalog', async () => {
+    it('refuses a responsible that is not in the catalog, and registers nothing', async () => {
       const db = caseDb();
-      db.assignee.findUnique.mockResolvedValue(null);
 
-      await expect(serviceOn(db).create({ companyId: 2, description: 'No abre', assigneeId: 9 }, user)).rejects.toThrow('El responsable no existe');
+      await expect(serviceOn(db).create({ companyId: 2, description: 'No abre', assigneeIds: [3, 9] }, user)).rejects.toThrow('El responsable no existe');
       expect(db.ticket.create).not.toHaveBeenCalled();
     });
 
@@ -514,17 +520,43 @@ describe('TicketsService', () => {
     it('writes the edit and its history lines together, signed by who made it', async () => {
       const db = caseDb();
 
-      await serviceOn(db).update(7, { companyId: 5, assigneeId: 9 }, user);
+      await serviceOn(db).update(7, { companyId: 5, assigneeIds: [5] }, user);
 
       expect(db.$transaction).toHaveBeenCalledTimes(1);
       expect(db.ticket.update).toHaveBeenCalledWith({
         where: { id: 7 },
-        data: { lastActivityAt: NOW, companyId: 5, searchText: 'corporacion nandu no abre la factura', assigneeId: 9 },
+        data: {
+          lastActivityAt: NOW,
+          companyId: 5,
+          searchText: 'corporacion nandu no abre la factura',
+          assignees: { deleteMany: { assigneeId: { in: [3] } }, createMany: { data: [{ assigneeId: 5 }] } },
+        },
       });
       expect(written(db).history).toEqual([
         { field: 'Empresa', oldValue: 'ACME', newValue: 'Corporación Ñandú', ticketId: 7, userId: 1 },
-        { field: 'Responsable', oldValue: 'Ana', newValue: 'Luis', ticketId: 7, userId: 1 },
+        { field: 'Responsables', oldValue: 'Ana', newValue: 'Luis', ticketId: 7, userId: 1 },
       ]);
+    });
+
+    it('replaces the responsibles of the case with the ones sent, a repeated id counting once', async () => {
+      const db = caseDb(row({ assignees: assignedTo(ANA, CLIENT) }));
+
+      await serviceOn(db).update(7, { assigneeIds: [5, 3, 5] }, user);
+
+      expect(written(db).data.assignees).toEqual({ deleteMany: { assigneeId: { in: [8] } }, createMany: { data: [{ assigneeId: 5 }] } });
+      expect(written(db).history).toEqual([{ field: 'Responsables', oldValue: 'Ana, Cliente', newValue: 'Ana, Luis', ticketId: 7, userId: 1 }]);
+    });
+
+    it('leaves the case without responsibles with an empty list, and keeps them when the list is not sent', async () => {
+      const emptied = caseDb(row({ assignees: assignedTo(ANA, LUIS) }));
+      await serviceOn(emptied).update(7, { assigneeIds: [] }, user);
+      expect(written(emptied).data.assignees).toEqual({ deleteMany: { assigneeId: { in: [3, 5] } }, createMany: undefined });
+      expect(written(emptied).history).toEqual([{ field: 'Responsables', oldValue: 'Ana, Luis', newValue: null, ticketId: 7, userId: 1 }]);
+
+      const kept = caseDb(row({ assignees: assignedTo(ANA, LUIS) }));
+      await serviceOn(kept).update(7, { status: 'RESOLVED' }, user);
+      expect(written(kept).data).not.toHaveProperty('assignees');
+      expect(kept.assignee.findMany).not.toHaveBeenCalled();
     });
 
     it('replaces the support types of the case with the ones sent, a repeated id counting once', async () => {
@@ -558,6 +590,7 @@ describe('TicketsService', () => {
 
     it.each([
       [{ supportTypeIds: [2, 99] }, 'El tipo de soporte no existe'],
+      [{ assigneeIds: [3, 99] }, 'El responsable no existe'],
       [{ companyId: 99 }, 'La empresa no existe'],
     ])('refuses %j, which is not in the catalog, and writes nothing', async (input, message) => {
       const db = caseDb(row({ supportTypes: carrying(TRAINING) }));

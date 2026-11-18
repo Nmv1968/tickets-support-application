@@ -53,7 +53,7 @@ Se instala en tu propia máquina o servidor con un comando. Tus datos no salen d
 - **Casos en una tabla.** Búsqueda sin distinguir tildes ni mayúsculas, paginación y filtros por
   estado, responsable, empresa, módulo, prioridad, tipo de soporte, fechas y más. **Nuevo caso**
   abre un formulario sobre la tabla para registrar varios seguidos, cada uno con su estado,
-  responsable, prioridad, módulo y tipos de soporte.
+  responsables, prioridad, módulo y tipos de soporte.
 - **Columnas a tu medida.** Cada persona elige qué columnas ve en la tabla. La elección se guarda
   con su usuario: no cambia la vista de nadie más y la sigue a cualquier navegador.
 - **Detalle del caso.** Prioridad, módulo, tipos de soporte, tiempo estimado y real con cronómetro,
@@ -193,6 +193,12 @@ es JSON, que solo deja una edición a mano de la base de datos, se borra: ya se 
 guardada. Si dos adjuntos compartieran el mismo archivo guardado (no debería haber ninguno), el más
 reciente pasa a buscarlo como `dup-<id>-<nombre>`: en la carpeta de adjuntos, copia el archivo
 `<nombre>` con ese nombre nuevo.
+
+Al actualizar desde una versión en la que un caso tenía un solo responsable, la migración
+`20261118090000_ticket_assignees` pasa el responsable de cada caso a la lista de responsables del
+caso, activo o no, y los casos sin responsable quedan sin ninguno. Nada más cambia: los casos, los
+responsables y su historial quedan como estaban. Un asistente conectado por MCP puede seguir
+enviando un solo `responsable`; las respuestas traen ahora `responsables`, una lista.
 
 Al actualizar desde una versión sin roles, todos los usuarios que ya existían quedan como
 administradores, así que nadie pierde lo que podía hacer; el usuario asistente queda como agente.
@@ -652,6 +658,9 @@ Cómo se comporta el asistente:
   veces al mismo cliente.
 - Los tipos de soporte de un caso los decides tú: el asistente puede proponerlos, y solo usa los del
   catálogo.
+- Un caso puede tener varios responsables: el asistente los recibe y los devuelve como una lista
+  (`responsables`), igual que los tipos de soporte (`tipos_soporte`). Si le nombras uno solo,
+  también lo entiende.
 - Adjunta a un caso archivos del disco de la máquina donde corre (`adjuntar_archivos`, o
   `imagenes` al registrar): solo imágenes PNG, JPG, WEBP o GIF, PDF y texto `.txt` de hasta 15 MB,
   con su ruta completa. Nunca un archivo oculto o de una carpeta oculta (`.env`, `.ssh`...), ni
@@ -842,7 +851,8 @@ casos de soporte.
 
 **Casos > Importar** acepta `.xlsx` o `.csv` con una fila de encabezados. Reconoce las columnas
 Fecha, Hora, Empresa, Descripción, Estado, Prioridad, Módulo, Responsable, Tipo de soporte y
-Observación; solo Empresa y Descripción son obligatorias.
+Observación (y las segundas columnas "Otro responsable" y "Otro tipo de soporte"); solo Empresa y
+Descripción son obligatorias.
 
 Para armar la hoja desde cero, el mismo diálogo tiene **Descargar plantilla**: un Excel con esas
 columnas listas para llenar y con los valores de tu sistema, que evita los errores más comunes:
@@ -856,9 +866,10 @@ columnas listas para llenar y con los valores de tu sistema, que evita los error
 - La hoja "Valores del sistema" muestra esas listas completas: empresas, estados, prioridades,
   módulos, responsables y tipos de soporte. Escribir en ella no registra nada: lo que falte se
   registra en **Configuración**, y después se descarga la plantilla otra vez.
-- Para el caso con más de un tipo de soporte hay una segunda columna, "Otro tipo de soporte". En
-  una hoja propia también se pueden escribir varios en la misma celda, separados por coma o punto y
-  coma.
+- Para el caso con más de un responsable o más de un tipo de soporte hay una segunda columna de
+  cada uno, "Otro responsable" y "Otro tipo de soporte". En una hoja propia también se pueden
+  escribir varios en la misma celda, separados por coma o punto y coma, como los escribe la
+  exportación.
 - Cada encabezado tiene una nota con lo que va en la columna, y la hoja "Instrucciones" resume las
   reglas.
 
@@ -868,7 +879,7 @@ Cómo se importa:
   rechazan y por qué, y las primeras filas.
 - Un caso con la misma fecha, empresa y descripción que uno existente se omite, así que importar dos
   veces el mismo archivo no duplica.
-- La empresa, el responsable, los tipos de soporte, el módulo y la prioridad de cada fila se buscan
+- La empresa, los responsables, los tipos de soporte, el módulo y la prioridad de cada fila se buscan
   en el sistema por su nombre, sin distinguir mayúsculas ni tildes, también entre los inactivos. Un
   módulo se escribe con su nombre completo ("Ventas > Facturas") o solo con el suyo ("Facturas") si
   ningún otro se llama igual.
@@ -893,7 +904,7 @@ Cómo se importa:
   ocupan unos 47 MB. Uno más grande se rechaza con el tamaño que tiene, antes de abrirlo; divídelo en
   varios archivos.
 - No se crean usuarios: un responsable es solo un nombre. Una celda de Responsable vacía, o con
-  "Sin asignar", deja el caso sin responsable.
+  "Sin asignar", no le da ninguno al caso; un caso sin ninguno queda sin asignar.
 - La fecha de registro de un caso importado es el momento de la importación. Si la fila trae
   prioridad, la fecha límite de su SLA se cuenta desde ahí.
 - Si las fechas están escritas como texto, elige el orden (mes/día/año o día/mes/año) antes de
@@ -915,8 +926,9 @@ que está en pantalla, con los casos archivados o sin ellos según la casilla **
 - **Excel** (`reporte-soporte-AAAA-MM-DD.xlsx`), para analizar:
   - `Resumen`: el periodo, cuándo se generó, y los totales e indicadores de la pantalla.
   - `Por mes`, `Por responsable`, `Por empresa` (todas, no solo las primeras), `Por módulo`,
-    `Por prioridad` y `Por tipo de soporte`.
-  - `Datos`: una fila por caso (empresa, estado, responsable, prioridad, módulo, tipos de soporte,
+    `Por prioridad` y `Por tipo de soporte`. Un caso con dos responsables, o con dos tipos de
+    soporte, cuenta en cada uno.
+  - `Datos`: una fila por caso (empresa, estado, responsables, prioridad, módulo, tipos de soporte,
     tiempos y fechas), como tabla de Excel con fechas y números de verdad. Es la hoja que se carga
     en una tabla dinámica o en Power BI.
 - **PDF** (`reporte-soporte-AAAA-MM-DD.pdf`), para leer o imprimir: los indicadores y cada desglose
@@ -940,10 +952,13 @@ periodo; nunca entrega un archivo incompleto.
   Al registrar un caso se puede crear la empresa ahí mismo. Una empresa inactiva conserva sus casos
   y deja de ofrecerse para los nuevos; solo se puede eliminar la que no tiene casos.
 - **Estados.** Sin resolver, Pendiente y Resuelto. Un caso nuevo empieza en Pendiente.
-- **Responsable.** Quien atiende el caso: una persona de la lista de responsables, o nadie. La lista
-  es un catálogo de nombres que se administra en **Configuración > Responsables**. Un caso nuevo
-  queda sin responsable hasta que alguien elige uno. Un responsable inactivo conserva sus casos y
-  deja de ofrecerse para los nuevos; solo se puede eliminar a quien no tiene casos.
+- **Responsables.** Quienes atienden el caso: una o varias personas de la lista de responsables, o
+  nadie. La lista es un catálogo de nombres que se administra en **Configuración > Responsables**.
+  Un caso nuevo queda sin responsable hasta que alguien elige uno. Se ven todos en la lista, en el
+  tablero y en el detalle del caso, por nombre y separados por comas. El filtro por responsable
+  encuentra los casos que lo tienen, solo o con otros, y "Sin asignar", los que no tienen ninguno.
+  Un responsable inactivo conserva sus casos y deja de ofrecerse para los nuevos; solo se puede
+  eliminar a quien no tiene casos.
 - **Tipos de soporte.** Etiquetas con nombre y color que dicen qué clase de soporte fue el caso:
   una falla del sistema, una capacitación, un error del usuario… Cada equipo define las suyas en
   **Configuración > Tipos de soporte**, y un caso puede llevar varias o ninguna. Sirven para filtrar

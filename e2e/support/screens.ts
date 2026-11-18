@@ -79,8 +79,9 @@ export async function makeShowcase(api: Api, uid: string): Promise<Showcase> {
     api.createCompany(`Ñu Demo ${uid}`),
     api.createCompany(`Óptica Demo que ya no opera ${uid}`),
   ]);
-  const [assignee, inactiveAssignee] = await Promise.all([
+  const [assignee, secondAssignee, inactiveAssignee] = await Promise.all([
     api.createAssignee(`María de los Ángeles Villavicencio-Quiñónez de la Torre ${uid}`),
+    api.createAssignee(`Ñu Responsable Demo ${uid}`),
     api.createAssignee(`Trinidad Benítez Demo ${uid}`),
   ]);
   // The extremes of a chip: white, black and a pale yellow, a strong colour, and a long name.
@@ -110,7 +111,8 @@ export async function makeShowcase(api: Api, uid: string): Promise<Showcase> {
       date: day,
       status: 'PENDING',
       priority: 'CRITICAL',
-      assigneeId: assignee.id,
+      // Two, the longest first: the chips of the panel, and the names of the list, on more than one line.
+      assigneeIds: [assignee.id, secondAssignee.id],
       moduleId: module.id,
       supportTypeIds: supportTypes.map((type) => type.id),
       promisedDate: dayFrom(0),

@@ -26,7 +26,7 @@ export interface TemplateValues {
 }
 
 interface TemplateColumn {
-  /** Field of the import that reads the column. Both "tipo" columns go to the same one. */
+  /** Field of the import that reads the column. Both "responsable" columns go to the same one, and so do both "tipo" columns. */
   key: ColumnKey;
   header: string;
   width: number;
@@ -56,7 +56,15 @@ export const TEMPLATE_COLUMNS: TemplateColumn[] = [
   { key: 'status', header: 'Estado', width: 16, required: false, list: 'statuses', help: 'Pendiente, Resuelto o Sin resolver. Vacío: Pendiente.' },
   { key: 'priority', header: 'Prioridad', width: 12, required: false, list: 'priorities', help: 'Baja, Media, Alta o Crítica. Vacía: sin prioridad.' },
   { key: 'module', header: 'Módulo', width: 30, required: false, list: 'modules', help: 'Módulo del sistema al que corresponde el caso. Vacío: sin módulo.' },
-  { key: 'assignee', header: 'Responsable', width: 24, required: false, list: 'assignees', help: 'Persona a cargo. Vacío: sin asignar.' },
+  { key: 'assignees', header: 'Responsable', width: 24, required: false, list: 'assignees', help: 'Persona a cargo. Vacío: sin asignar.' },
+  {
+    key: 'assignees',
+    header: 'Otro responsable',
+    width: 24,
+    required: false,
+    list: 'assignees',
+    help: 'Un segundo responsable, para el caso que tiene más de uno.',
+  },
   { key: 'supportTypes', header: 'Tipo de soporte', width: 24, required: false, list: 'supportTypes', help: 'Qué clase de soporte fue. Vacío: sin tipo.' },
   {
     key: 'supportTypes',
@@ -153,6 +161,8 @@ const TEMPLATE_RULES = [
     'Cambiar esa hoja no registra nada: lo que falte se registra en Configuración, y después se descarga la plantilla otra vez.',
   'Una fila con una empresa, un responsable, un tipo de soporte, un módulo, una prioridad o un estado que no existe en el sistema se rechaza: no se importa, y la vista previa dice cuál es y por qué. ' +
     'Al importar se puede pedir que se creen las empresas, los responsables y los tipos de soporte que falten; los módulos, las prioridades y los estados, no.',
+  'Un caso puede tener varios responsables y varios tipos de soporte: usa las columnas "Otro responsable" y "Otro tipo de soporte". ' +
+    'En un archivo propio, o en uno exportado de Casos, una sola celda también puede llevar varios, separados por comas o punto y coma.',
   'Un caso con la misma fecha, empresa y descripción que uno ya registrado se omite, así que importar dos veces el mismo archivo no duplica casos.',
   'La "Fecha" de la plantilla es la fecha del caso. La fecha de registro de cada caso es el momento de la importación.',
   `Las listas y los avisos de las celdas llegan hasta la fila ${TEMPLATE_ROWS + 1}. Puedes seguir más abajo: esas filas se importan igual, sin avisos.`,

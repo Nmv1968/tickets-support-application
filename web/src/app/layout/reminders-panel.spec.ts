@@ -49,7 +49,7 @@ describe('RemindersPanel', () => {
 // Drawn for real, with the stylesheet of the app, with many cases to tell of and names that do not break by themselves.
 describe('RemindersPanel on the screen', () => {
   const cases = Array.from({ length: 6 }, (_, index) =>
-    ticket({ id: index + 1, code: `SOP-0000${index + 1}`, company: 'CorporaciónÑanduríQuíntupleZafiroDeLaSierra'.repeat(3), assigneeName: 'FernandaGisellaVillavicencioQuiñónez', promisedDate: '2026-11-05', promiseState: 'overdue' }),
+    ticket({ id: index + 1, code: `SOP-0000${index + 1}`, company: 'CorporaciónÑanduríQuíntupleZafiroDeLaSierra'.repeat(3), assignees: [{ id: 3, name: 'FernandaGisellaVillavicencioQuiñónez' }], promisedDate: '2026-11-05', promiseState: 'overdue' }),
   );
 
   let el: HTMLElement;
@@ -111,5 +111,28 @@ describe('RemindersPanel, its cards to who hears them', () => {
     }
     expect(cards[0].getAttribute('aria-labelledby')).not.toBe(cards[1].getAttribute('aria-labelledby'));
     expect(texts(cards[0].getAttribute('aria-describedby'))[0]).toMatch(/^venció /);
+  });
+
+  it('names every responsible of a case on its card, and "Sin asignar" for a case nobody has', () => {
+    const team = ticket({
+      id: 1,
+      code: 'SOP-00001',
+      assignees: [
+        { id: 4, name: 'Ana' },
+        { id: 5, name: 'Luis' },
+      ],
+      promisedDate: '2026-11-05',
+      promiseState: 'overdue',
+    });
+    const nobody = ticket({ id: 2, code: 'SOP-00002', promisedDate: '2026-11-05', promiseState: 'overdue' });
+    const reminders: Partial<Reminders> = { staleHours: signal(48), promiseSoonDays: signal(0), promises: signal<Ticket[]>([team, nobody]), stale: signal<Ticket[]>([]), overdue: signal<Ticket[]>([]) };
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([]), { provide: Reminders, useValue: reminders }] });
+    TestBed.inject(Auth).user.set({ id: 1, username: 'ana', name: 'Ana', role: 'ADMIN' });
+    const fixture = TestBed.createComponent(RemindersPanel);
+    fixture.detectChanges();
+    const cards = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button[appReminderCard]'));
+
+    expect(textOf(cards[0])).toContain('Ana, Luis');
+    expect(textOf(cards[1])).toContain('Sin asignar');
   });
 });

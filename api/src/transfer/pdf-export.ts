@@ -1,7 +1,7 @@
 import type { Prisma, TicketStatus } from '@prisma/client';
 import type { TDocumentDefinitions, TableCell } from 'pdfmake/interfaces';
 import { refuseOverLimit } from '../common/exports';
-import { STATUS_LABEL, formatDateEs, formatMomentEs, moduleFullName, supportTypesText, ticketCode, todayDateOnly } from '../common/labels';
+import { STATUS_LABEL, formatDateEs, formatMomentEs, moduleFullName, namesText, ticketCode, todayDateOnly } from '../common/labels';
 import { PDF_COLOR, PDF_HEADER_CELL, PDF_STATUS_COLOR, pdfFrame, pdfSafe, renderPdf } from '../common/pdf';
 import { XLSX_EXPORT_LIMIT } from '../common/xlsx';
 import type { PrismaService } from '../prisma.service';
@@ -49,7 +49,7 @@ export async function pdfExport(prisma: PrismaService, filters: TicketFilters, w
 
   const headerCell = (text: string): TableCell => ({ text, ...PDF_HEADER_CELL });
   const body: TableCell[][] = [
-    ['Código', 'Fecha caso', 'Registro', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Tipos de soporte', 'Observación'].map(headerCell),
+    ['Código', 'Fecha caso', 'Registro', 'Empresa', 'Descripción', 'Estado', 'Responsables', 'Tipos de soporte', 'Observación'].map(headerCell),
     ...rows.map((t): TableCell[] => [
       // The header only says that the file includes the archived cases: each of them says so itself.
       t.archivedAt ? { stack: [ticketCode(t.id), { text: '(archivado)', fontSize: 7, color: PDF_COLOR.muted }] } : ticketCode(t.id),
@@ -58,8 +58,8 @@ export async function pdfExport(prisma: PrismaService, filters: TicketFilters, w
       pdfSafe(t.company.name),
       pdfSafe(t.description),
       { text: STATUS_LABEL[t.status], color: PDF_STATUS_COLOR[t.status], bold: true },
-      pdfSafe(t.assignee?.name ?? ''),
-      pdfSafe(supportTypesText(t.supportTypes.map((link) => link.supportType))),
+      pdfSafe(namesText(t.assignees.map((link) => link.assignee))),
+      pdfSafe(namesText(t.supportTypes.map((link) => link.supportType))),
       pdfSafe(notesText(t.notes)),
     ]),
   ];

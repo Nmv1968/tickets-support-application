@@ -55,6 +55,7 @@ describe('spreadsheet import', () => {
       /** The ids of the cases, taken from the sequence of the table: from 100 on here. */
       $queryRaw: jest.fn((_sql: TemplateStringsArray, count: number) => Promise.resolve(Array.from({ length: count }, (_, index) => ({ id: 100 + index })))),
       ticket: { findMany: jest.fn().mockResolvedValue(cases), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      ticketAssignee: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
       ticketSupportType: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
       ticketNote: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
       assignee: { findMany: jest.fn().mockResolvedValue(people), createManyAndReturn: creating(90) },
@@ -66,15 +67,17 @@ describe('spreadsheet import', () => {
     return db;
   };
   /**
-   * What the import stored of each case, in order: the fields named. `supportTypes` is the ids of
-   * the types the case got, in their order, and `note` the text of its observation.
+   * What the import stored of each case, in order: the fields named. `assignees` and `supportTypes`
+   * are the ids of the responsibles and of the types the case got, in their order, and `note` the
+   * text of its observation.
    */
   const stored = (db: ReturnType<typeof database>, ...fields: string[]): unknown[][] => {
     type Rows = [{ data: Record<string, unknown>[] }][];
     const rows = (mock: jest.Mock): Record<string, unknown>[] => (mock.mock.calls as Rows).flatMap(([call]) => call.data);
-    const [types, notes] = [rows(db.ticketSupportType.createMany), rows(db.ticketNote.createMany)];
+    const [assignees, types, notes] = [rows(db.ticketAssignee.createMany), rows(db.ticketSupportType.createMany), rows(db.ticketNote.createMany)];
     return rows(db.ticket.createMany).map((data) =>
       fields.map((field) => {
+        if (field === 'assignees') return assignees.filter((person) => person.ticketId === data.id).map((person) => person.assigneeId);
         if (field === 'supportTypes') return types.filter((type) => type.ticketId === data.id).map((type) => type.supportTypeId);
         if (field === 'note') return notes.find((note) => note.ticketId === data.id)?.text ?? null;
         return data[field];
@@ -110,7 +113,6 @@ describe('spreadsheet import', () => {
           description: 'No abre la Facturación',
           searchText: 'corporacion nandu no abre la facturacion',
           status: 'PENDING',
-          assigneeId: 3,
           priority: null,
           dueAt: null,
           moduleId: null,
@@ -119,7 +121,8 @@ describe('spreadsheet import', () => {
         },
       ],
     });
-    // The observation points at the case by the id the case got from the sequence.
+    // The responsible and the observation point at the case by the id the case got from the sequence.
+    expect(db.ticketAssignee.createMany).toHaveBeenCalledWith({ data: [{ ticketId: 100, assigneeId: 3 }] });
     expect(db.ticketNote.createMany).toHaveBeenCalledWith({
       data: [{ ticketId: 100, text: 'Se REINICIÓ el servicio', searchText: 'se reinicio el servicio', createdAt: midday }],
     });
@@ -135,14 +138,14 @@ describe('spreadsheet import', () => {
     const result = await serviceOn(db).import(sheet, plain, user);
 
     expect(result).toMatchObject({ toCreate: 2, rejected: 0 });
-    expect(stored(db, 'companyId', 'assigneeId', 'searchText')).toEqual([
-      [2, 3, 'acme uno'],
-      [5, 3, 'corporacion nandu dos'],
+    expect(stored(db, 'companyId', 'assignees', 'searchText')).toEqual([
+      [2, [3], 'acme uno'],
+      [5, [3], 'corporacion nandu dos'],
     ]);
     // The preview shows each case with the names it will have, which are the ones of the catalogs.
-    expect(result.sample.map((row) => [row.company, row.assignee])).toEqual([
-      ['ACME', 'Ana'],
-      ['Corporación Ñandú', 'Ana'],
+    expect(result.sample.map((row) => [row.company, row.assignees])).toEqual([
+      ['ACME', ['Ana']],
+      ['Corporación Ñandú', ['Ana']],
     ]);
     // Deactivated entries included: a sheet that names one of them means that one.
     for (const catalog of [db.company, db.assignee, db.supportType]) {
@@ -196,19 +199,19 @@ describe('spreadsheet import', () => {
       // A name is all a responsible has, with its key: nobody becomes a user of the app by being named in a sheet.
       expect(db.assignee.createManyAndReturn.mock.calls).toEqual([[{ data: [{ name: 'José Pérez', nameKey: 'jose perez' }], ...adds }]]);
       expect(db.supportType.createManyAndReturn.mock.calls).toEqual([[{ data: [{ name: 'Consulta', nameKey: 'consulta', color: '#64748b' }], ...adds }]]);
-      expect(stored(db, 'description', 'companyId', 'assigneeId', 'supportTypes')).toEqual([
-        ['Uno', 2, 3, [11]],
-        ['Dos', 80, 3, []],
-        ['Tres', 2, 90, []],
-        ['Cuatro', 80, 90, [70]],
-        ['Cinco', 2, null, [70]],
+      expect(stored(db, 'description', 'companyId', 'assignees', 'supportTypes')).toEqual([
+        ['Uno', 2, [3], [11]],
+        ['Dos', 80, [3], []],
+        ['Tres', 2, [90], []],
+        ['Cuatro', 80, [90], [70]],
+        ['Cinco', 2, [], [70]],
       ]);
-      expect(result.sample.map((row) => [row.company, row.assignee, row.supportTypes])).toEqual([
-        ['ACME', 'Ana', ['Capacitación']],
-        ['Beta Sur', 'Ana', []],
-        ['ACME', 'José Pérez', []],
-        ['Beta Sur', 'José Pérez', ['Consulta']],
-        ['ACME', null, ['Consulta']],
+      expect(result.sample.map((row) => [row.company, row.assignees, row.supportTypes])).toEqual([
+        ['ACME', ['Ana'], ['Capacitación']],
+        ['Beta Sur', ['Ana'], []],
+        ['ACME', ['José Pérez'], []],
+        ['Beta Sur', ['José Pérez'], ['Consulta']],
+        ['ACME', [], ['Consulta']],
       ]);
     });
 
@@ -405,7 +408,8 @@ describe('spreadsheet import', () => {
 
     expect(result).toMatchObject({ toCreate: 3, rejected: 0, created: { assignees: [] } });
     expect(result.unknown.assignees).toEqual([]);
-    expect(stored(db, 'assigneeId')).toEqual([[null], [null], [null]]);
+    expect(stored(db, 'assignees')).toEqual([[[]], [[]], [[]]]);
+    expect(db.ticketAssignee.createMany).not.toHaveBeenCalled();
     nothingAdded(db);
   });
 
@@ -438,8 +442,8 @@ describe('spreadsheet import', () => {
     expect(result.columns).toMatchObject({ description: 'Descripción', module: 'Módulo', note: 'Observación' });
     expect(result).toMatchObject({ toCreate: 1, rejected: 0 });
     expect(result.unknown).toEqual({ companies: [], assignees: [], supportTypes: [], modules: [], priorities: [], statuses: [] });
-    expect(stored(db, 'companyId', 'description', 'priority', 'moduleId', 'assigneeId', 'supportTypes')).toEqual([
-      [5, 'No abre la facturación', 'CRITICAL', 22, 3, [11]],
+    expect(stored(db, 'companyId', 'description', 'priority', 'moduleId', 'assignees', 'supportTypes')).toEqual([
+      [5, 'No abre la facturación', 'CRITICAL', 22, [3], [11]],
     ]);
     nothingAdded(db);
   });
@@ -452,7 +456,68 @@ describe('spreadsheet import', () => {
 
     // The second row is the case; the third repeats it.
     expect(result).toMatchObject({ rejected: 1, toCreate: 1, duplicates: 1 });
-    expect(stored(db, 'description', 'assigneeId')).toEqual([['No imprime', 3]]);
+    expect(stored(db, 'description', 'assignees')).toEqual([['No imprime', [3]]]);
+  });
+
+  // As the support types.
+  describe('responsibles', () => {
+    const team = [...people, { id: 4, name: 'Luis Ñáñez' }];
+
+    it('reads them from every column whose title starts with "responsable", several to a cell, each once', async () => {
+      const db = database();
+      db.assignee.findMany.mockResolvedValue(team);
+      const sheet = csv(
+        'Fecha;Empresa;Descripción;Responsable;Otro responsable;Responsables',
+        '27/7/2023;ACME;Uno;Ana;luis nañez;',
+        '27/7/2023;ACME;Dos;ana, Luis Ñáñez;ANA;Ana',
+        '27/7/2023;ACME;Tres;;;"Luis Ñáñez ; Ana"',
+        '27/7/2023;ACME;Cuatro;;;',
+      );
+
+      const result = await serviceOn(db).import(sheet, { ...plain, dateOrder: 'dmy' }, user);
+
+      expect(result.columns.assignees).toBe('Responsable, Otro responsable, Responsables');
+      expect(result).toMatchObject({ toCreate: 4, rejected: 0 });
+      expect(stored(db, 'assignees')).toEqual([[[3, 4]], [[3, 4]], [[4, 3]], [[]]]);
+      expect(result.sample[1].assignees).toEqual(['Ana', 'Luis Ñáñez']);
+    });
+
+    it('takes a cell that is the name of a responsible as that one, even with a comma in the name', async () => {
+      const db = database();
+      db.assignee.findMany.mockResolvedValue([...people, { id: 6, name: 'Soporte, turno noche' }]);
+      const sheet = csv('Fecha,Empresa,Descripción,Responsable', '7/27/2023,ACME,Uno,"soporte, turno noche"', '7/27/2023,ACME,Dos,"Soporte, Ana"');
+
+      const result = await serviceOn(db).import(sheet, plain, user);
+
+      expect(stored(db, 'description', 'assignees')).toEqual([['Uno', [6]]]);
+      expect(result.rejectedSample).toEqual([{ row: 3, reasons: ['El responsable «Soporte» no existe'] }]);
+    });
+
+    it('adds each one that is missing when asked to, and leaves out "Sin asignar" beside a person', async () => {
+      const db = database();
+      const sheet = csv('Fecha,Empresa,Descripción,Responsable,Otro responsable', '7/27/2023,ACME,Uno,"Ana, Marta Ríos",Pedro Sol', '7/27/2023,ACME,Dos,Sin asignar,marta rios');
+
+      const result = await serviceOn(db).import(sheet, adding, user);
+
+      expect(result).toMatchObject({ toCreate: 2, rejected: 0, created: { assignees: ['Marta Ríos', 'Pedro Sol'] } });
+      expect(db.assignee.createManyAndReturn.mock.calls).toEqual([
+        [{ data: [{ name: 'Marta Ríos', nameKey: 'marta rios' }, { name: 'Pedro Sol', nameKey: 'pedro sol' }], ...adds }],
+      ]);
+      expect(stored(db, 'description', 'assignees')).toEqual([
+        ['Uno', [3, 90, 91]],
+        ['Dos', [90]],
+      ]);
+    });
+
+    it('rejects a row with more responsibles than a case can have', async () => {
+      const many = Array.from({ length: 21 }, (_, index) => `Persona ${index + 1}`);
+      const sheet = csv('Fecha,Empresa,Descripción,Responsable', `7/27/2023,ACME,Uno,"${many.join(', ')}"`);
+
+      const result = await serviceOn(database()).import(sheet, { ...adding, dryRun: true }, user);
+
+      expect(result).toMatchObject({ toCreate: 0, rejected: 1, created: { assignees: [] } });
+      expect(result.rejectedSample).toEqual([{ row: 2, reasons: ['Un caso no puede tener más de 20 responsables'] }]);
+    });
   });
 
   describe('support types', () => {
@@ -611,7 +676,7 @@ describe('spreadsheet import', () => {
         status: 'RESOLVED',
         priority: null,
         module: null,
-        assignee: 'Ana',
+        assignees: ['Ana'],
         supportTypes: [],
         note: 'Se cambió el cable',
       },
@@ -675,7 +740,7 @@ describe('spreadsheet import', () => {
   // the file again skipped that part as duplicates, and nobody could tell which rows had gone in.
   describe('all or nothing', () => {
     type Row = Record<string, unknown>;
-    type Table = 'company' | 'assignee' | 'supportType' | 'ticket' | 'ticketSupportType' | 'ticketNote';
+    type Table = 'company' | 'assignee' | 'supportType' | 'ticket' | 'ticketAssignee' | 'ticketSupportType' | 'ticketNote';
     type Tables = Record<Table, Row[]>;
     const sheet = csv(
       'Fecha,Empresa,Descripción,Responsable,Tipo de soporte,Observación',
@@ -693,7 +758,7 @@ describe('spreadsheet import', () => {
      * import: the fourth case of the sheet, say. `events` says where each write was.
      */
     const keeping = (failing?: { table: Table; row: number }) => {
-      const kept: Tables = { company: [...companies], assignee: [...people], supportType: [...types], ticket: [], ticketSupportType: [], ticketNote: [] };
+      const kept: Tables = { company: [...companies], assignee: [...people], supportType: [...types], ticket: [], ticketAssignee: [], ticketSupportType: [], ticketNote: [] };
       const events: string[] = [];
       const written: Partial<Record<Table, number>> = {};
       let nextEntry = 80;
@@ -735,6 +800,7 @@ describe('spreadsheet import', () => {
               return Promise.resolve({});
             },
           },
+          ticketAssignee: many('ticketAssignee'),
           ticketSupportType: many('ticketSupportType'),
           ticketNote: many('ticketNote'),
           systemModule: { findMany: () => Promise.resolve(modules) },
@@ -760,7 +826,7 @@ describe('spreadsheet import', () => {
       return { db, kept, events };
     };
     const untouched = (kept: Tables): void => {
-      expect(kept).toEqual({ company: companies, assignee: people, supportType: types, ticket: [], ticketSupportType: [], ticketNote: [] });
+      expect(kept).toEqual({ company: companies, assignee: people, supportType: types, ticket: [], ticketAssignee: [], ticketSupportType: [], ticketNote: [] });
     };
 
     it('stores nothing when a case fails: neither the cases before it nor what it added to the catalogs', async () => {
@@ -792,6 +858,7 @@ describe('spreadsheet import', () => {
         'in: assignee',
         'in: supportType',
         'in: ticket',
+        'in: ticketAssignee',
         'in: ticketSupportType',
         'in: ticketNote',
         'commit',
@@ -799,12 +866,18 @@ describe('spreadsheet import', () => {
       expect(db.$transaction).toHaveBeenCalledTimes(1);
       expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), IMPORT_TRANSACTION);
       // In the order of the sheet, each with the ids of what it names and its rows in the other tables.
-      expect(kept.ticket.map((row) => [row.id, row.description, row.companyId, row.assigneeId])).toEqual([
-        [100, 'Uno', 2, 3],
-        [101, 'Dos', 80, 81],
-        [102, 'Tres', 2, null],
-        [103, 'Cuatro', 80, 3],
-        [104, 'Cinco', 2, 81],
+      expect(kept.ticket.map((row) => [row.id, row.description, row.companyId])).toEqual([
+        [100, 'Uno', 2],
+        [101, 'Dos', 80],
+        [102, 'Tres', 2],
+        [103, 'Cuatro', 80],
+        [104, 'Cinco', 2],
+      ]);
+      expect(kept.ticketAssignee).toEqual([
+        { ticketId: 100, assigneeId: 3 },
+        { ticketId: 101, assigneeId: 81 },
+        { ticketId: 103, assigneeId: 3 },
+        { ticketId: 104, assigneeId: 81 },
       ]);
       expect(kept.ticketSupportType).toEqual([
         { ticketId: 100, supportTypeId: 11 },

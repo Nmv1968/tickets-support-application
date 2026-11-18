@@ -16,6 +16,7 @@ import { chooseOption, clearSelect, closeSelect, ngSelect, optionTexts, selected
 import { reduceMotion } from '../testing/reduced-motion';
 import { said, toasts } from '../testing/screen';
 import { resizeScreen } from '../testing/viewport';
+import { textOf } from '../testing/text';
 import { BoardPage } from './board';
 
 /** One read of the board: the open cases and the latest resolved ones, asked for together. */
@@ -26,8 +27,17 @@ interface BoardRead {
 
 const REFUSED = { status: 400, statusText: 'Bad Request' };
 
-const OF_ANA = ticket({ id: 8, code: 'SOP-00008', assigneeId: 4, assigneeName: 'Ana' });
-const OF_ZOE = ticket({ id: 9, code: 'SOP-00009', status: 'RESOLVED', assigneeId: 6, assigneeName: 'Zoe' });
+const OF_ANA = ticket({ id: 8, code: 'SOP-00008', assignees: [{ id: 4, name: 'Ana' }] });
+const OF_ZOE = ticket({ id: 9, code: 'SOP-00009', status: 'RESOLVED', assignees: [{ id: 6, name: 'Zoe' }] });
+/** A case of two responsibles. */
+const OF_TEAM = ticket({
+  id: 10,
+  code: 'SOP-00010',
+  assignees: [
+    { id: 4, name: 'Ana' },
+    { id: 5, name: 'Luis' },
+  ],
+});
 const ARCHIVED = '2026-11-08T09:00:00.000Z';
 
 // The board with the real Api: the tests act on the page and on TicketEvents, and look at the
@@ -319,15 +329,36 @@ describe('BoardPage', () => {
     }));
 
     it('with "Sin asignar" leaves the cards of the cases nobody has', fakeAsync(() => {
-      open([ticket(), OF_ANA, OF_ZOE]);
+      open([ticket(), OF_ANA, OF_ZOE, OF_TEAM]);
       chooseOption(filter(), 'Sin asignar');
       render();
 
       expect(cards()).toEqual(['SOP-00007']);
     }));
+
+    // As the list: a case of two responsibles is one of each of them.
+    it('leaves a case of several responsibles under the filter of each one', fakeAsync(() => {
+      open([ticket(), OF_ANA, OF_TEAM]);
+
+      chooseOption(filter(), 'Luis');
+      render();
+      expect(cards()).toEqual(['SOP-00010']);
+
+      chooseOption(filter(), 'Ana');
+      render();
+      expect(cards()).toEqual(['SOP-00008', 'SOP-00010']);
+    }));
   });
 
   describe('a card', () => {
+    it('names every responsible of its case, by name and separated by commas, and "Sin asignar" for nobody', fakeAsync(() => {
+      open([ticket(), OF_TEAM]);
+
+      const card = (id: number): string => textOf(el.querySelector(`[data-case-id="${id}"]`));
+      expect(card(10)).toContain('Ana, Luis');
+      expect(card(7)).toContain('Sin asignar');
+    }));
+
     it('shows the support types of its case as chips, each in its colour, and none for a case without them', fakeAsync(() => {
       const types = [
         { id: 1, name: 'Capacitación', color: '#12b76a' },
@@ -468,7 +499,10 @@ describe('BoardPage', () => {
     const LONG = ticket({
       company: 'UnidadEducativaParticularJaguarDelValleDeLosChillosYSusAlrededores'.repeat(3),
       description: 'https://soporte.example.test/casos/abiertos?empresa=UnidadEducativaParticularJaguar&modulo=FacturacionElectronica',
-      assigneeName: 'FernandaGisellaVillavicencioQuiñónezDeLaTorre',
+      assignees: [
+        { id: 4, name: 'FernandaGisellaVillavicencioQuiñónezDeLaTorre' },
+        { id: 5, name: 'MaríaJoséAlexandraCarrionDeLosMonteros' },
+      ],
       notesCount: 3,
     });
 

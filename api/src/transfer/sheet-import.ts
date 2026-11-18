@@ -8,7 +8,7 @@ import { tidyName } from '../common/named-catalog';
 import { COMPANIES, COMPANY_NAME_MAX } from '../companies/companies.service';
 import type { PrismaService } from '../prisma.service';
 import { SUPPORT_TYPES, SUPPORT_TYPE_NAME_MAX, meansNoType } from '../support-types/support-types.service';
-import { MAX_SUPPORT_TYPES, TEXT_MAX } from '../tickets/ticket-input';
+import { MAX_ASSIGNEES, MAX_SUPPORT_TYPES, TEXT_MAX } from '../tickets/ticket-input';
 import { activityStamp, slaDueAt } from '../tickets/ticket-update';
 import { ModuleCatalog, NameCatalog, moduleKey } from './name-catalogs';
 import type { CatalogEntry } from './name-catalogs';
@@ -18,7 +18,7 @@ import type { DateOrder, SheetFile } from './sheet-reading';
 // The import of a sheet of cases: what each row says, checked against the catalogs, and the cases
 // stored in one transaction. The file itself is read by sheet-reading.ts.
 
-export type ColumnKey = 'date' | 'time' | 'company' | 'description' | 'status' | 'priority' | 'module' | 'assignee' | 'supportTypes' | 'note';
+export type ColumnKey = 'date' | 'time' | 'company' | 'description' | 'status' | 'priority' | 'module' | 'assignees' | 'supportTypes' | 'note';
 
 /** A case of the sheet as it will be stored. What comes from a catalog carries the name the catalog gives it. */
 interface ParsedRow {
@@ -31,8 +31,8 @@ interface ParsedRow {
   priority: Priority | null;
   /** Full name of the module: "Ventas > Facturas". Null for a case without one. */
   module: string | null;
-  /** Name of the responsible. Null for a case nobody is responsible for. */
-  assignee: string | null;
+  /** Names of the responsibles. Empty for a case nobody is responsible for. */
+  assignees: string[];
   supportTypes: string[];
   note: string | null;
 }
@@ -52,7 +52,10 @@ export interface ImportResult {
   dryRun: boolean;
   /** The import was asked to add the companies, responsibles and support types the catalogs lack. */
   createMissing: boolean;
-  /** Spreadsheet header found for each field, or null when the column is missing. Several "tipo" columns go together, separated by commas. */
+  /**
+   * Spreadsheet header found for each field, or null when the column is missing. Several "tipo"
+   * columns go together, separated by commas, and so do several "responsable" columns.
+   */
   columns: Record<ColumnKey, string | null>;
   totalRows: number;
   skippedEmpty: number;
@@ -88,8 +91,9 @@ const HEADER_PATTERNS: Record<ColumnKey, RegExp> = {
   status: /^estado/,
   priority: /^priorid/,
   module: /^modulo/,
-  assignee: /^(respons|asignad|tecnico)/,
-  // Every column that matches is read, not only the first: the template has a second one, "Otro tipo de soporte".
+  // Every column that matches is read, not only the first: the template has a second one of each,
+  // "Otro responsable" and "Otro tipo de soporte".
+  assignees: /^(otros? )?(respons|asignad|tecnico)/,
   supportTypes: /^(otros? )?tipo/,
   note: /^(observ|nota|comentario)/,
 };
@@ -120,15 +124,17 @@ const PRIORITY_BY_LABEL = new Map(PRIORITIES.map((priority) => [searchKey(PRIORI
 const notFound = (what: string, value: string): string => `${what} «${value}» no existe`;
 
 /**
- * The support types a row names in its "tipo" cells, each once. A cell may hold several, separated
- * by commas or semicolons, which is how the export writes them. `isType` says whether a text is
- * the name of a type: a cell that is one is not split, so a name with a comma in it can be written.
+ * The support types a row names in its "tipo" cells, or the responsibles in its "responsable"
+ * cells, each once. A cell may hold several, separated by commas or semicolons, which is how the
+ * export writes them. `isEntry` says whether a text is the name of an entry of the catalog: a cell
+ * that is one is not split, so a name with a comma in it can be written. `max` is the longest name
+ * the catalog keeps.
  */
-function typesWritten(cells: string[], isType: (text: string) => boolean): string[] {
+function namesWritten(cells: string[], isEntry: (text: string) => boolean, max: number): string[] {
   const written = new Map<string, string>();
   for (const cell of cells) {
-    const names = isType(cell) ? [cell] : cell.split(/[,;]/);
-    for (const name of names.map((text) => tidyName(text).slice(0, SUPPORT_TYPE_NAME_MAX))) {
+    const names = isEntry(cell) ? [cell] : cell.split(/[,;]/);
+    for (const name of names.map((text) => tidyName(text).slice(0, max))) {
       if (name && !written.has(searchKey(name))) written.set(searchKey(name), name);
     }
   }
@@ -147,9 +153,9 @@ interface CaseLinks {
 }
 
 /**
- * Stores the cases of an import in `tx`: three statements for the whole sheet, the cases, their
- * support types and their observations, where one `create` per case took several for each. A case
- * with support types or an observation cannot go in a `createMany` with them, so its rows in those
+ * Stores the cases of an import in `tx`: four statements for the whole sheet, the cases, their
+ * responsibles, their support types and their observations, where one `create` per case took
+ * several for each. A case with any of those cannot go in a `createMany` with them, so its rows in those
  * tables point at it by an id it gets beforehand: one taken from the sequence of the table, in a
  * single query, the same way the database numbers a case it is given without one. The ids go to
  * the cases in the order of the sheet, so their codes follow it, as they did case by case.
@@ -174,7 +180,6 @@ async function storeCases(tx: Prisma.TransactionClient, rows: ParsedRow[], creat
       description: row.description,
       searchText: ticketSearchKey(row.company, row.description),
       status: row.status,
-      assigneeId: row.assignee ? links.assignee(row.assignee) : null,
       priority: row.priority,
       dueAt: slaDueAt(now, row.priority ? links.slaHours(row.priority) : null),
       moduleId: row.module ? links.module(row.module) : null,
@@ -183,6 +188,8 @@ async function storeCases(tx: Prisma.TransactionClient, rows: ParsedRow[], creat
       ...activityStamp(reportedAt(row)),
     })),
   });
+  const assignees = rows.flatMap((row, index) => row.assignees.map((person) => ({ ticketId: ids[index], assigneeId: links.assignee(person) })));
+  if (assignees.length) await tx.ticketAssignee.createMany({ data: assignees });
   const supportTypes = rows.flatMap((row, index) => row.supportTypes.map((type) => ({ ticketId: ids[index], supportTypeId: links.supportType(type) })));
   if (supportTypes.length) await tx.ticketSupportType.createMany({ data: supportTypes });
   // The sheet does not date its observations; the day of the case is the closest known date.
@@ -212,12 +219,12 @@ export async function importSheet(prisma: PrismaService, file: SheetFile, option
   }
 
   const headers = table[headerIndex].cells.map((cell) => cellText(cell));
-  /** Where each field is in a row. Only the support types are read from every column that matches. */
+  /** Where each field is in a row. Only the responsibles and the support types are read from every column that matches. */
   const positions = {} as Record<ColumnKey, number[]>;
   const columns = {} as Record<ColumnKey, string | null>;
   for (const key of Object.keys(HEADER_PATTERNS) as ColumnKey[]) {
     const matching = headers.flatMap((header, index) => (HEADER_PATTERNS[key].test(searchKey(header)) ? [index] : []));
-    positions[key] = key === 'supportTypes' ? matching : matching.slice(0, 1);
+    positions[key] = key === 'supportTypes' || key === 'assignees' ? matching : matching.slice(0, 1);
     columns[key] = positions[key].map((index) => headers[index]).join(', ') || null;
   }
 
@@ -287,13 +294,19 @@ export async function importSheet(prisma: PrismaService, file: SheetFile, option
     };
 
     const companyName = nameIn(companies, company, 'La empresa');
-    const assignee = tidyName(cellText(at('assignee'))).slice(0, ASSIGNEE_NAME_MAX);
-    // "Sin asignar" in the cell is the same as leaving it empty: it is not a person to look for, or to add.
-    const assigneeName = assignee && !meansNobody(assignee) ? nameIn(people, assignee, 'El responsable') : null;
+    const peopleOfRow = namesWritten(
+      positions.assignees.map((index) => cellText(cells[index])),
+      (text) => people.has(text),
+      ASSIGNEE_NAME_MAX,
+    );
+    // "Sin asignar" in a cell is the same as leaving it empty: it is not a person to look for, or to add.
+    const assigneeNames = peopleOfRow.filter((person) => !meansNobody(person)).map((person) => nameIn(people, person, 'El responsable'));
+    if (assigneeNames.length > MAX_ASSIGNEES) reasons.push(`Un caso no puede tener más de ${MAX_ASSIGNEES} responsables`);
     const typeNames: string[] = [];
-    const typesOfRow = typesWritten(
+    const typesOfRow = namesWritten(
       positions.supportTypes.map((index) => cellText(cells[index])),
       (text) => types.has(text),
+      SUPPORT_TYPE_NAME_MAX,
     );
     for (const type of typesOfRow) {
       // "Sin tipo" is how the reports name the cases without a type. It is no type to look for,
@@ -347,7 +360,7 @@ export async function importSheet(prisma: PrismaService, file: SheetFile, option
       status,
       priority,
       module: module && !Array.isArray(module) ? module.fullName : null,
-      assignee: assigneeName,
+      assignees: assigneeNames,
       supportTypes: typeNames,
       note: cellText(at('note')).slice(0, TEXT_MAX) || null,
     });

@@ -63,7 +63,7 @@ export function seed() {
       companyId: 1,
       description: 'No se puede emitir una nota de crédito.',
       status: 'UNRESOLVED',
-      assigneeId: 1,
+      assigneeIds: [1],
       supportTypeIds: [1, 3],
       priority: 'HIGH',
       estimatedMinutes: 60,
@@ -96,7 +96,11 @@ export function seed() {
 /** A case as the API answers it (detailDto of api/src/tickets/ticket-mappers.ts). */
 function ticket(data, fields) {
   const company = data.companies.find((c) => c.id === fields.companyId);
-  const assignee = data.assignees.find((a) => a.id === fields.assigneeId);
+  // By name, as the API orders them.
+  const assignees = (fields.assigneeIds ?? [])
+    .map((id) => data.assignees.find((person) => person.id === id))
+    .map(({ id, name }) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'));
   const module = data.modules.find((m) => m.id === fields.moduleId);
   const supportTypes = (fields.supportTypeIds ?? [])
     .map((id) => data.supportTypes.find((type) => type.id === id))
@@ -114,8 +118,7 @@ function ticket(data, fields) {
     company: company?.name,
     description: fields.description,
     status: fields.status ?? 'PENDING',
-    assigneeId: fields.assigneeId ?? null,
-    assigneeName: assignee?.name ?? null,
+    assignees,
     supportTypes,
     priority: fields.priority ?? null,
     estimatedMinutes: fields.estimatedMinutes ?? null,
@@ -212,15 +215,16 @@ export async function startFakeApi() {
     return created;
   };
 
-  /** A stored case as the fields `ticket()` builds one from: its support types by id. */
-  const fieldsOf = (current) => ({ ...current, supportTypeIds: current.supportTypes.map((type) => type.id) });
+  /** A stored case as the fields `ticket()` builds one from: its responsibles and its support types by id. */
+  const fieldsOf = (current) => ({ ...current, assigneeIds: current.assignees.map((person) => person.id), supportTypeIds: current.supportTypes.map((type) => type.id) });
 
   /** Applies a TicketInput to a stored case, as `TicketsService.update` reads its fields. */
   const applyInput = (current, body) => {
     const fields = fieldsOf(current);
-    for (const name of ['date', 'time', 'companyId', 'description', 'status', 'assigneeId', 'priority', 'estimatedMinutes', 'spentMinutes', 'moduleId', 'promisedDate']) {
+    for (const name of ['date', 'time', 'companyId', 'description', 'status', 'priority', 'estimatedMinutes', 'spentMinutes', 'moduleId', 'promisedDate']) {
       if (body[name] !== undefined) fields[name] = body[name];
     }
+    if (body.assigneeIds !== undefined) fields.assigneeIds = [...new Set(body.assigneeIds)];
     if (body.supportTypeIds !== undefined) fields.supportTypeIds = [...new Set(body.supportTypeIds)];
     if (body.customerReply !== undefined) fields.customerReply = body.customerReply || null;
     if (body.archived !== undefined) fields.archivedAt = body.archived ? new Date().toISOString() : null;
@@ -288,6 +292,7 @@ export async function startFakeApi() {
         const created = ticket(data, {
           ...body,
           id: data.nextId++,
+          assigneeIds: [...new Set(body.assigneeIds ?? [])],
           supportTypeIds: [...new Set(body.supportTypeIds ?? [])],
           notes: note ? [{ id: 100, text: note, authorName: 'Asistente', createdAt: new Date().toISOString() }] : [],
         });

@@ -6,9 +6,9 @@ import type { ReminderRules } from '../settings/settings.service';
 
 export const baseInclude = {
   company: { select: { id: true, name: true } },
-  assignee: { select: { id: true, name: true } },
   module: { select: { id: true, name: true, parent: { select: { name: true } } } },
   supportTypes: { select: { supportType: { select: { id: true, name: true, color: true } } } },
+  assignees: { select: { assignee: { select: { id: true, name: true } } } },
 } satisfies Prisma.TicketInclude;
 
 export const listInclude = {
@@ -25,7 +25,7 @@ export const detailInclude = {
   history: { orderBy: { createdAt: 'desc' }, take: 100, include: { user: { select: { name: true } } } },
 } satisfies Prisma.TicketInclude;
 
-/** A case as stored, with its company, its support types and the names of its responsible person and module. */
+/** A case as stored, with its company, its support types, its responsibles and the name of its module. */
 export type StoredTicket = Prisma.TicketGetPayload<{ include: typeof baseInclude }>;
 type ListRow = Prisma.TicketGetPayload<{ include: typeof listInclude }>;
 type DetailRow = Prisma.TicketGetPayload<{ include: typeof detailInclude }>;
@@ -64,8 +64,8 @@ function baseDto(t: StoredTicket, rules: ReminderRules) {
     company: t.company.name,
     description: t.description,
     status: t.status,
-    assigneeId: t.assigneeId,
-    assigneeName: t.assignee?.name ?? null,
+    /** By name, as the support types. Empty for a case nobody is responsible for. */
+    assignees: byName(t.assignees.map((link) => link.assignee)),
     supportTypes: byName(t.supportTypes.map((link) => link.supportType)),
     priority: t.priority,
     estimatedMinutes: t.estimatedMinutes,

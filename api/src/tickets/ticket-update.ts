@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { PRIORITY_LABEL, STATUS_LABEL, formatDateEs, formatDateOnly, parseDateOnly, supportTypesText, ticketSearchKey, todayDateOnly } from '../common/labels';
+import { PRIORITY_LABEL, STATUS_LABEL, formatDateEs, formatDateOnly, parseDateOnly, namesText, ticketSearchKey, todayDateOnly } from '../common/labels';
 import type { TicketInput } from './ticket-input';
 import { moduleName } from './ticket-mappers';
 import type { StoredTicket } from './ticket-mappers';
@@ -23,8 +23,8 @@ export interface TicketUpdateContext {
   now: Date;
   /** Name of the company in `dto.companyId`. */
   companyName: string | null;
-  /** Name of the responsible in `dto.assigneeId`. */
-  assigneeName: string | null;
+  /** The responsibles in `dto.assigneeIds`, each once. Null when the input does not carry them. */
+  assignees: { id: number; name: string }[] | null;
   /** The support types in `dto.supportTypeIds`, each once. Null when the input does not carry them. */
   supportTypes: { id: number; name: string }[] | null;
   /** Name of the module in `dto.moduleId`, as shown in the history. */
@@ -64,7 +64,8 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
 
   // `@IsOptional()` lets a null through. The date, company, description, status and time spent of a
   // case cannot be empty in the database, so for them null means "not sent", as it does on create.
-  // The same goes for its support types, where the empty value is an empty list, and for the archive.
+  // The same goes for its responsibles and its support types, where the empty value is an empty
+  // list, and for the archive.
   if (dto.date != null && dto.date !== formatDateOnly(before.date)) {
     assertReportDate(dto.date, now);
     data.date = parseDateOnly(dto.date);
@@ -104,25 +105,31 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
     track('Estado', STATUS_LABEL[before.status], STATUS_LABEL[dto.status]);
   }
 
-  // The responsible is optional on a case: null is a value, and leaves the case without one.
-  if (dto.assigneeId !== undefined && dto.assigneeId !== before.assigneeId) {
-    data.assigneeId = dto.assigneeId;
-    track('Responsable', before.assignee?.name ?? null, dto.assigneeId ? context.assigneeName : null);
+  if (dto.assigneeIds != null) {
+    const change = setChange(
+      before.assignees.map((link) => link.assignee),
+      context.assignees ?? [],
+    );
+    if (change) {
+      data.assignees = {
+        deleteMany: change.removed.length ? { assigneeId: { in: change.removed } } : undefined,
+        createMany: change.added.length ? { data: change.added.map((assigneeId) => ({ assigneeId })) } : undefined,
+      };
+      track('Responsables', change.oldValue, change.newValue);
+    }
   }
 
   if (dto.supportTypeIds != null) {
-    const had = before.supportTypes.map((link) => link.supportType);
-    const wanted = context.supportTypes ?? [];
-    const removed = had.filter((type) => !wanted.some((other) => other.id === type.id)).map((type) => type.id);
-    const added = wanted.filter((type) => !had.some((other) => other.id === type.id)).map((type) => type.id);
-    if (removed.length || added.length) {
-      // Only the difference is written: the types the case keeps are not deleted and created again.
+    const change = setChange(
+      before.supportTypes.map((link) => link.supportType),
+      context.supportTypes ?? [],
+    );
+    if (change) {
       data.supportTypes = {
-        deleteMany: removed.length ? { supportTypeId: { in: removed } } : undefined,
-        createMany: added.length ? { data: added.map((supportTypeId) => ({ supportTypeId })) } : undefined,
+        deleteMany: change.removed.length ? { supportTypeId: { in: change.removed } } : undefined,
+        createMany: change.added.length ? { data: change.added.map((supportTypeId) => ({ supportTypeId })) } : undefined,
       };
-      // Null for none, as for every other field a case can be left without.
-      track('Tipos de soporte', supportTypesText(had) || null, supportTypesText(wanted) || null);
+      track('Tipos de soporte', change.oldValue, change.newValue);
     }
   }
 
@@ -160,6 +167,23 @@ export function planTicketUpdate(before: StoredTicket, dto: TicketInput, context
   }
 
   return { data, history };
+}
+
+/**
+ * What an edit changes of a set of entries of a case (its responsibles, its support types): the ids
+ * it takes off and the ones it adds, and the set before and after as the history says it. Only the
+ * difference is written: the entries the case keeps are not deleted and created again. Null when
+ * the set stays the same.
+ */
+function setChange(
+  had: { id: number; name: string }[],
+  wanted: { id: number; name: string }[],
+): { removed: number[]; added: number[]; oldValue: string | null; newValue: string | null } | null {
+  const removed = had.filter((entry) => !wanted.some((other) => other.id === entry.id)).map((entry) => entry.id);
+  const added = wanted.filter((entry) => !had.some((other) => other.id === entry.id)).map((entry) => entry.id);
+  if (!removed.length && !added.length) return null;
+  // Null for none, as for every other field a case can be left without.
+  return { removed, added, oldValue: namesText(had) || null, newValue: namesText(wanted) || null };
 }
 
 /**

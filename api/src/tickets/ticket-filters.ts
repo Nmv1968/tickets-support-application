@@ -23,7 +23,7 @@ export type TicketSort = 'date' | 'company' | 'status';
  */
 export type TicketFilters = {
   status?: TicketStatus[];
-  /** A person's id, or `none` for cases nobody is responsible for. */
+  /** Cases this person is responsible for, alone or with others. `none` for the cases nobody is responsible for. */
   assignee?: number | 'none';
   companyId?: number;
   priority?: Priority;
@@ -148,8 +148,8 @@ export function buildWhere(filters: TicketFilters, rules: ReminderRules = { stal
 
   if (filters.status?.length) and.push({ status: { in: filters.status } });
 
-  if (filters.assignee === 'none') and.push({ assigneeId: null });
-  else if (filters.assignee !== undefined) and.push({ assigneeId: filters.assignee });
+  if (filters.assignee === 'none') and.push({ assignees: { none: {} } });
+  else if (filters.assignee !== undefined) and.push({ assignees: { some: { assigneeId: filters.assignee } } });
 
   if (filters.companyId !== undefined) and.push({ companyId: filters.companyId });
   if (filters.priority) and.push({ priority: filters.priority });

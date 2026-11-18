@@ -4,7 +4,7 @@ import { ASSIGNEE_NAME_MAX } from '../assignees/assignees.service';
 import { MODULE_NAME_MAX } from '../catalog/modules.service';
 import { COMPANY_NAME_MAX } from '../companies/companies.service';
 import { SUPPORT_TYPE_NAME_MAX } from '../support-types/support-types.service';
-import { byName, noteSearchKey, searchKey, supportTypesText, ticketSearchKey } from './labels';
+import { byName, noteSearchKey, searchKey, namesText, ticketSearchKey } from './labels';
 
 /** Every character of the basic plane, one by one. The halves of a pair are not characters by themselves. */
 function* characters(): Generator<string> {
@@ -40,13 +40,13 @@ describe('search keys', () => {
   });
 });
 
-describe('supportTypesText', () => {
+describe('namesText', () => {
   const named = (...names: string[]): { name: string }[] => names.map((name) => ({ name }));
 
   it('lists the types of a case by name, and is empty for a case without any', () => {
-    expect(supportTypesText(named('Falla del sistema', 'capacitación', 'Ámbito'))).toBe('Ámbito, capacitación, Falla del sistema');
-    expect(supportTypesText(named('Capacitación'))).toBe('Capacitación');
-    expect(supportTypesText([])).toBe('');
+    expect(namesText(named('Falla del sistema', 'capacitación', 'Ámbito'))).toBe('Ámbito, capacitación, Falla del sistema');
+    expect(namesText(named('Capacitación'))).toBe('Capacitación');
+    expect(namesText([])).toBe('');
   });
 
   // The answers of the API give the support types of a case in the order of this text (`byName`).
@@ -55,7 +55,7 @@ describe('supportTypesText', () => {
 
     expect(byName(types).map((type) => type.id)).toEqual([1, 2]);
     expect(types.map((type) => type.id)).toEqual([2, 1]);
-    expect(supportTypesText(types)).toBe(byName(types).map((type) => type.name).join(', '));
+    expect(namesText(types)).toBe(byName(types).map((type) => type.name).join(', '));
   });
 });
 

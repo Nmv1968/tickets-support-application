@@ -1,7 +1,8 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import type { Ticket } from '../core/api';
 import { Icon } from '../core/icon';
 import { StatusBadge } from '../core/status-badge';
+import { assigneesText } from '../core/ui';
 
 let cards = 0;
 
@@ -33,7 +34,7 @@ let cards = 0;
     <div [id]="id + '-details'">
       <div class="line-clamp-2 text-muted">{{ ticket().description }}</div>
       <div class="mt-1 flex items-center gap-2 text-xs text-muted">
-        <span class="min-w-0"><app-icon name="account-outline" /> {{ ticket().assigneeName ?? 'Sin asignar' }}</span>
+        <span class="min-w-0"><app-icon name="account-outline" /> {{ assignees() || 'Sin asignar' }}</span>
         @if (detail()) {
           <span class="ml-auto">{{ detail() }}</span>
         }
@@ -49,6 +50,8 @@ export class ReminderCard {
   readonly reasonClass = input.required<string>();
   /** Optional line at the bottom right. */
   readonly detail = input('');
+
+  protected readonly assignees = computed(() => assigneesText(this.ticket()));
 
   /** The same case can be in two groups of the bell: the ids are of this card. */
   protected readonly id = `reminder-card-${++cards}`;

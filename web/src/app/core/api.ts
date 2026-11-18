@@ -35,6 +35,9 @@ export interface Assignee {
   tickets: number;
 }
 
+/** A responsible as a case has them. */
+export type TicketAssignee = Pick<Assignee, 'id' | 'name'>;
+
 /** A client company that reports cases ("Empresa"). */
 export interface Company {
   id: number;
@@ -80,8 +83,8 @@ export interface Ticket {
   company: string;
   description: string;
   status: TicketStatus;
-  assigneeId: number | null;
-  assigneeName: string | null;
+  /** "Responsables" of the case, by name, as its support types. Empty for a case nobody is responsible for. */
+  assignees: TicketAssignee[];
   /** "Tipos de soporte" of the case, by name. Empty for a case without any. */
   supportTypes: TicketSupportType[];
   priority: Priority | null;
@@ -154,8 +157,11 @@ export interface TicketInput {
   companyId?: number;
   description?: string;
   status?: TicketStatus;
-  /** Null leaves the case without a responsible, which is also how a new case starts. */
-  assigneeId?: number | null;
+  /**
+   * The whole set of responsibles, as the support types: the ones left out are taken off the case,
+   * and `[]` leaves it without any, which is also how a new case starts.
+   */
+  assigneeIds?: number[];
   /** The whole set: the types left out are taken off the case, and `[]` takes all of them off. */
   supportTypeIds?: number[];
   /** True archives the case, false brings it back. */
@@ -177,7 +183,7 @@ export interface TicketInput {
  */
 export interface TicketFilters {
   status?: string;
-  /** Id of a responsible, or `none` for the cases without one. */
+  /** Id of a responsible: the cases they have, alone or with others. `none` for the cases without any. */
   assignee?: number | string | null;
   companyId?: number | string | null;
   priority?: string | null;
@@ -288,7 +294,7 @@ export interface ImportRow {
   priority: Priority | null;
   /** Full name of the module. */
   module: string | null;
-  assignee: string | null;
+  assignees: string[];
   supportTypes: string[];
   note: string | null;
 }
@@ -310,9 +316,9 @@ export interface ImportResult {
   createMissing: boolean;
   /**
    * Header found in the sheet for each column the import reads, or null when the sheet does not
-   * have it. Several columns of support types come together, separated by commas.
+   * have it. Several columns of responsibles, or of support types, come together, separated by commas.
    */
-  columns: Record<'date' | 'time' | 'company' | 'description' | 'status' | 'priority' | 'module' | 'assignee' | 'supportTypes' | 'note', string | null>;
+  columns: Record<'date' | 'time' | 'company' | 'description' | 'status' | 'priority' | 'module' | 'assignees' | 'supportTypes' | 'note', string | null>;
   totalRows: number;
   skippedEmpty: number;
   duplicates: number;

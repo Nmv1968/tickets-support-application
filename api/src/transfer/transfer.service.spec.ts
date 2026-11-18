@@ -27,19 +27,26 @@ describe('export', () => {
       exportRow({
         id: 1,
         time: '14:35',
+        assignees: [{ assignee: { name: 'Luis' } }, { assignee: { name: 'Ana' } }],
         priority: 'CRITICAL',
         module: { name: 'Facturas', parent: { name: 'Ventas' } },
         supportTypes: [{ supportType: { name: 'Falla del sistema' } }, { supportType: { name: 'Capacitación' } }],
         notes: [{ text: 'Se llamó al cliente', createdAt: new Date(2026, 10, 2, 10, 0) }],
       }),
       // Archived: its row says so in a column the import does not read.
-      exportRow({ id: 2, description: 'Pide un reporte', status: 'RESOLVED', assignee: null, priority: null, module: null, archivedAt: new Date(2026, 10, 5, 9, 0) }),
+      exportRow({ id: 2, description: 'Pide un reporte', status: 'RESOLVED', assignees: [], priority: null, module: null, archivedAt: new Date(2026, 10, 5, 9, 0) }),
     ];
     /** A system with the catalogs the cases above use, and the cases given. */
     const database = (storedCases: Record<string, unknown>[]) => ({
       ticket: { count: jest.fn().mockResolvedValue(storedCases.length), findMany: jest.fn().mockResolvedValue(storedCases), createMany: jest.fn() },
       company: { findMany: jest.fn().mockResolvedValue([{ id: 2, name: 'ACME' }]), createManyAndReturn: jest.fn() },
-      assignee: { findMany: jest.fn().mockResolvedValue([{ id: 3, name: 'Ana' }]), createManyAndReturn: jest.fn() },
+      assignee: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 3, name: 'Ana' },
+          { id: 4, name: 'Luis' },
+        ]),
+        createManyAndReturn: jest.fn(),
+      },
       supportType: {
         findMany: jest.fn().mockResolvedValue([
           { id: 11, name: 'Capacitación' },
@@ -83,7 +90,7 @@ describe('export', () => {
         status: 'Estado',
         priority: 'Prioridad',
         module: 'Módulo',
-        assignee: 'Responsable',
+        assignees: 'Responsables',
         supportTypes: 'Tipos de soporte',
         note: 'Observación',
       });
@@ -98,7 +105,7 @@ describe('export', () => {
           status: 'PENDING',
           priority: 'CRITICAL',
           module: 'Ventas > Facturas',
-          assignee: 'Ana',
+          assignees: ['Ana', 'Luis'],
           supportTypes: ['Capacitación', 'Falla del sistema'],
           note: 'Se llamó al cliente',
         },
@@ -110,7 +117,7 @@ describe('export', () => {
           status: 'RESOLVED',
           priority: null,
           module: null,
-          assignee: null,
+          assignees: [],
           supportTypes: [],
           note: null,
         },

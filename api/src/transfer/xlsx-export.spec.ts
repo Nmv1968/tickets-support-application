@@ -27,7 +27,7 @@ describe('xlsx', () => {
     expect(cell('Código')).toBe('SOP-00007');
     expect(cell('Empresa')).toBe('ACME');
     expect(cell('Estado')).toBe('Pendiente');
-    expect(cell('Responsable')).toBe('Ana');
+    expect(cell('Responsables')).toBe('Ana');
     expect(cell('Observación')).toBe('11/11/2026: Se llamó al cliente\n11/11/2026: Se reinició el servicio');
     const where = { AND: [active, { companyId: 9 }] };
     expect(db.ticket.count).toHaveBeenCalledWith({ where });
@@ -64,12 +64,21 @@ describe('xlsx', () => {
     expect(headers).toHaveLength(18);
   });
 
-  it('leaves the responsible empty for a case nobody is responsible for', async () => {
-    const db = { ticket: { count: jest.fn().mockResolvedValue(1), findMany: jest.fn().mockResolvedValue([exportRow({ assignee: null })]) } };
+  it('leaves the responsibles empty for a case nobody is responsible for', async () => {
+    const db = { ticket: { count: jest.fn().mockResolvedValue(1), findMany: jest.fn().mockResolvedValue([exportRow({ assignees: [] })]) } };
 
     const [cell] = await sheetRows(await serviceOn(db).xlsx({}));
 
-    expect(cell('Responsable')).toBe('');
+    expect(cell('Responsables')).toBe('');
+  });
+
+  it('lists the responsibles of each case in one cell, by name, as the support types', async () => {
+    const assignees = [{ assignee: { name: 'Luis' } }, { assignee: { name: 'Ana' } }];
+    const db = { ticket: { count: jest.fn().mockResolvedValue(1), findMany: jest.fn().mockResolvedValue([exportRow({ assignees })]) } };
+
+    const [cell] = await sheetRows(await serviceOn(db).xlsx({}));
+
+    expect(cell('Responsables')).toBe('Ana, Luis');
   });
 
   it('lists the support types of each case in one cell, by name', async () => {

@@ -14,7 +14,8 @@ describe('Reminders', () => {
   let http: HttpTestingController;
   let reminders: Reminders;
 
-  const ticket = (id: number, assigneeId: number | null): Ticket => ({ id, code: `SOP-${id}`, assigneeId }) as Ticket;
+  const ticket = (id: number, assigneeId: number | null): Ticket =>
+    ({ id, code: `SOP-${id}`, assignees: assigneeId === null ? [] : [{ id: assigneeId, name: `Responsable ${assigneeId}` }] }) as Ticket;
   const list = (groups: Partial<ReminderList>): ReminderList => ({ staleHours: 48, promiseSoonDays: 0, promises: [], stale: [], overdue: [], ...groups });
 
   beforeEach(() => {

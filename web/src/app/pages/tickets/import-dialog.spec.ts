@@ -96,7 +96,7 @@ function row(overrides: Partial<ImportRow> = {}): ImportRow {
     status: 'PENDING',
     priority: null,
     module: null,
-    assignee: 'Ana',
+    assignees: ['Ana'],
     supportTypes: [],
     note: null,
     ...overrides,
@@ -108,7 +108,7 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
   return {
     dryRun: true,
     createMissing: false,
-    columns: { date: 'Fecha', time: null, company: 'Empresa', description: 'Descripción', status: 'Estado', priority: null, module: null, assignee: 'Responsable', supportTypes: null, note: null },
+    columns: { date: 'Fecha', time: null, company: 'Empresa', description: 'Descripción', status: 'Estado', priority: null, module: null, assignees: 'Responsable', supportTypes: null, note: null },
     totalRows: 3,
     skippedEmpty: 0,
     duplicates: 0,
@@ -279,19 +279,26 @@ describe('ImportDialog, the preview of a sheet', () => {
     await preview();
     expect(el.textContent).toContain('Empresa: Empresa');
     expect(el.textContent).toContain('Prioridad: no encontrada');
-    expect(sampleHeaders()).toEqual(['Fecha', 'Empresa', 'Descripción', 'Estado', 'Responsable']);
+    expect(sampleHeaders()).toEqual(['Fecha', 'Empresa', 'Descripción', 'Estado', 'Responsables']);
 
     chooseFile('completa.xlsx');
     request().flush(
       result({
-        columns: { ...result().columns, priority: 'Prioridad', module: 'Módulo', supportTypes: 'Tipo de soporte, Otro tipo de soporte' },
-        sample: [row({ priority: 'HIGH', module: 'Ventas > Facturas', supportTypes: ['Capacitación', 'Falla del sistema'] })],
+        columns: {
+          ...result().columns,
+          priority: 'Prioridad',
+          module: 'Módulo',
+          assignees: 'Responsable, Otro responsable',
+          supportTypes: 'Tipo de soporte, Otro tipo de soporte',
+        },
+        sample: [row({ priority: 'HIGH', module: 'Ventas > Facturas', assignees: ['Ana', 'Luis'], supportTypes: ['Capacitación', 'Falla del sistema'] })],
       }),
     );
     await show();
+    expect(el.textContent).toContain('Responsable: Responsable, Otro responsable');
     expect(el.textContent).toContain('Tipo de soporte: Tipo de soporte, Otro tipo de soporte');
-    expect(sampleHeaders()).toEqual(['Fecha', 'Empresa', 'Descripción', 'Estado', 'Responsable', 'Prioridad', 'Módulo', 'Tipos de soporte']);
-    expect(sampleCells()).toEqual(['05/11/2026', 'Acme', 'No imprime', 'Pendiente', 'Ana', 'Alta', 'Ventas > Facturas', 'Capacitación, Falla del sistema']);
+    expect(sampleHeaders()).toEqual(['Fecha', 'Empresa', 'Descripción', 'Estado', 'Responsables', 'Prioridad', 'Módulo', 'Tipos de soporte']);
+    expect(sampleCells()).toEqual(['05/11/2026', 'Acme', 'No imprime', 'Pendiente', 'Ana, Luis', 'Alta', 'Ventas > Facturas', 'Capacitación, Falla del sistema']);
   });
 
   it('that the server refuses says why and leaves nothing to import', async () => {

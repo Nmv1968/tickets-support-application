@@ -114,7 +114,7 @@ test.describe('la guarda del tamaño de los botones', () => {
  * A phone, as a phone lays out a page: a list that ran past the right edge of the screen, even
  * for the moment before it was put in place, made the page wider, the select moved from under the
  * finger and the end of the tap closed the list it had just opened. The selects of the case panel
- * on the right half of the screen (Responsable, Módulo) could not be opened with a finger.
+ * on the right half of the screen (Responsables, Módulo) could not be opened with a finger.
  */
 test('en un teléfono, un toque abre la lista de cada select del panel del caso y la deja abierta', async ({ api, uid, newUser, pageAs }) => {
   const [showcase, admin] = await Promise.all([makeShowcase(api, uid), newUser('ADMIN')]);
@@ -122,7 +122,7 @@ test('en un teléfono, un toque abre la lista de cada select del panel del caso 
   await watchShowcase(page, showcase);
   const panel = await openFullCase(page, showcase);
   const list = page.locator(OPEN_LIST);
-  for (const name of ['Estado', 'Responsable', 'Prioridad', 'Módulo', 'Empresa', 'Tipos de soporte']) {
+  for (const name of ['Estado', 'Responsables', 'Prioridad', 'Módulo', 'Empresa', 'Tipos de soporte']) {
     const combobox = panel.getByRole('combobox', { name });
     await combobox.scrollIntoViewIfNeeded();
     await selectBox(combobox).locator('.ng-select-container').tap({ position: { x: 24, y: 16 } });

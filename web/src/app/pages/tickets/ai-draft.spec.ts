@@ -111,6 +111,7 @@ describe('AiDraftDialog, the case under review', () => {
     catalogs = TestBed.inject(Catalogs);
     catalogs.companies.set([TORNILLO, { id: 4, name: 'Bodega Sur', active: false, tickets: 1 }]);
     catalogs.assignees.set([
+      { id: 4, name: 'Ana', active: true, tickets: 1 },
       { id: 5, name: 'Luis', active: true, tickets: 0 },
       { id: 6, name: 'Zoe', active: false, tickets: 2 },
     ]);
@@ -200,7 +201,7 @@ describe('AiDraftDialog, the case under review', () => {
     for (const [id, label] of [
       ['ai-status', 'Estado'],
       ['ai-company', 'Empresa *'],
-      ['ai-assignee', 'Responsable'],
+      ['ai-assignee', 'Responsables'],
       ['ai-priority', 'Prioridad'],
       ['ai-module', 'Módulo'],
       ['ai-types', 'Tipos de soporte'],
@@ -212,7 +213,7 @@ describe('AiDraftDialog, the case under review', () => {
     // The deactivated company, responsible, module and support type are not offered.
     expect(offers('ai-status')).toEqual(['Sin resolver', 'Pendiente', 'Resuelto']);
     expect(offers('ai-company')).toEqual(['Ferretería El Tornillo']);
-    expect(offers('ai-assignee')).toEqual(['Luis']);
+    expect(offers('ai-assignee')).toEqual(['Ana', 'Luis']);
     expect(offers('ai-priority')).toEqual(['Baja', 'Media', 'Alta', 'Crítica']);
     expect(offers('ai-module')).toEqual(['Ventas', 'Ventas / Facturas']);
     expect(offers('ai-types')).toEqual(['Capacitación', 'Falla del sistema']);
@@ -309,9 +310,10 @@ describe('AiDraftDialog, the case under review', () => {
     click(button('Guardar caso'));
 
     const save = caseSave();
-    expect(sent(save)).toEqual(jasmine.objectContaining({ companyId: 3, description: 'No imprime', status: 'PENDING', assigneeId: null, priority: null, moduleId: null, aiGenerated: false }));
-    // The company goes as the one of the catalog, not as a name, and no set of types is sent for a case without them.
+    expect(sent(save)).toEqual(jasmine.objectContaining({ companyId: 3, description: 'No imprime', status: 'PENDING', priority: null, moduleId: null, aiGenerated: false }));
+    // The company goes as the one of the catalog, not as a name, and no set of responsibles or of types is sent for a case without them.
     expect(Object.keys(sent(save))).not.toContain('company');
+    expect(Object.keys(sent(save))).not.toContain('assigneeIds');
     expect(Object.keys(sent(save))).not.toContain('supportTypeIds');
     save.flush({ id: 8, code: 'SOP-00008' });
     settle();
@@ -325,6 +327,8 @@ describe('AiDraftDialog, the case under review', () => {
     type('ai-description', 'No imprime');
     pick('ai-status', 'Resuelto');
     pick('ai-assignee', 'Luis');
+    pick('ai-assignee', 'Ana');
+    closeSelect(select('ai-assignee'));
     pick('ai-priority', 'Alta');
     pick('ai-module', 'Ventas / Facturas');
     pick('ai-types', 'Falla del sistema');
@@ -332,13 +336,14 @@ describe('AiDraftDialog, the case under review', () => {
     closeSelect(select('ai-types'));
     render();
 
-    // Each support type is a chip in the colour the team gave it.
+    // Each responsible is a chip, as each support type, which is in the colour the team gave it.
+    expect(chosen('ai-assignee')).toEqual(['Luis', 'Ana']);
     expect(chosen('ai-types')).toEqual(['Falla del sistema', 'Capacitación']);
     expect(Array.from(select('ai-types').querySelectorAll<HTMLElement>('app-type-chip'), (chip) => chip.style.backgroundColor)).toEqual(['rgb(185, 28, 28)', 'rgb(18, 183, 106)']);
 
     click(button('Guardar caso'));
     const save = caseSave();
-    expect(sent(save)).toEqual(jasmine.objectContaining({ companyId: 3, status: 'RESOLVED', assigneeId: 5, priority: 'HIGH', moduleId: 2, supportTypeIds: [2, 1] }));
+    expect(sent(save)).toEqual(jasmine.objectContaining({ companyId: 3, status: 'RESOLVED', assigneeIds: [5, 4], priority: 'HIGH', moduleId: 2, supportTypeIds: [2, 1] }));
     save.flush({ id: 8, code: 'SOP-00008' });
     settle();
   }));

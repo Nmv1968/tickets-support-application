@@ -21,8 +21,8 @@ export interface Draft {
   companyId: number;
   description: string;
   status: TicketStatus;
-  /** Null: nobody. */
-  assigneeId: number | null;
+  /** Empty: nobody. */
+  assigneeIds: number[];
   priority: Priority | null;
   moduleId: number | null;
   supportTypeIds: number[];
@@ -44,7 +44,7 @@ type Values = Required<
     | 'companyId'
     | 'description'
     | 'status'
-    | 'assigneeId'
+    | 'assigneeIds'
     | 'priority'
     | 'moduleId'
     | 'supportTypeIds'
@@ -104,7 +104,7 @@ export function draftOf(ticket: TicketDetail): Draft {
     companyId: ticket.companyId,
     description: asHeld(ticket.description),
     status: ticket.status,
-    assigneeId: ticket.assigneeId,
+    assigneeIds: ticket.assignees.map((person) => person.id),
     priority: ticket.priority,
     moduleId: ticket.moduleId,
     supportTypeIds: ticket.supportTypes.map((type) => type.id),
@@ -133,7 +133,7 @@ function valuesOf(draft: Draft): Values {
     companyId: draft.companyId,
     description: draft.description.trim(),
     status: draft.status,
-    assigneeId: draft.assigneeId,
+    assigneeIds: draft.assigneeIds,
     priority: draft.priority,
     moduleId: draft.moduleId,
     supportTypeIds: draft.supportTypeIds,
@@ -147,7 +147,7 @@ function valuesOf(draft: Draft): Values {
   };
 }
 
-/** The support types of a case are a set: the order they were chosen in says nothing. */
+/** The responsibles and the support types of a case are sets: the order they were chosen in says nothing. */
 function equal(a: Values[Field], b: Values[Field]): boolean {
   return Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((id) => b.includes(id)) : a === b;
 }

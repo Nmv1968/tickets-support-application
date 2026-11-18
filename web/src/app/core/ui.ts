@@ -83,6 +83,15 @@ export function formatDay(value: string | null | undefined): string {
 }
 
 /** When a case was reported: its day and, when the case has one, its time. "10/11/2026 14:35". */
+/**
+ * The responsibles of a case as one text, the way every screen writes them: their names in the
+ * order the API gives them (by name, as its support types), separated by commas. Empty for a case
+ * nobody is responsible for.
+ */
+export function assigneesText(ticket: { assignees: readonly { name: string }[] }): string {
+  return ticket.assignees.map((person) => person.name).join(', ');
+}
+
 export function formatCaseDate(ticket: { date: string; time?: string | null }): string {
   return ticket.time ? `${formatDay(ticket.date)} ${ticket.time}` : formatDay(ticket.date);
 }

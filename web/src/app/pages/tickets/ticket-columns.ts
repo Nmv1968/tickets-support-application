@@ -51,7 +51,7 @@ export const COLUMNS: readonly Column[] = [
   { id: 'company', label: 'Empresa', width: 128 },
   { id: 'description', label: 'Descripción', width: null },
   { id: 'status', label: 'Estado', width: 104 },
-  { id: 'assignee', label: 'Responsable', width: 112 },
+  { id: 'assignee', label: 'Responsables', width: 112 },
   { id: 'priority', label: 'Prioridad', width: 92 },
   { id: 'module', label: 'Módulo', width: 142 },
   { id: 'supportTypes', label: 'Tipos de soporte', width: 120 },

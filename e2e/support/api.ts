@@ -39,6 +39,8 @@ export interface Ticket {
   status: 'PENDING' | 'RESOLVED' | 'UNRESOLVED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | null;
   archivedAt: string | null;
+  /** By name, as the support types. */
+  assignees: Assignee[];
   supportTypes: SupportType[];
 }
 
@@ -49,7 +51,7 @@ export interface TicketInput {
   status?: Ticket['status'];
   priority?: Ticket['priority'];
   supportTypeIds?: number[];
-  assigneeId?: number;
+  assigneeIds?: number[];
   moduleId?: number;
   promisedDate?: string;
   estimatedMinutes?: number;

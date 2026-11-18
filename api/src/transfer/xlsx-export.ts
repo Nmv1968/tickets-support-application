@@ -1,7 +1,7 @@
 import type { Prisma, TicketStatus } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { refuseOverLimit } from '../common/exports';
-import { PRIORITY_LABEL, STATUS_LABEL, moduleFullName, supportTypesText, ticketCode } from '../common/labels';
+import { PRIORITY_LABEL, STATUS_LABEL, moduleFullName, namesText, ticketCode } from '../common/labels';
 import { EXCEL_FORMAT, XLSX_EXPORT_LIMIT, excelMoment, paintHeader } from '../common/xlsx';
 import type { PrismaService } from '../prisma.service';
 import type { TicketFilters } from '../tickets/ticket-filters';
@@ -32,7 +32,7 @@ export async function xlsxExport(prisma: PrismaService, filters: TicketFilters, 
     { header: 'Empresa', key: 'company', width: 28 },
     { header: 'Descripción', key: 'description', width: 60 },
     { header: 'Estado', key: 'status', width: 14 },
-    { header: 'Responsable', key: 'assignee', width: 18 },
+    { header: 'Responsables', key: 'assignee', width: 22 },
     { header: 'Observación', key: 'notes', width: 60 },
     { header: 'Prioridad', key: 'priority', width: 11 },
     { header: 'Módulo', key: 'module', width: 26 },
@@ -59,11 +59,11 @@ export async function xlsxExport(prisma: PrismaService, filters: TicketFilters, 
       company: t.company.name,
       description: t.description,
       status: STATUS_LABEL[t.status],
-      assignee: t.assignee?.name ?? '',
+      assignee: namesText(t.assignees.map((link) => link.assignee)),
       notes: notesText(t.notes),
       priority: t.priority ? PRIORITY_LABEL[t.priority] : '',
       module: t.module ? moduleFullName(t.module) : '',
-      supportTypes: supportTypesText(t.supportTypes.map((link) => link.supportType)),
+      supportTypes: namesText(t.supportTypes.map((link) => link.supportType)),
       estimated: t.estimatedMinutes,
       spent: t.spentMinutes || null,
       promised: t.promisedDate,

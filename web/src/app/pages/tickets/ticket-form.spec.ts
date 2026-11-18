@@ -36,7 +36,7 @@ describe('ticket form', () => {
         companyId: 1,
         description: 'No imprime',
         status: 'PENDING',
-        assigneeId: null,
+        assigneeIds: [],
         priority: null,
         moduleId: null,
         supportTypeIds: [2, 1],
@@ -78,6 +78,12 @@ describe('ticket form', () => {
       expect(changed(same, base)).toEqual([]);
     });
 
+    it('leaves out the responsibles chosen in another order, and tells one taken off or added', () => {
+      expect(changed(draft({ assigneeIds: [5, 4] }), draft({ assigneeIds: [4, 5] }))).toEqual([]);
+      expect(changed(draft({ assigneeIds: [4] }), draft({ assigneeIds: [4, 5] }))).toEqual(['assigneeIds']);
+      expect(changed(draft({ assigneeIds: [] }), draft({ assigneeIds: [4] }))).toEqual(['assigneeIds']);
+    });
+
     it('tells a type taken off, and one put in its place', () => {
       expect(changed(draft({ supportTypeIds: [1] }), draft({ supportTypeIds: [1, 2] }))).toEqual(['supportTypeIds']);
       expect(changed(draft({ supportTypeIds: [1, 3] }), draft({ supportTypeIds: [1, 2] }))).toEqual(['supportTypeIds']);
@@ -100,9 +106,9 @@ describe('ticket form', () => {
   describe('changesOf', () => {
     it('is what "Actualizar" sends: the fields that changed, as the case stores them, and nothing else', () => {
       const base = draft({ time: '14:30' });
-      const edited = draft({ time: '', description: ' No imprime desde el lunes ', estimatedMinutes: 45.6, assigneeId: 4 });
+      const edited = draft({ time: '', description: ' No imprime desde el lunes ', estimatedMinutes: 45.6, assigneeIds: [4, 5] });
 
-      expect(changesOf(edited, base)).toEqual({ time: null, description: 'No imprime desde el lunes', estimatedMinutes: 46, assigneeId: 4 });
+      expect(changesOf(edited, base)).toEqual({ time: null, description: 'No imprime desde el lunes', estimatedMinutes: 46, assigneeIds: [4, 5] });
     });
 
     it('sends a promise taken off, an emptied estimate and an emptied reply as none, and an emptied "Real" as zero', () => {

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, booleanAttribute, computed, input, model, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgSelectComponent } from '@ng-select/ng-select';
-import type { Priority, TicketStatus, TicketSupportType } from './api';
+import type { Priority, TicketAssignee, TicketStatus, TicketSupportType } from './api';
 import { NAME_MAX, companyCreator } from './catalogs';
 import { SELECT } from './select';
 import { TypeChip } from './type-chip';
@@ -145,12 +145,15 @@ export class PrioritySelect {
 }
 
 /**
- * The responsible of a case. Named by `inputId`, which a label points at, or by `ariaLabel`
- * where there is no label. A filter offers `none` among its options, for the cases nobody has.
+ * The responsibles of a case, as the support types: `multiple` for the ones of a case, whose value
+ * is a list of ids, each chosen person a chip with a "×" that takes them off, and the list stays
+ * open after each choice, since a case may take more than one. Otherwise one responsible (a
+ * filter, which offers `none` among its options for the cases nobody has). Named by `inputId`,
+ * which a label points at, or by `ariaLabel` where there is no label.
  */
 @Component({
   selector: 'app-assignee-select',
-  imports: [FormsModule, ...SELECT],
+  imports: [FormsModule, ...SELECT, TypeChip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -162,18 +165,30 @@ export class PrioritySelect {
       bindLabel="name"
       appendTo="body"
       [placeholder]="placeholder()"
-      clearAllText="Quitar responsable"
+      [clearAllText]="multiple() ? 'Quitar todos los responsables' : 'Quitar responsable'"
       [items]="items()"
+      [multiple]="multiple()"
+      [closeOnSelect]="!multiple()"
       [ngModel]="value()"
       (ngModelChange)="value.set($event)"
-    />
+    >
+      <ng-template ng-label-tmp let-item="item" let-clear="clear">
+        @if (multiple()) {
+          <app-type-chip [type]="item" removable (removed)="clear(item)" />
+        } @else {
+          <span class="ng-value-label">{{ item.name }}</span>
+        }
+      </ng-template>
+    </ng-select>
   `,
 })
-export class AssigneeSelect<T extends number | 'none'> {
+export class AssigneeSelect<V extends number[] | number | 'none' | null> {
   readonly inputId = input<string | null>(null);
   readonly ariaLabel = input<string>();
-  readonly items = input.required<readonly { id: T; name: string }[]>();
-  readonly value = model.required<T | null>();
+  readonly items = input.required<readonly (TicketAssignee | { id: 'none'; name: string })[]>();
+  /** A list of ids with `multiple`, one id (or `none`) or null without it. */
+  readonly value = model.required<V>();
+  readonly multiple = input(false, { transform: booleanAttribute });
   /** What an empty select says: in a form, that the case has no responsible. */
   readonly placeholder = input('Sin asignar');
 }

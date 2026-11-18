@@ -184,6 +184,17 @@ describe('answers of the fake API', () => {
     assert.deepEqual(sorted(Object.keys(listItem(detail))), sorted([...dtoKeys('baseDto'), ...dtoKeys('listDto')]));
   });
 
+  // As its support types: the server sends their ids, and reads their names.
+  test('the responsibles of a case are a list: ids in TicketInput, entries with their name in the answer', () => {
+    const input = block(TICKETS, 'export class TicketInput {', '\n}\n');
+    assert.match(input, /@IsArray\(\)[^;]*?assigneeIds\?: number\[\];/);
+    assert.doesNotMatch(input, /assigneeId\?:/);
+    assert.match(TICKETS, /assignees: \{ select: \{ assignee: \{ select: \{ id: true, name: true \} \} \} \}/);
+    assert.match(block(TICKETS, 'function baseDto(', '\n}\n'), /assignees: byName\(/);
+    assert.deepEqual(sorted(Object.keys(detail.assignees[0])), ['id', 'name']);
+    assert.match(SERVER, /responsables: t\.assignees\.map\(\(person\) => person\.name\)/);
+  });
+
   test('the notes and attachments of a case have the fields of detailDto', () => {
     const detailDto = block(TICKETS, 'function detailDto(', '\n}\n');
     const notes = all(block(detailDto, 'notes: t.notes.map((n) => ({', '}))'), /(\w+):/g);

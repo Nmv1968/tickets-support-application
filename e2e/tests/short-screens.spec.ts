@@ -18,7 +18,7 @@ const PHONE_ON_ITS_SIDE = { width: 740, height: 360 };
 const ZOOMED_400 = { width: 320, height: 200 };
 
 /** The selects of the case panel, by their label. */
-const PANEL_SELECTS = ['Empresa', 'Estado', 'Responsable', 'Prioridad', 'Módulo', 'Tipos de soporte'];
+const PANEL_SELECTS = ['Empresa', 'Estado', 'Responsables', 'Prioridad', 'Módulo', 'Tipos de soporte'];
 
 test.describe('en una pantalla baja', () => {
   test.use({ reducedMotion: 'reduce' });

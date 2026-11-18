@@ -19,7 +19,7 @@ import { StatusBadge } from '../core/status-badge';
 import { TicketFlags, TicketFlagsLegend } from '../core/ticket-flags';
 import { Toast } from '../core/toast';
 import { TypeChip } from '../core/type-chip';
-import { STATUSES, STATUS_LABEL, formatCaseDate } from '../core/ui';
+import { STATUSES, STATUS_LABEL, assigneesText, formatCaseDate } from '../core/ui';
 import { TicketPanel } from './tickets/ticket-panel';
 
 const RESOLVED_SHOWN = 30;
@@ -134,7 +134,7 @@ const OPEN_LIMIT = 500;
                     }
                     <div class="mt-1.5 flex items-center gap-1 text-xs text-muted">
                       <app-icon name="account-outline" />
-                      <span class="truncate">{{ t.assigneeName ?? 'Sin asignar' }}</span>
+                      <span class="min-w-0">{{ assigneesText(t) || 'Sin asignar' }}</span>
                       @if (t.notesCount) {
                         <span class="ml-auto shrink-0 whitespace-nowrap"><app-icon name="comment-text-outline" /> {{ t.notesCount }}</span>
                       }
@@ -163,6 +163,7 @@ export class BoardPage {
 
   protected readonly statusLabel = STATUS_LABEL;
   protected readonly formatCaseDate = formatCaseDate;
+  protected readonly assigneesText = assigneesText;
   protected readonly resolvedShown = RESOLVED_SHOWN;
   protected readonly openLimit = OPEN_LIMIT;
 
@@ -197,7 +198,8 @@ export class BoardPage {
     const text = this.search().trim().toLowerCase();
     const assignee = this.assignee();
     const visible = this.tickets().filter((t) => {
-      if (assignee !== null && t.assigneeId !== (assignee === 'none' ? null : assignee)) return false;
+      // As the list: the cases of a responsible are the ones they have, alone or with others.
+      if (assignee === 'none' ? t.assignees.length > 0 : assignee !== null && !t.assignees.some((person) => person.id === assignee)) return false;
       return !text || `${t.code} ${t.company} ${t.description}`.toLowerCase().includes(text);
     });
     return STATUSES.map((status) => ({ status, tickets: visible.filter((t) => t.status === status) }));
